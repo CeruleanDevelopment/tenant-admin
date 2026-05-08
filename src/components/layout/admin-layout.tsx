@@ -3,20 +3,20 @@
 import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
 
-import { AppSidebar } from "@/components/app-sidebar"
-import { NotificationDropdown } from "@/components/notification-dropdown"
-import { AppLauncherDropdown } from "@/components/appLauncher-dropdown"
-import { LanguageDropdown } from "@/components/language-dropdown"
-import { ThemeToggle } from "@/components/theme-toggle"
-import { GlobalSearch } from "@/components/global-search"
-import HeaderUser from "@/components/header-user"
+import { AppSidebar } from "../app-sidebar"
+import { NotificationDropdown } from "../notification-dropdown"
+import { AppLauncherDropdown } from "../appLauncher-dropdown"
+import { LanguageDropdown } from "../language-dropdown"
+import { ThemeToggle } from "../theme-toggle"
+import { GlobalSearch } from "../global-search"
+import HeaderUser from "../header-user"
 import { useSelector, useDispatch } from "react-redux"
 import type { RootState } from "../../../redux/reducers"
 import { signOutTenant } from "../../../actions/auth"
 import type { AppDispatch } from "../../../redux/store"
 import { useRouter } from "next/navigation"
 
-import Footer from "@/components/layout/Footer"
+import Footer from "./Footer"
 
 import {
   Breadcrumb,
@@ -25,16 +25,16 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb"
+} from "../ui/breadcrumb"
 
-import { Separator } from "@/components/ui/separator"
+import { Separator } from "../ui/separator"
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
-} from "@/components/ui/sidebar"
+} from "../ui/sidebar"
 
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 export default function AdminLayout({
   children,
