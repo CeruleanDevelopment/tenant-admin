@@ -1,7 +1,7 @@
 
- import { TooltipProvider } from "@/components/ui/tooltip"
- import AdminLayout from "@/components/layout/admin-layout"
- import { Toaster } from "sonner"
+import { TooltipProvider } from "../../components/ui/tooltip"
+import AdminLayout from "../../components/layout/admin-layout"
+import { Toaster } from "sonner"
 export default function LayoutPages({
   children,
 }: {
