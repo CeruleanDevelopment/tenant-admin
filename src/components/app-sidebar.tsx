@@ -415,6 +415,58 @@ const data = {
   ],
 }
 
+// Normalize navigation URLs to match next.js app routes under `layout-pages` or `no-layout-pages`.
+const layoutRoots = new Set([
+  "dashboard",
+  "eCommerce",
+  "widgets",
+  "applications",
+  "ui-components",
+  "forms",
+  "tables",
+  "icons",
+  "pricing-tables",
+  "account",
+  "charts",
+  "docs",
+  "faq",
+])
+
+function resolveUrl(url: string) {
+  if (!url || url === "#") return url
+  const parts = url.split("/").filter(Boolean)
+  if (parts.length === 0) return url
+  const first = parts[0]
+
+  if (layoutRoots.has(first)) {
+    return `/layout-pages${url}`
+  }
+
+  // Auth pages live under `no-layout-pages/auth/*` except the app-level signin/signup
+  if (first === "auth") {
+    // map common login/register to top-level signin/signup
+    if (parts[1] === "basic") {
+      if (parts[2] === "login") return "/signin"
+      if (parts[2] === "register") return "/signup"
+      return `/no-layout-pages${url}`
+    }
+    return `/no-layout-pages${url}`
+  }
+
+  return url
+}
+
+function normalizeItems(items: any[] | undefined) {
+  if (!items) return
+  for (const it of items) {
+    if (typeof it.url === "string") it.url = resolveUrl(it.url)
+    if (Array.isArray(it.items)) normalizeItems(it.items)
+  }
+}
+
+normalizeItems(data.navMain)
+normalizeItems(data.navSecondary)
+
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter()
