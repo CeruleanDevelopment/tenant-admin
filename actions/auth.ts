@@ -1,5 +1,6 @@
 import type { AnyAction } from "redux"
 import type { ThunkAction } from "redux-thunk"
+import { toast } from "sonner"
 
 import axios from "../service/api"
 import {
@@ -46,6 +47,7 @@ type TenantMeResponse = {
     chunkSize?: number
     chunkOverlap?: number
   }
+  picture?: string | null
   users: TenantMeUser[]
 }
 
@@ -102,14 +104,26 @@ const openCenteredPopup = (browserWindow: Window, url: string): Window | null =>
   )
 }
 
-const runTenantGoogleAuthPopup = (
+const runTenantGoogleAuthPopup = async (
   dispatch: any,
   mode: "signin" | "signup",
   options?: TenantGoogleAuthOptions,
-): void => {
+): Promise<void> => {
   const browserWindow = getBrowserWindow()
   if (!browserWindow) {
     return
+  }
+
+  // Best-effort health probe: do not block OAuth kickoff on probe failure.
+  // If backend is truly unavailable, callback flow will surface the real error.
+  try {
+    const health = await axios.get("/tenant/health")
+    if (!health || !health.data || health.data.ok !== true) {
+      const errText = String((health && health.data && health.data.error) || "Service temporarily unavailable. Please try again shortly.")
+      toast.warning(errText)
+    }
+  } catch {
+    // Ignore probe errors here to avoid blocking Google auth startup.
   }
 
   const requestedNext = mode === "signup" ? options?.next || "/" : options?.next
@@ -158,11 +172,11 @@ const runTenantGoogleAuthPopup = (
     if (payload?.type === "tenant-auth-error") {
       const authMode = String(payload.mode || mode).trim().toLowerCase() === "signup" ? "signup" : "signin"
       const errorText = String(payload.error || "Tenant authentication failed.").trim()
-      const nextPath = authMode === "signup" ? "/signup" : "/signin"
-      const target = `${nextPath}?error=${encodeURIComponent(errorText)}`
+      const target = authMode === "signup" ? "/signup" : "/signin"
 
       cleanup()
       closePopup()
+      toast.error(errorText)
       redirectTo(browserWindow, target)
       return
     }
@@ -175,6 +189,7 @@ const runTenantGoogleAuthPopup = (
 
     try {
       if (!token || !refreshToken) {
+        toast.error("Tenant authentication failed.")
         redirectTo(browserWindow, "/signin")
         return
       }
@@ -185,12 +200,14 @@ const runTenantGoogleAuthPopup = (
 
       const hydrated = await dispatch(hydrateTenantSession({ token, refreshToken }))
       if (hydrated) {
+        toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
         redirectTo(browserWindow, nextPath)
         return
       }
 
       const refreshed = await dispatch(refreshTenantSession())
       if (refreshed) {
+        toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
         redirectTo(browserWindow, nextPath)
         return
       }
@@ -198,6 +215,7 @@ const runTenantGoogleAuthPopup = (
       persistSession(null)
       dispatch(clearAuthSession())
       dispatch(clearTenantProfile())
+      toast.error("Unable to complete tenant authentication. Please try again.")
       redirectTo(browserWindow, "/signin")
     } finally {
       closePopup()
@@ -393,6 +411,7 @@ export const hydrateTenantSession =
         status: tenantProfile.status,
         allowedOrigins: tenantProfile.allowedOrigins,
         settings: tenantProfile.settings,
+        picture: tenantProfile.picture || null,
         users: tenantProfile.users,
       }
 
@@ -419,8 +438,9 @@ export const hydrateTenantSession =
   }
 
 export const signOutTenant =
-  (): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
+  (options?: { redirectToSignIn?: boolean }): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
   async (dispatch) => {
+    const redirectToSignIn = options?.redirectToSignIn !== false
     const refreshToken = loadRefreshTokenCookie()
 
     try {
@@ -433,6 +453,10 @@ export const signOutTenant =
     dispatch(clearAuthSession())
     dispatch(clearTenantProfile())
     dispatch(setAuthInitialized(true))
+
+    if (redirectToSignIn && typeof window !== "undefined") {
+      window.location.assign("/signin")
+    }
   }
 
 export const signInTenantWithGoogle =

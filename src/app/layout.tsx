@@ -2,6 +2,8 @@ import "./globals.css"
 import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { Providers } from "./providers"
+import { Toaster } from "@/components/ui/sonner"
+import AppShell from "./AppShell"
 
 export const metadata = {
   title: {
@@ -28,7 +30,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <Providers>{children}</Providers>
+          <Providers>
+            <AppShell>{children}</AppShell>
+            <Toaster position="top-right" richColors closeButton />
+          </Providers>
         </ThemeProvider>
       </body>
     </html>

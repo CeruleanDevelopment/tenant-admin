@@ -6,8 +6,11 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useDispatch } from "react-redux"
 import { useForm } from "react-hook-form"
+import { toast } from "sonner"
 
 import { Button } from "../../components/ui/button"
+import { Input } from "../../components/ui/input"
+import { Label } from "../../components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card"
 import { cn } from "../../lib/utils"
 import { signInTenantWithGoogle } from "../../../actions/auth"
@@ -16,18 +19,37 @@ import { GalleryVerticalEnd } from "lucide-react"
 import { FaGoogle } from "react-icons/fa"
 import { FcGoogle } from "react-icons/fc";
 
-type LoginValues = Record<string, never>
+type LoginValues = { email?: string }
 
 export default function SignInPage() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
-  const { handleSubmit, formState: { isSubmitting } } = useForm<LoginValues>({ defaultValues: {} })
   const errorMessage = String(searchParams.get("error") || "").trim()
 
-  const onSubmit = handleSubmit(() => {
+  const { register: registerEmail, handleSubmit: handleEmailSubmit, formState: { isSubmitting: isEmailSubmitting } } = useForm<LoginValues>({ defaultValues: { email: String(searchParams.get("email") || "") } })
+
+  const onGoogleClick = () => {
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams()
     const tenantId = params.get("tenantId") || params.get("slug") || undefined
     dispatch(signInTenantWithGoogle({ tenantId, next: "/" }))
+  }
+
+  const onEmailSubmit = handleEmailSubmit(async (data) => {
+    const email = String(data.email || "").trim()
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+    if (!email) {
+      toast.error("Please enter your email.")
+      return
+    }
+
+    if (!emailRegex.test(email)) {
+      toast.error("Please enter a valid email address.")
+      return
+    }
+
+    // No magic-link backend implemented here; surface success message for now.
+    toast.success("If an account exists, we'll send a sign-in link to that email.")
   })
 
   return (
@@ -48,21 +70,44 @@ export default function SignInPage() {
                 <CardDescription>Sign in with Google to access your tenant workspace.</CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={onSubmit}>
                   <div className="grid gap-4">
+
                     {errorMessage ? (
                       <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                         {errorMessage}
                       </p>
                     ) : null}
 
-                    {/* <Button type="submit" className="w-full" disabled={isSubmitting}>
-                      {isSubmitting ? "Redirecting..." : "Continue with Google"}
-                    </Button> */}
-                    <Button  type="submit" className="w-full" disabled={isSubmitting} variant="outline">
-                      <FcGoogle /> {" "}
-                      {isSubmitting ? "Redirecting..." : "Login with Google"}
-                    </Button>
+                    <div>
+                      <Button type="button" className="w-full" onClick={onGoogleClick} variant="outline">
+                        <FcGoogle /> {" "}
+                        Login with Google
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 border-t border-border" />
+                      <span className="px-2 text-muted-foreground text-sm">Or continue with</span>
+                      <div className="flex-1 border-t border-border" />
+                    </div>
+
+                    <form onSubmit={onEmailSubmit}>
+                      <div className="grid gap-6">
+                        <div className="grid gap-2">
+                          <Label htmlFor="email">Email</Label>
+                          <Input
+                            id="email"
+                            type="email"
+                            placeholder="m@example.com"
+                            {...registerEmail("email")}
+                            required
+                          />
+                        </div>
+                        <Button type="submit" className="w-full" disabled={isEmailSubmitting}>
+                          {isEmailSubmitting ? "Sending..." : "Continue"}
+                        </Button>
+                      </div>
+                    </form>
 
                     <div className="text-center text-sm">
                       Don&apos;t have a tenant yet? {" "}
@@ -71,7 +116,6 @@ export default function SignInPage() {
                       </Link>
                     </div>
                   </div>
-                </form>
               </CardContent>
             </Card>
 

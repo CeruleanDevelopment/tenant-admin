@@ -14,7 +14,6 @@ import { useSelector, useDispatch } from "react-redux"
 import type { RootState } from "../../../redux/reducers"
 import { signOutTenant } from "../../../actions/auth"
 import type { AppDispatch } from "../../../redux/store"
-import { useRouter } from "next/navigation"
 
 import Footer from "./Footer"
 
@@ -45,7 +44,6 @@ export default function AdminLayout({
   const pathname = usePathname()
   const isRoot = pathname === "/"
   const dispatch = useDispatch<AppDispatch>()
-  const router = useRouter()
   const reduxUser = useSelector((state: RootState) => state.auth.user)
   const userForHeader = {
     name: reduxUser?.name || "User",
@@ -120,7 +118,6 @@ export default function AdminLayout({
                             user={userForHeader}
                             onLogout={async () => {
                               await dispatch(signOutTenant())
-                              router.replace("/signin")
                             }}
                           />
                         </div>

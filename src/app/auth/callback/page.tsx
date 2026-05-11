@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useDispatch } from "react-redux"
+import { toast } from "sonner"
 
 import { hydrateTenantSession } from "../../../../actions/auth"
 import type { AppDispatch } from "../../../../redux/store"
@@ -58,8 +59,9 @@ export default function AuthCallbackPage() {
             return
           }
 
+          toast.error(error)
           const redirectPath = mode === "signup" ? "/signup" : "/signin"
-          router.replace(`${redirectPath}?error=${encodeURIComponent(error)}`)
+          router.replace(redirectPath)
           return
         }
 
@@ -88,12 +90,15 @@ export default function AuthCallbackPage() {
         const session = await dispatch(hydrateTenantSession({ token, refreshToken }))
 
         if (mounted && session) {
+          toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
           router.replace(next)
           return
         }
 
+        toast.error("Unable to complete tenant authentication. Please try again.")
         router.replace("/signin")
       } catch {
+        toast.error("Unable to complete tenant authentication. Please try again.")
         router.replace("/signin")
       }
     }
