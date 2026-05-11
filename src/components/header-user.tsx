@@ -31,14 +31,14 @@ export function HeaderUser({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted">
+        <button className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted cursor-pointer">
           <Avatar className="h-8 w-8 rounded-lg">
             <AvatarImage src={user.avatar} alt={user.name} />
             <AvatarFallback className="rounded-lg">{(user.name || "U").slice(0,2).toUpperCase()}</AvatarFallback>
           </Avatar>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="min-w-[220px] rounded-lg" sideOffset={8} align="end">
+      <DropdownMenuContent className="min-w-56 rounded-lg" sideOffset={8} align="end">
         <DropdownMenuLabel className="p-0 font-normal">
           <div className="flex items-center gap-2 px-2 py-2 text-left text-sm">
             <Avatar className="h-8 w-8 rounded-lg">
@@ -49,26 +49,26 @@ export function HeaderUser({
               <span className="truncate font-medium">{user.name}</span>
               <span className="truncate text-xs">{user.email}</span>
             </div>
-            <ChevronsUpDownIcon className="ml-1 size-4" />
+            {/* <ChevronsUpDownIcon className="ml-1 size-4" /> */}
           </div>
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        {/* <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem>
             <SparklesIcon />
             Upgrade to Pro
           </DropdownMenuItem>
-        </DropdownMenuGroup>
+        </DropdownMenuGroup> */}
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem>
             <BadgeCheckIcon />
             Account
           </DropdownMenuItem>
-          <DropdownMenuItem>
+          {/* <DropdownMenuItem>
             <CreditCardIcon />
             Billing
-          </DropdownMenuItem>
+          </DropdownMenuItem> */}
           <DropdownMenuItem>
             <BellIcon />
             Notifications

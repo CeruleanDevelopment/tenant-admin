@@ -103,7 +103,7 @@ export default function AdminLayout({
                 <div className="ml-auto">
                     <div className="flex items-center gap-1">
                         <GlobalSearch />
-                        <ThemeToggle />
+                        {/* <ThemeToggle />
                         <LanguageDropdown />
                         <AppLauncherDropdown />
                         <div className="relative">
@@ -111,7 +111,7 @@ export default function AdminLayout({
                             <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-medium text-white">
                                 5
                             </span>
-                        </div>
+                        </div> */}
                         <div className="ml-2">
                           {/* Header user profile (top-right) */}
                           <HeaderUser
