@@ -59,6 +59,32 @@ type TenantGoogleAuthOptions = {
   frontend?: string
 }
 
+type TenantOtpMode = "signin" | "signup"
+
+type TenantOtpRequestInput = {
+  email: string
+  mode: TenantOtpMode
+  tenantId?: string
+  tenantName?: string
+  slug?: string
+}
+
+type TenantOtpVerifyInput = {
+  sessionId: string
+  code: string
+  mode: TenantOtpMode
+  tenantId?: string
+  tenantName?: string
+  slug?: string
+}
+
+type TenantOtpSendResponse = {
+  success: true
+  sessionId: string
+  expiresAt: string
+  resendCooldownSeconds: number
+}
+
 const normalizePostAuthNext = (value?: string | null): string => {
   const fallback = "/"
   const candidate = String(value || "").trim()
@@ -469,4 +495,18 @@ export const signUpTenantWithGoogle =
   (options?: TenantGoogleAuthOptions): ThunkAction<void, RootState, unknown, AnyAction> =>
   (dispatch) => {
     runTenantGoogleAuthPopup(dispatch, "signup", options)
+  }
+
+export const requestTenantOtp =
+  (input: TenantOtpRequestInput): ThunkAction<Promise<TenantOtpSendResponse>, RootState, unknown, AnyAction> =>
+  async () => {
+    const response = await axios.post("/tenant/auth/otp/send", input)
+    return response.data as TenantOtpSendResponse
+  }
+
+export const verifyTenantOtp =
+  (input: TenantOtpVerifyInput): ThunkAction<Promise<AuthResponse>, RootState, unknown, AnyAction> =>
+  async () => {
+    const response = await axios.post("/tenant/auth/otp/verify", input)
+    return response.data as AuthResponse
   }

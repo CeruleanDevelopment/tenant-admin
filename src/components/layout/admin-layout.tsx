@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
+import Link from "next/link"
 
 import { AppSidebar } from "../app-sidebar"
 import { NotificationDropdown } from "../notification-dropdown"
@@ -85,17 +86,61 @@ export default function AdminLayout({
 
                 <Breadcrumb>
                   <BreadcrumbList>
-                    <BreadcrumbItem className="hidden md:block">
-                      <BreadcrumbLink href="#">Dashboard</BreadcrumbLink>
-                    </BreadcrumbItem>
-                    {!isRoot && (
-                      <>
-                        <BreadcrumbSeparator className="hidden md:block" />
-                        <BreadcrumbItem>
-                          <BreadcrumbPage>eCommerce</BreadcrumbPage>
-                        </BreadcrumbItem>
-                      </>
-                    )}
+                    {/** Build dynamic crumbs from pathname */}
+                    {(() => {
+                      const parts = String(pathname || "").split("/").filter(Boolean)
+                      const crumbs: { href: string; label: string }[] = [{ href: "/", label: "Dashboard" }]
+
+                      const singular = (s: string) => (s.endsWith("s") ? s.slice(0, -1) : s)
+                      const capitalize = (s: string) => s.replace(/(^|\s)\S/g, (t) => t.toUpperCase())
+
+                      let acc = ""
+                      parts.forEach((segment, idx) => {
+                        acc += `/${segment}`
+                        let label = ""
+                        const prev = parts[idx - 1]
+
+                        if (segment === "add") {
+                          label = prev ? `Add ${capitalize(singular(prev))}` : "Add"
+                        } else if (segment === "view") {
+                          label = prev ? `View ${capitalize(prev)}` : "View"
+                        } else if (segment === "edit") {
+                          label = prev ? `Edit ${capitalize(singular(prev))}` : "Edit"
+                        } else if (/^\d+$/.test(segment)) {
+                          label = `#${segment}`
+                        } else {
+                          label = capitalize(segment.replace(/-|_/g, " "))
+                        }
+
+                        crumbs.push({ href: acc, label })
+                      })
+
+                      {
+                        const nodes: React.ReactNode[] = []
+                        crumbs.forEach((c, i) => {
+                          const last = i === crumbs.length - 1
+                          if (i > 0) {
+                            nodes.push(
+                              <BreadcrumbSeparator key={`sep-${c.href}`} className="hidden md:block" />,
+                            )
+                          }
+
+                          nodes.push(
+                            <BreadcrumbItem key={c.href} className={i === 0 ? "hidden md:block" : undefined}>
+                              {last ? (
+                                <BreadcrumbPage>{c.label}</BreadcrumbPage>
+                              ) : (
+                                <BreadcrumbLink asChild>
+                                  <Link href={c.href}>{c.label}</Link>
+                                </BreadcrumbLink>
+                              )}
+                            </BreadcrumbItem>
+                          )
+                        })
+
+                        return nodes
+                      }
+                    })()}
                   </BreadcrumbList>
                 </Breadcrumb>
               </div>
