@@ -30,7 +30,7 @@ import {
 import { tenantAdminConfig } from "../config/config"
 
 type TenantMeUser = {
-  id: number
+  id: string
   email: string
   name: string
   role: string
@@ -426,7 +426,7 @@ export const hydrateTenantSession =
 
       const decoded = decodeJwtPayload(token)
       const decodedEmail = String(decoded?.email || "").trim().toLowerCase()
-      const decodedUserId = Number(decoded?.sub || 0)
+      const decodedUserId = String(decoded?.sub || "").trim()
       const tenantUser = tenantProfile.users.find((user: TenantMeUser) => user.email.trim().toLowerCase() === decodedEmail) ||
         tenantProfile.users.find((user: TenantMeUser) => user.id === decodedUserId)
 
@@ -445,7 +445,7 @@ export const hydrateTenantSession =
         token,
         refreshToken,
         user: {
-          id: tenantUser?.id || decodedUserId || 0,
+          id: tenantUser?.id || decodedUserId || "",
           email: tenantUser?.email || decodedEmail,
           name: tenantUser?.name || String(decoded?.name || decodedEmail || "Tenant User"),
           role: tenantUser?.role || String(decoded?.role || "member"),

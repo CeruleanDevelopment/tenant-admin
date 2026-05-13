@@ -13,7 +13,7 @@ export interface TenantProfile {
   }
   picture?: string | null
   users?: Array<{
-    id: number
+    id: string
     email: string
     name: string
     role: string
