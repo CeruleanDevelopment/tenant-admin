@@ -2,10 +2,10 @@
 
 import * as React from "react"
 
-import { NavMain } from "@/components/nav-main"
-import { NavProjects } from "@/components/nav-projects"
-import { NavSecondary } from "@/components/nav-secondary"
-import { NavUser } from "@/components/nav-user"
+import { NavMain } from "./nav-main"
+import { NavProjects } from "./nav-projects"
+import { NavSecondary } from "./nav-secondary"
+import { NavUser } from "./nav-user"
 import {
   Sidebar,
   SidebarContent,
@@ -14,7 +14,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
+} from "./ui/sidebar"
 import { useSelector } from "react-redux"
 import type { RootState } from "../../redux/reducers"
 import { useDispatch } from "react-redux"
@@ -76,6 +76,18 @@ const data = {
       //     url: "/dashboard/eCommerce",
       //   },
       // ],
+    },
+    {
+      title: "Users",
+      url: "/users",
+      icon: (
+        <CircleUserRound
+        />
+      ),
+      items: [
+        { title: "Add User", url: "/users/add" },
+        { title: "View Users", url: "/users/view" },        
+      ],
     },
     {
       title: "eCommerce",
@@ -469,19 +481,17 @@ normalizeItems(data.navSecondary)
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const dispatch = useDispatch<AppDispatch>()
-  const router = useRouter()
   const reduxUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
 
   const userForNav = {
     name: reduxUser?.name || data.user.name,
     email: reduxUser?.email || data.user.email,
-    avatar: "",
+    avatar: tenantProfile?.picture || data.user.avatar,
   }
 
   const handleLogout = async () => {
     await dispatch(signOutTenant())
-    router.replace("/signin")
   }
 
   return (
@@ -514,9 +524,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <NavSecondary items={data.navSecondary} />
         </div> */}
       </SidebarContent>
-      <SidebarFooter className="">
+      {/* <SidebarFooter className="border-t border-border p-0">
         <NavUser user={userForNav} onLogout={handleLogout} />
-      </SidebarFooter>
+      </SidebarFooter> */}
     </Sidebar>
   )
 }

@@ -1,7 +1,6 @@
 
- import { TooltipProvider } from "@/components/ui/tooltip"
- import AdminLayout from "@/components/layout/admin-layout"
- import { Toaster } from "sonner"
+import { TooltipProvider } from "../../components/ui/tooltip"
+import AdminLayout from "../../components/layout/admin-layout"
 export default function LayoutPages({
   children,
 }: {
@@ -11,11 +10,6 @@ export default function LayoutPages({
     <TooltipProvider delayDuration={0}>
         <AdminLayout>
           {children}
-          <Toaster
-            position="top-right"
-            richColors
-            closeButton
-          />
         </AdminLayout>
     </TooltipProvider>
   )

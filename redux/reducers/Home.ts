@@ -2,7 +2,7 @@ import type { TenantProfile } from "./Tenant"
 import * as ReduxTypes from "../../constants/types"
 
 export interface AuthUser {
-  id: number
+  id: string
   email: string
   name: string
   role?: string

@@ -1,5 +1,6 @@
 import type { AnyAction } from "redux"
 import type { ThunkAction } from "redux-thunk"
+import { toast } from "sonner"
 
 import axios from "../service/api"
 import {
@@ -29,7 +30,7 @@ import {
 import { tenantAdminConfig } from "../config/config"
 
 type TenantMeUser = {
-  id: number
+  id: string
   email: string
   name: string
   role: string
@@ -46,7 +47,8 @@ type TenantMeResponse = {
     chunkSize?: number
     chunkOverlap?: number
   }
-  users: TenantMeUser[]
+  picture?: string | null
+  // users: TenantMeUser[]
 }
 
 type TenantGoogleAuthOptions = {
@@ -55,6 +57,32 @@ type TenantGoogleAuthOptions = {
   tenantName?: string
   next?: string
   frontend?: string
+}
+
+type TenantOtpMode = "signin" | "signup"
+
+type TenantOtpRequestInput = {
+  email: string
+  mode: TenantOtpMode
+  tenantId?: string
+  tenantName?: string
+  slug?: string
+}
+
+type TenantOtpVerifyInput = {
+  sessionId: string
+  code: string
+  mode: TenantOtpMode
+  tenantId?: string
+  tenantName?: string
+  slug?: string
+}
+
+type TenantOtpSendResponse = {
+  success: true
+  sessionId: string
+  expiresAt: string
+  resendCooldownSeconds: number
 }
 
 const normalizePostAuthNext = (value?: string | null): string => {
@@ -102,14 +130,26 @@ const openCenteredPopup = (browserWindow: Window, url: string): Window | null =>
   )
 }
 
-const runTenantGoogleAuthPopup = (
+const runTenantGoogleAuthPopup = async (
   dispatch: any,
   mode: "signin" | "signup",
   options?: TenantGoogleAuthOptions,
-): void => {
+): Promise<void> => {
   const browserWindow = getBrowserWindow()
   if (!browserWindow) {
     return
+  }
+
+  // Best-effort health probe: do not block OAuth kickoff on probe failure.
+  // If backend is truly unavailable, callback flow will surface the real error.
+  try {
+    const health = await axios.get("/tenant/health")
+    if (!health || !health.data || health.data.ok !== true) {
+      const errText = String((health && health.data && health.data.error) || "Service temporarily unavailable. Please try again shortly.")
+      toast.warning(errText)
+    }
+  } catch {
+    // Ignore probe errors here to avoid blocking Google auth startup.
   }
 
   const requestedNext = mode === "signup" ? options?.next || "/" : options?.next
@@ -158,11 +198,11 @@ const runTenantGoogleAuthPopup = (
     if (payload?.type === "tenant-auth-error") {
       const authMode = String(payload.mode || mode).trim().toLowerCase() === "signup" ? "signup" : "signin"
       const errorText = String(payload.error || "Tenant authentication failed.").trim()
-      const nextPath = authMode === "signup" ? "/signup" : "/signin"
-      const target = `${nextPath}?error=${encodeURIComponent(errorText)}`
+      const target = authMode === "signup" ? "/signup" : "/signin"
 
       cleanup()
       closePopup()
+      toast.error(errorText)
       redirectTo(browserWindow, target)
       return
     }
@@ -175,6 +215,7 @@ const runTenantGoogleAuthPopup = (
 
     try {
       if (!token || !refreshToken) {
+        toast.error("Tenant authentication failed.")
         redirectTo(browserWindow, "/signin")
         return
       }
@@ -185,12 +226,14 @@ const runTenantGoogleAuthPopup = (
 
       const hydrated = await dispatch(hydrateTenantSession({ token, refreshToken }))
       if (hydrated) {
+        toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
         redirectTo(browserWindow, nextPath)
         return
       }
 
       const refreshed = await dispatch(refreshTenantSession())
       if (refreshed) {
+        toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
         redirectTo(browserWindow, nextPath)
         return
       }
@@ -198,6 +241,7 @@ const runTenantGoogleAuthPopup = (
       persistSession(null)
       dispatch(clearAuthSession())
       dispatch(clearTenantProfile())
+      toast.error("Unable to complete tenant authentication. Please try again.")
       redirectTo(browserWindow, "/signin")
     } finally {
       closePopup()
@@ -382,9 +426,7 @@ export const hydrateTenantSession =
 
       const decoded = decodeJwtPayload(token)
       const decodedEmail = String(decoded?.email || "").trim().toLowerCase()
-      const decodedUserId = Number(decoded?.sub || 0)
-      const tenantUser = tenantProfile.users.find((user: TenantMeUser) => user.email.trim().toLowerCase() === decodedEmail) ||
-        tenantProfile.users.find((user: TenantMeUser) => user.id === decodedUserId)
+      const decodedUserId = String(decoded?.sub || "").trim()
 
       const profile: TenantProfile = {
         id: tenantProfile.id,
@@ -393,17 +435,17 @@ export const hydrateTenantSession =
         status: tenantProfile.status,
         allowedOrigins: tenantProfile.allowedOrigins,
         settings: tenantProfile.settings,
-        users: tenantProfile.users,
+        picture: tenantProfile.picture || null,
       }
 
       const session: AuthSession = {
         token,
         refreshToken,
         user: {
-          id: tenantUser?.id || decodedUserId || 0,
-          email: tenantUser?.email || decodedEmail,
-          name: tenantUser?.name || String(decoded?.name || decodedEmail || "Tenant User"),
-          role: tenantUser?.role || String(decoded?.role || "member"),
+          id: decodedUserId || "",
+          email: decodedEmail,
+          name: String(decoded?.name || decodedEmail || "Tenant User"),
+          role: String(decoded?.role || "member"),
           tenantId: tenantProfile.id,
         },
         tenant: profile,
@@ -419,8 +461,9 @@ export const hydrateTenantSession =
   }
 
 export const signOutTenant =
-  (): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
+  (options?: { redirectToSignIn?: boolean }): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
   async (dispatch) => {
+    const redirectToSignIn = options?.redirectToSignIn !== false
     const refreshToken = loadRefreshTokenCookie()
 
     try {
@@ -433,6 +476,10 @@ export const signOutTenant =
     dispatch(clearAuthSession())
     dispatch(clearTenantProfile())
     dispatch(setAuthInitialized(true))
+
+    if (redirectToSignIn && typeof window !== "undefined") {
+      window.location.assign("/signin")
+    }
   }
 
 export const signInTenantWithGoogle =
@@ -445,4 +492,18 @@ export const signUpTenantWithGoogle =
   (options?: TenantGoogleAuthOptions): ThunkAction<void, RootState, unknown, AnyAction> =>
   (dispatch) => {
     runTenantGoogleAuthPopup(dispatch, "signup", options)
+  }
+
+export const requestTenantOtp =
+  (input: TenantOtpRequestInput): ThunkAction<Promise<TenantOtpSendResponse>, RootState, unknown, AnyAction> =>
+  async () => {
+    const response = await axios.post("/tenant/auth/otp/send", input)
+    return response.data as TenantOtpSendResponse
+  }
+
+export const verifyTenantOtp =
+  (input: TenantOtpVerifyInput): ThunkAction<Promise<AuthResponse>, RootState, unknown, AnyAction> =>
+  async () => {
+    const response = await axios.post("/tenant/auth/otp/verify", input)
+    return response.data as AuthResponse
   }

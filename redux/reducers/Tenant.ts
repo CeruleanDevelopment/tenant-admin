@@ -11,8 +11,9 @@ export interface TenantProfile {
     chunkSize?: number
     chunkOverlap?: number
   }
+  picture?: string | null
   users?: Array<{
-    id: number
+    id: string
     email: string
     name: string
     role: string
