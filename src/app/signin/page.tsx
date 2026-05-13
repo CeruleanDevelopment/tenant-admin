@@ -18,12 +18,10 @@ import { TenantOtpInput } from "../../components/TenantOtpInput"
 import {
   hydrateTenantSession,
   requestTenantOtp,
-  signInTenantWithGoogle,
   verifyTenantOtp,
 } from "../../../actions/auth"
 import type { AppDispatch } from "../../../redux/store"
-import { GalleryVerticalEnd, RefreshCcw } from "lucide-react"
-import { FcGoogle } from "react-icons/fc"
+import { GalleryVerticalEnd, RefreshCcw, ShieldCheck } from "lucide-react"
 
 type LoginValues = { email?: string }
 
@@ -58,11 +56,6 @@ export default function SignInPage() {
 
     return () => window.clearInterval(timerId)
   }, [resendSeconds])
-
-  const onGoogleClick = () => {
-    const tenantId = searchParams.get("tenantId") || searchParams.get("slug") || undefined
-    dispatch(signInTenantWithGoogle({ tenantId, next: "/" }))
-  }
 
   const onEmailSubmit = handleEmailSubmit(async (data) => {
     const email = String(data.email || emailValue || "").trim().toLowerCase()
@@ -188,7 +181,7 @@ export default function SignInPage() {
                 <CardTitle className="text-xl">Sign in to your tenant</CardTitle>
                 <CardDescription>
                   {stage === "email"
-                    ? "Sign in with Google or continue with email OTP."
+                    ? "Use your registered email and continue with OTP."
                     : "Enter the 6-digit OTP sent to your email."}
                 </CardDescription>
               </CardHeader>
@@ -202,17 +195,12 @@ export default function SignInPage() {
 
                   {stage === "email" ? (
                     <>
-                      <div>
-                        <Button type="button" className="w-full cursor-pointer" onClick={onGoogleClick} variant="outline">
-                          <FcGoogle /> {" "}
-                          Login with Google
-                        </Button>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 border-t border-border" />
-                        <span className="px-2 text-muted-foreground text-sm">Or continue with</span>
-                        <div className="flex-1 border-t border-border" />
+                      {/* Legacy Google sign-in flow disabled for tenant-admin OTP-only sign-in. */}
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="size-4" />
+                          Enter your registered tenant admin email to receive OTP.
+                        </div>
                       </div>
                     </>
                   ) : null}

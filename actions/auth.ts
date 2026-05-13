@@ -85,6 +85,35 @@ type TenantOtpSendResponse = {
   resendCooldownSeconds: number
 }
 
+type TenantRegisterInput = {
+  firstName: string
+  lastName: string
+  email: string
+  companyName: string
+  countryId: string
+  phone?: string
+  address1?: string
+  address2?: string
+  city?: string
+  state?: string
+  postalCode?: string
+}
+
+type TenantRegisterResponse = {
+  success: true
+  tenantId: string
+  userId: string
+  email: string
+  message: string
+}
+
+export type ActiveCountry = {
+  id: string
+  name: string
+  iso2: string
+  phoneCode?: string | null
+}
+
 const normalizePostAuthNext = (value?: string | null): string => {
   const fallback = "/"
   const candidate = String(value || "").trim()
@@ -499,6 +528,21 @@ export const requestTenantOtp =
   async () => {
     const response = await axios.post("/tenant/auth/otp/send", input)
     return response.data as TenantOtpSendResponse
+  }
+
+export const registerTenant =
+  (input: TenantRegisterInput): ThunkAction<Promise<TenantRegisterResponse>, RootState, unknown, AnyAction> =>
+  async () => {
+    const response = await axios.post("/tenant/register", input)
+    return response.data as TenantRegisterResponse
+  }
+
+export const fetchCountries =
+  (): ThunkAction<Promise<ActiveCountry[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const response = await axios.get("/tenant/countries")
+    const countries = Array.isArray(response?.data?.countries) ? response.data.countries : []
+    return countries as ActiveCountry[]
   }
 
 export const verifyTenantOtp =

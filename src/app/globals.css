@@ -1,4 +1,5 @@
 @import "../../node_modules/bootstrap-icons/font/bootstrap-icons.css";
+@import "../../node_modules/react-widgets/styles.css";
 
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -128,4 +129,17 @@
   html {
     @apply font-sans;
   }
+}
+
+.rw-widget.rw-dark,
+.rw-dark .rw-widget {
+  background-color: rgba(2, 6, 23, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgb(241, 245, 249);
+}
+
+.rw-dark .rw-popup,
+.rw-dark .rw-list {
+  background-color: rgb(15, 23, 42);
+  color: rgb(241, 245, 249);
 }
