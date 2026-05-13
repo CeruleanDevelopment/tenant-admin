@@ -48,7 +48,7 @@ type TenantMeResponse = {
     chunkOverlap?: number
   }
   picture?: string | null
-  users: TenantMeUser[]
+  // users: TenantMeUser[]
 }
 
 type TenantGoogleAuthOptions = {
@@ -427,8 +427,6 @@ export const hydrateTenantSession =
       const decoded = decodeJwtPayload(token)
       const decodedEmail = String(decoded?.email || "").trim().toLowerCase()
       const decodedUserId = String(decoded?.sub || "").trim()
-      const tenantUser = tenantProfile.users.find((user: TenantMeUser) => user.email.trim().toLowerCase() === decodedEmail) ||
-        tenantProfile.users.find((user: TenantMeUser) => user.id === decodedUserId)
 
       const profile: TenantProfile = {
         id: tenantProfile.id,
@@ -438,17 +436,16 @@ export const hydrateTenantSession =
         allowedOrigins: tenantProfile.allowedOrigins,
         settings: tenantProfile.settings,
         picture: tenantProfile.picture || null,
-        users: tenantProfile.users,
       }
 
       const session: AuthSession = {
         token,
         refreshToken,
         user: {
-          id: tenantUser?.id || decodedUserId || "",
-          email: tenantUser?.email || decodedEmail,
-          name: tenantUser?.name || String(decoded?.name || decodedEmail || "Tenant User"),
-          role: tenantUser?.role || String(decoded?.role || "member"),
+          id: decodedUserId || "",
+          email: decodedEmail,
+          name: String(decoded?.name || decodedEmail || "Tenant User"),
+          role: String(decoded?.role || "member"),
           tenantId: tenantProfile.id,
         },
         tenant: profile,
