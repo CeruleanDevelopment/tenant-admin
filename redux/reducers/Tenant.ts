@@ -3,7 +3,7 @@ import * as ReduxTypes from "../../constants/types"
 export interface TenantProfile {
   id: string
   slug: string
-  name: string
+  companyName: string
   status?: string
   allowedOrigins?: string[]
   settings?: {

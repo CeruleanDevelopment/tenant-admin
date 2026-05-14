@@ -58,6 +58,8 @@ export default function SignUpPage() {
   const [isLoadingCountries, setIsLoadingCountries] = useState(true)
   const [countries, setCountries] = useState<ActiveCountry[]>([])
   const [formError, setFormError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const showFieldErrors = !formError
 
   const sortedCountries = useMemo(() => {
     return [...countries].sort((a, b) => a.name.localeCompare(b.name))
@@ -69,6 +71,8 @@ export default function SignUpPage() {
     control,
     setError,
     clearErrors,
+    reset,
+    setFocus,
     formState: { errors },
   } = useForm<SignupValues>({
     defaultValues: {
@@ -113,12 +117,12 @@ export default function SignUpPage() {
   }, [dispatch])
 
   const onRegister = handleSubmit(async (data) => {
-    // clear previous errors
     clearErrors()
     setFormError(null)
+    setSuccessMessage(null)
     setIsSubmitting(true)
     try {
-      const response = await dispatch(registerTenant({
+      var formData = {
         firstName: String(data.firstName || "").trim(),
         lastName: String(data.lastName || "").trim(),
         email: String(data.email || "").trim().toLowerCase(),
@@ -130,10 +134,22 @@ export default function SignUpPage() {
         city: String(data.city || "").trim() || undefined,
         state: String(data.state || "").trim() || undefined,
         postalCode: String(data.postalCode || "").trim() || undefined,
-      }))
-
-      toast.success(response.message || "Registered successfully. Please sign in with OTP.")
-      router.push(`/signin?email=${encodeURIComponent(response.email)}`)
+      }
+      console.log(formData,"data");
+      
+      const response = await dispatch(registerTenant(formData))
+      // toast.success(response.message || "Registered successfully. Please sign in with OTP.")
+      // router.push(`/signin?email=${encodeURIComponent(response.email)}`)
+      
+      const msg = response.message || "Registered successfully. Please sign in with OTP."
+      toast.success(msg)
+      setSuccessMessage(msg)
+      // Reset form to initial empty values after successful registration
+      try {
+        reset()
+      } catch (err) {
+        // ignore reset errors
+      }
     } catch (error: any) {
       const payload = error?.response?.data || error?.data || null
 
@@ -143,7 +159,6 @@ export default function SignUpPage() {
             try {
               setError(field as any, { type: "server", message: String(msg) })
             } catch {
-              // ignore unknown fields
             }
           })
         }
@@ -179,14 +194,13 @@ export default function SignUpPage() {
                 <div className="mx-auto mb-3 inline-flex size-11 items-center justify-center rounded-xl border border-emerald-300/30 bg-emerald-500">
                   <Building2 className="size-5 " />
                 </div>
-                {/* Legacy signup OTP/Google flow is replaced by register-first onboarding. */}
                 <CardTitle className="text-xl">Register Tenant Admin</CardTitle>
                 <CardDescription className="text-muted-foreground">
                   Create your tenant account first. Then sign in with OTP using the registered email.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={onRegister}>
+                <form onSubmit={onRegister} noValidate>
                   <div className="grid gap-4">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="grid gap-2">
@@ -198,9 +212,8 @@ export default function SignUpPage() {
                             maxLength: { value: LIMITS.firstName, message: `First name must be at most ${LIMITS.firstName} characters.` },
                             pattern: { value: NAME_PATTERN, message: "First name may only contain letters, spaces, hyphens and apostrophes." },
                           })}
-                          required
                         />
-                        {errors.firstName?.message ? (
+                        {showFieldErrors && errors.firstName?.message ? (
                           <p className="text-xs text-destructive">{String(errors.firstName.message)}</p>
                         ) : null}
                       </div>
@@ -213,9 +226,8 @@ export default function SignUpPage() {
                             maxLength: { value: LIMITS.lastName, message: `Last name must be at most ${LIMITS.lastName} characters.` },
                             pattern: { value: NAME_PATTERN, message: "Last name may only contain letters, spaces, hyphens and apostrophes." },
                           })}
-                          required
                         />
-                        {errors.lastName?.message ? (
+                        {showFieldErrors && errors.lastName?.message ? (
                           <p className="text-xs text-destructive">{String(errors.lastName.message)}</p>
                         ) : null}
                       </div>
@@ -232,9 +244,8 @@ export default function SignUpPage() {
                           maxLength: { value: LIMITS.email, message: `Email must be at most ${LIMITS.email} characters.` },
                           pattern: { value: EMAIL_PATTERN, message: "Please provide a valid email address." },
                         })}
-                        required
                       />
-                      {errors.email?.message ? (
+                      {showFieldErrors && errors.email?.message ? (
                         <p className="text-xs text-destructive">{String(errors.email.message)}</p>
                       ) : null}
                     </div>
@@ -248,9 +259,8 @@ export default function SignUpPage() {
                           required: "Company name is required.",
                           maxLength: { value: LIMITS.companyName, message: `Company name must be at most ${LIMITS.companyName} characters.` },
                         })}
-                        required
                       />
-                      {errors.companyName?.message ? (
+                      {showFieldErrors && errors.companyName?.message ? (
                         <p className="text-xs text-destructive">{String(errors.companyName.message)}</p>
                       ) : null}
                     </div>
@@ -262,7 +272,7 @@ export default function SignUpPage() {
                         control={control}
                         rules={{
                           required: "Country is required.",
-                          validate: (v) => (/^[0-9]+$/.test(String(v)) ? true : "Please select a valid country."),
+                          validate: (v) => (String(v || "").trim() ? true : "Please select a valid country."),
                         }}
                         render={({ field }) => (
                           <DropdownList
@@ -281,7 +291,7 @@ export default function SignUpPage() {
                           />
                         )}
                       />
-                      {errors.countryId?.message ? (
+                      {showFieldErrors && errors.countryId?.message ? (
                         <p className="text-xs text-destructive">{String(errors.countryId.message)}</p>
                       ) : null}
                     </div>
@@ -289,21 +299,22 @@ export default function SignUpPage() {
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="grid gap-2">
                         <Label htmlFor="phone" className="text-foreground">Phone</Label>
-                        <Input
-                          id="phone"
-                          {...register("phone", {
-                            pattern: { value: PHONE_PATTERN, message: "Phone must contain digits only (0-9)." },
-                            maxLength: { value: LIMITS.phone, message: `Phone must be at most ${LIMITS.phone} characters.` },
-                          })}
+                          <Input
+                            id="phone"
+                              {...register("phone", {
+                                required: "Phone is required.",
+                                pattern: { value: PHONE_PATTERN, message: "Phone must contain digits only (0-9)." },
+                                maxLength: { value: LIMITS.phone, message: `Phone must be at most ${LIMITS.phone} characters.` },
+                              })}
                         />
-                        {errors.phone?.message ? (
+                        {showFieldErrors && errors.phone?.message ? (
                           <p className="text-xs text-destructive">{String(errors.phone.message)}</p>
                         ) : null}
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor="postalCode" className="text-foreground">Postal code</Label>
-                        <Input id="postalCode" {...register("postalCode", { maxLength: { value: LIMITS.postalCode, message: `Postal code must be at most ${LIMITS.postalCode} characters.` } })} />
-                        {errors.postalCode?.message ? (
+                          <Label htmlFor="postalCode" className="text-foreground">Postal code</Label>
+                          <Input id="postalCode" {...register("postalCode", { required: "Postal code is required.", maxLength: { value: LIMITS.postalCode, message: `Postal code must be at most ${LIMITS.postalCode} characters.` } })} />
+                        {showFieldErrors && errors.postalCode?.message ? (
                           <p className="text-xs text-destructive">{String(errors.postalCode.message)}</p>
                         ) : null}
                       </div>
@@ -311,16 +322,16 @@ export default function SignUpPage() {
 
                     <div className="grid gap-2">
                       <Label htmlFor="address1" className="text-foreground">Address line 1</Label>
-                      <Input id="address1" {...register("address1", { maxLength: { value: LIMITS.address1, message: `Address line 1 must be at most ${LIMITS.address1} characters.` } })} />
-                      {errors.address1?.message ? (
+                      <Input id="address1" {...register("address1", { required: "Address line 1 is required.", maxLength: { value: LIMITS.address1, message: `Address line 1 must be at most ${LIMITS.address1} characters.` } })} />
+                      {showFieldErrors && errors.address1?.message ? (
                         <p className="text-xs text-destructive">{String(errors.address1.message)}</p>
                       ) : null}
                     </div>
 
                     <div className="grid gap-2">
                       <Label htmlFor="address2" className="text-foreground">Address line 2</Label>
-                      <Input id="address2" {...register("address2", { maxLength: { value: LIMITS.address2, message: `Address line 2 must be at most ${LIMITS.address2} characters.` } })} />
-                      {errors.address2?.message ? (
+                      <Input id="address2" {...register("address2", { required: "Address line 2 is required.", maxLength: { value: LIMITS.address2, message: `Address line 2 must be at most ${LIMITS.address2} characters.` } })} />
+                      {showFieldErrors && errors.address2?.message ? (
                         <p className="text-xs text-destructive">{String(errors.address2.message)}</p>
                       ) : null}
                     </div>
@@ -328,15 +339,15 @@ export default function SignUpPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="grid gap-2">
                         <Label htmlFor="city" className="text-foreground">City</Label>
-                        <Input id="city" {...register("city", { maxLength: { value: LIMITS.city, message: `City must be at most ${LIMITS.city} characters.` }, pattern: { value: CITY_STATE_PATTERN, message: "City contains invalid characters." } })} />
-                        {errors.city?.message ? (
+                        <Input id="city" {...register("city", { required: "City is required.", maxLength: { value: LIMITS.city, message: `City must be at most ${LIMITS.city} characters.` }, pattern: { value: CITY_STATE_PATTERN, message: "City contains invalid characters." } })} />
+                        {showFieldErrors && errors.city?.message ? (
                           <p className="text-xs text-destructive">{String(errors.city.message)}</p>
                         ) : null}
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="state" className="text-foreground">State</Label>
-                        <Input id="state" {...register("state", { maxLength: { value: LIMITS.state, message: `State must be at most ${LIMITS.state} characters.` }, pattern: { value: CITY_STATE_PATTERN, message: "State contains invalid characters." } })} />
-                        {errors.state?.message ? (
+                        <Input id="state" {...register("state", { required: "State is required.", maxLength: { value: LIMITS.state, message: `State must be at most ${LIMITS.state} characters.` }, pattern: { value: CITY_STATE_PATTERN, message: "State contains invalid characters." } })} />
+                        {showFieldErrors && errors.state?.message ? (
                           <p className="text-xs text-destructive">{String(errors.state.message)}</p>
                         ) : null}
                       </div>
@@ -351,7 +362,7 @@ export default function SignUpPage() {
                     <button
                       type="submit"
                       disabled={isSubmitting || isLoadingCountries}
-                      className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-xl border border-emerald-300/40 bg-emerald-400 px-4 text-base font-semibold text-slate-950 shadow-lg shadow-emerald-900/30 transition-colors hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-xl border border-emerald-300/40 bg-emerald-400 px-4 text-base font-semibold text-slate-950 shadow-lg shadow-emerald-900/30 transition-colors hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                     >
                       {isSubmitting ? "Registering..." : "Register Tenant"}
                     </button>

@@ -40,6 +40,7 @@ export default function SignInPage() {
   const [resendSeconds, setResendSeconds] = useState(0)
   const [isRequestingOtp, setIsRequestingOtp] = useState(false)
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   const { register: registerEmail, handleSubmit: handleEmailSubmit, formState: { isSubmitting: isEmailSubmitting } } = useForm<LoginValues>({
     defaultValues: { email: String(searchParams.get("email") || "") },
@@ -71,6 +72,7 @@ export default function SignInPage() {
       return
     }
 
+    setFormError(null)
     setEmailValue(email)
     setIsRequestingOtp(true)
 
@@ -78,7 +80,6 @@ export default function SignInPage() {
       const response = await dispatch(
         requestTenantOtp({
           email,
-          mode: "signin",
           tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
           tenantName: searchParams.get("tenantName") || undefined,
           slug: searchParams.get("slug") || undefined,
@@ -89,9 +90,11 @@ export default function SignInPage() {
       setResendSeconds(Math.max(RESEND_COOLDOWN_SECONDS, Number(response.resendCooldownSeconds) || 0))
       setOtpValue("")
       setStage("otp")
+      setFormError(null)
       toast.success("OTP sent to your email.")
     } catch (error: any) {
       const message = error?.response?.data?.error || error?.message || "Failed to send OTP."
+      setFormError(String(message))
       toast.error(String(message))
     } finally {
       setIsRequestingOtp(false)
@@ -109,7 +112,6 @@ export default function SignInPage() {
         verifyTenantOtp({
           sessionId,
           code: otpValue,
-          mode: "signin",
           tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
           tenantName: searchParams.get("tenantName") || undefined,
           slug: searchParams.get("slug") || undefined,
@@ -129,6 +131,7 @@ export default function SignInPage() {
       toast.error("Unable to complete authentication.")
     } catch (error: any) {
       const message = error?.response?.data?.error || error?.message || "Invalid OTP code."
+      setFormError(String(message))
       toast.error(String(message))
     } finally {
       setIsVerifyingOtp(false)
@@ -145,7 +148,6 @@ export default function SignInPage() {
       const response = await dispatch(
         requestTenantOtp({
           email: emailValue,
-          mode: "signin",
           tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
           tenantName: searchParams.get("tenantName") || undefined,
           slug: searchParams.get("slug") || undefined,
@@ -158,6 +160,7 @@ export default function SignInPage() {
       toast.success("OTP resent.")
     } catch (error: any) {
       const message = error?.response?.data?.error || error?.message || "Failed to resend OTP."
+      setFormError(String(message))
       toast.error(String(message))
     } finally {
       setIsRequestingOtp(false)
@@ -187,15 +190,14 @@ export default function SignInPage() {
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4">
-                  {errorMessage ? (
+                  {(formError || errorMessage) ? (
                     <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                      {errorMessage}
+                      {formError || errorMessage}
                     </p>
                   ) : null}
 
-                  {stage === "email" ? (
+                  {/* {stage === "email" ? (
                     <>
-                      {/* Legacy Google sign-in flow disabled for tenant-admin OTP-only sign-in. */}
                       <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
                         <div className="flex items-center gap-2">
                           <ShieldCheck className="size-4" />
@@ -203,7 +205,7 @@ export default function SignInPage() {
                         </div>
                       </div>
                     </>
-                  ) : null}
+                  ) : null} */}
 
                   {stage === "email" ? (
                     <form onSubmit={onEmailSubmit}>
@@ -277,7 +279,7 @@ export default function SignInPage() {
                   <div className="text-center text-sm">
                     Don&apos;t have a tenant yet? {" "}
                     <Link href="/signup" className="underline underline-offset-4">
-                      Create one
+                      Signup
                     </Link>
                   </div>
                 </div>

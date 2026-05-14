@@ -16,8 +16,6 @@ import { TenantOtpInput } from "./TenantOtpInput"
 import {
   hydrateTenantSession,
   requestTenantOtp,
-  signInTenantWithGoogle,
-  signUpTenantWithGoogle,
   verifyTenantOtp,
 } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
@@ -39,8 +37,8 @@ const resolveCopy = (mode: AuthMode) => {
     return {
       eyebrow: "Create your tenant",
       title: "Launch a workspace in minutes",
-      description: "Use Google or a one-time code to create the tenant, then jump straight into the dashboard.",
-      primaryButton: "Continue with Google",
+      description: "Use a one-time code to create the tenant, then jump straight into the dashboard.",
+      primaryButton: "Continue",
       footerPrefix: "Already have a tenant?",
       footerHref: "/signin",
       footerLabel: "Sign in",
@@ -51,8 +49,8 @@ const resolveCopy = (mode: AuthMode) => {
   return {
     eyebrow: "Welcome back",
     title: "Sign in without friction",
-    description: "Use Google or a six-digit code to get back into your tenant dashboard fast.",
-    primaryButton: "Continue with Google",
+    description: "Use a six-digit code to get back into your tenant dashboard fast.",
+    primaryButton: "Continue",
     footerPrefix: "Don’t have a tenant yet?",
     footerHref: "/signup",
     footerLabel: "Create one",
@@ -112,14 +110,13 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     return () => window.clearInterval(intervalId)
   }, [expiresAt])
 
-  const authGoogle = mode === "signup" ? signUpTenantWithGoogle : signInTenantWithGoogle
+  // Google auth disabled for now; OTP flows remain active.
 
   const requestOtp = async (email: string) => {
     setIsRequestingOtp(true)
     const response = await dispatch(
       requestTenantOtp({
         email,
-        mode,
         tenantId: initialTenantId,
         tenantName,
         slug,
@@ -145,7 +142,6 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
         verifyTenantOtp({
           sessionId,
           code,
-          mode,
           tenantId: initialTenantId,
           tenantName,
           slug,
@@ -206,16 +202,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     }
   })
 
-  const onGoogleClick = () => {
-    dispatch(
-      authGoogle({
-        tenantId: initialTenantId,
-        slug,
-        tenantName,
-        next: "/",
-      }),
-    )
-  }
+  // Google auth disabled; no-op placeholder left intentionally.
 
   const resendOtp = async () => {
     if (!emailValue || resendSeconds > 0 || isRequestingOtp) {
@@ -253,7 +240,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
             <div className="mt-10 max-w-xl">
               <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-100">
                 <Sparkles className="size-3.5" />
-                OTP + Google authentication
+                OTP authentication
               </span>
               <h1 className="mt-6 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
                 {copy.title}
@@ -302,15 +289,8 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                   </div>
                 ) : null}
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-12 w-full border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
-                  onClick={onGoogleClick}
-                >
-                  <span className="mr-2 inline-flex size-5 items-center justify-center rounded-full bg-white/10 text-sm">G</span>
-                  {copy.primaryButton}
-                </Button>
+                {/* Google sign-in is currently disabled. Use email/OTP below. */}
+                <div className="mb-2 rounded-md bg-white/5 px-4 py-3 text-sm text-slate-300">Google sign-in is temporarily disabled. Use email and a one-time code (OTP) below to continue.</div>
 
                 <div className="flex items-center gap-3 text-xs uppercase tracking-[0.26em] text-slate-400">
                   <span className="h-px flex-1 bg-white/10" />

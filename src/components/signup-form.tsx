@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form"
 import { Button } from "./ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { cn } from "../lib/utils"
-import { signUpTenantWithGoogle } from "../../actions/auth"
+import { useRouter } from "next/navigation"
 import type { AppDispatch } from "../../redux/store"
 
 type SignupValues = Record<string, never>
@@ -16,26 +16,28 @@ type SignupValues = Record<string, never>
 export function SignupForm({ className, ...props }: React.ComponentProps<"div">) {
   const searchParams = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
+  const router = useRouter()
   const { handleSubmit, formState: { isSubmitting } } = useForm<SignupValues>({ defaultValues: {} })
 
   const tenantId = searchParams.get("tenantId") || searchParams.get("slug") || undefined
 
   const onSubmit = handleSubmit(() => {
-    dispatch(signUpTenantWithGoogle({ tenantId, next: "/signup" }))
+    // Google sign-up is disabled for now; open the full registration form instead.
+    router.push('/signup')
   })
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
-        <CardHeader className="text-center">
+          <CardHeader className="text-center">
           <CardTitle className="text-xl">Create your tenant</CardTitle>
-          <CardDescription>Use Google to create and access a tenant workspace.</CardDescription>
+          <CardDescription>Open the registration form to create and access a tenant workspace.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit}>
+              <form onSubmit={onSubmit}>
             <div className="grid gap-4">
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? "Redirecting..." : "Continue with Google"}
+                {isSubmitting ? "Opening..." : "Open registration form"}
               </Button>
 
               <div className="text-center text-sm">

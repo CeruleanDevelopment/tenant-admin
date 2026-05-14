@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form"
 import { Button } from "./ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { cn } from "../lib/utils"
-import { signInTenantWithGoogle } from "../../actions/auth"
+import { useRouter } from "next/navigation"
 import type { AppDispatch } from "../../redux/store"
 
 type LoginValues = Record<string, never>
@@ -16,12 +16,14 @@ type LoginValues = Record<string, never>
 export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRef<"div">) {
   const searchParams = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
+  const router = useRouter()
   const { handleSubmit, formState: { isSubmitting } } = useForm<LoginValues>({ defaultValues: {} })
 
   const tenantId = searchParams.get("tenantId") || searchParams.get("slug") || undefined
 
   const onSubmit = handleSubmit(() => {
-    dispatch(signInTenantWithGoogle({ tenantId, next: "/" }))
+    // Google sign-in disabled — open the OTP sign-in page instead.
+    router.push('/signin')
   })
 
   return (
@@ -29,13 +31,13 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
-          <CardDescription>Sign in with Google to access your tenant workspace.</CardDescription>
+          <CardDescription>Use your registered email and a one-time code (OTP) to sign in.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit}>
             <div className="grid gap-4">
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? "Redirecting..." : "Continue with Google"}
+                {isSubmitting ? "Opening..." : "Open sign-in"}
               </Button>
 
               <div className="text-center text-sm">

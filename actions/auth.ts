@@ -39,7 +39,7 @@ type TenantMeUser = {
 type TenantMeResponse = {
   id: string
   slug: string
-  name: string
+  companyName: string
   status: string
   allowedOrigins: string[]
   settings: {
@@ -57,13 +57,11 @@ type TenantGoogleAuthOptions = {
   tenantName?: string
   next?: string
   frontend?: string
+  authPath?: "signin" | "signup"
 }
-
-type TenantOtpMode = "signin" | "signup"
 
 type TenantOtpRequestInput = {
   email: string
-  mode: TenantOtpMode
   tenantId?: string
   tenantName?: string
   slug?: string
@@ -72,7 +70,6 @@ type TenantOtpRequestInput = {
 type TenantOtpVerifyInput = {
   sessionId: string
   code: string
-  mode: TenantOtpMode
   tenantId?: string
   tenantName?: string
   slug?: string
@@ -161,7 +158,6 @@ const openCenteredPopup = (browserWindow: Window, url: string): Window | null =>
 
 const runTenantGoogleAuthPopup = async (
   dispatch: any,
-  mode: "signin" | "signup",
   options?: TenantGoogleAuthOptions,
 ): Promise<void> => {
   const browserWindow = getBrowserWindow()
@@ -181,9 +177,10 @@ const runTenantGoogleAuthPopup = async (
     // Ignore probe errors here to avoid blocking Google auth startup.
   }
 
-  const requestedNext = mode === "signup" ? options?.next || "/" : options?.next
+  const authPath = options?.authPath === "signup" ? "signup" : "signin"
+  const requestedNext = authPath === "signup" ? options?.next || "/" : options?.next
   const next = normalizePostAuthNext(requestedNext)
-  const url = buildTenantGoogleAuthUrl(mode, {
+  const url = buildTenantGoogleAuthUrl(authPath, {
     ...options,
     next,
     frontend: options?.frontend || browserWindow.location.origin,
@@ -214,7 +211,7 @@ const runTenantGoogleAuthPopup = async (
     }
   }
 
-  const handleMessage = async (event: MessageEvent) => {
+    const handleMessage = async (event: MessageEvent) => {
     if (event.origin !== browserWindow.location.origin) {
       return
     }
@@ -225,7 +222,7 @@ const runTenantGoogleAuthPopup = async (
     }
 
     if (payload?.type === "tenant-auth-error") {
-      const authMode = String(payload.mode || mode).trim().toLowerCase() === "signup" ? "signup" : "signin"
+      const authMode = options?.authPath === "signup" || Boolean(options?.tenantName) ? "signup" : "signin"
       const errorText = String(payload.error || "Tenant authentication failed.").trim()
       const target = authMode === "signup" ? "/signup" : "/signin"
 
@@ -255,14 +252,14 @@ const runTenantGoogleAuthPopup = async (
 
       const hydrated = await dispatch(hydrateTenantSession({ token, refreshToken }))
       if (hydrated) {
-        toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
+        toast.success(authPath === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
         redirectTo(browserWindow, nextPath)
         return
       }
 
       const refreshed = await dispatch(refreshTenantSession())
       if (refreshed) {
-        toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
+        toast.success(authPath === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
         redirectTo(browserWindow, nextPath)
         return
       }
@@ -341,10 +338,10 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
 }
 
 const buildTenantGoogleAuthUrl = (
-  mode: "signin" | "signup",
+  authPath: "signin" | "signup",
   options?: TenantGoogleAuthOptions,
 ): string => {
-  const url = new URL(`${tenantAdminConfig.apiUrl}/tenant/auth/google/${mode}`)
+  const url = new URL(`${tenantAdminConfig.apiUrl}/tenant/auth/google/${authPath}`)
 
   if (options?.tenantId) {
     url.searchParams.set("tenantId", options.tenantId)
@@ -460,7 +457,7 @@ export const hydrateTenantSession =
       const profile: TenantProfile = {
         id: tenantProfile.id,
         slug: tenantProfile.slug,
-        name: tenantProfile.name,
+        companyName: (tenantProfile as any).companyName || (tenantProfile as any).name || "",
         status: tenantProfile.status,
         allowedOrigins: tenantProfile.allowedOrigins,
         settings: tenantProfile.settings,
@@ -514,13 +511,13 @@ export const signOutTenant =
 export const signInTenantWithGoogle =
   (options?: TenantGoogleAuthOptions): ThunkAction<void, RootState, unknown, AnyAction> =>
   (dispatch) => {
-    runTenantGoogleAuthPopup(dispatch, "signin", options)
+    runTenantGoogleAuthPopup(dispatch, { ...options, authPath: "signin" })
   }
 
 export const signUpTenantWithGoogle =
   (options?: TenantGoogleAuthOptions): ThunkAction<void, RootState, unknown, AnyAction> =>
   (dispatch) => {
-    runTenantGoogleAuthPopup(dispatch, "signup", options)
+    runTenantGoogleAuthPopup(dispatch, { ...options, authPath: "signup" })
   }
 
 export const requestTenantOtp =
@@ -543,6 +540,32 @@ export const fetchCountries =
     const response = await axios.get("/tenant/countries")
     const countries = Array.isArray(response?.data?.countries) ? response.data.countries : []
     return countries as ActiveCountry[]
+  }
+
+let _fetchTenantUsersPromise: Promise<TenantMeUser[]> | null = null
+
+export const fetchTenantUsers =
+  (): ThunkAction<Promise<TenantMeUser[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    // Deduplicate concurrent requests (helps with React StrictMode double-mounts)
+    if (_fetchTenantUsersPromise) return _fetchTenantUsersPromise
+
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    _fetchTenantUsersPromise = (async () => {
+      try {
+        const response = await axios.get("/tenant/users", { headers })
+        const users = Array.isArray(response?.data?.users) ? response.data.users : []
+        return users as TenantMeUser[]
+      } finally {
+        // clear promise so subsequent calls after completion will re-fetch
+        _fetchTenantUsersPromise = null
+      }
+    })()
+
+    return _fetchTenantUsersPromise
   }
 
 export const verifyTenantOtp =

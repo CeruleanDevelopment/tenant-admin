@@ -37,13 +37,14 @@ export default function AuthCallbackPage() {
         const token = params.get("token") || undefined
         const refreshToken = params.get("refreshToken") || undefined
         const error = String(params.get("error") || "").trim()
-        const mode = String(params.get("mode") || "signin").trim().toLowerCase() === "signup" ? "signup" : "signin"
-        const next = normalizePostAuthNext(params.get("next"))
+        const rawNext = params.get("next")
+        const next = normalizePostAuthNext(rawNext)
+        const isSignup = String(rawNext || "").trim().toLowerCase().startsWith("/signup")
 
         if (error) {
           if (typeof window !== "undefined" && window.opener && window.opener !== window) {
             try {
-              window.opener.postMessage({ type: "tenant-auth-error", error, mode, next }, window.location.origin)
+              window.opener.postMessage({ type: "tenant-auth-error", error, next }, window.location.origin)
             } catch {
               // ignore
             }
@@ -60,7 +61,7 @@ export default function AuthCallbackPage() {
           }
 
           toast.error(error)
-          const redirectPath = mode === "signup" ? "/signup" : "/signin"
+          const redirectPath = isSignup ? "/signup" : "/signin"
           router.replace(redirectPath)
           return
         }
@@ -90,7 +91,7 @@ export default function AuthCallbackPage() {
         const session = await dispatch(hydrateTenantSession({ token, refreshToken }))
 
         if (mounted && session) {
-          toast.success(mode === "signup" ? "Tenant account created successfully." : "Signed in successfully.")
+          toast.success(isSignup ? "Tenant account created successfully." : "Signed in successfully.")
           router.replace(next)
           return
         }
