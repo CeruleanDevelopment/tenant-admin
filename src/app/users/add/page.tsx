@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { useDispatch } from "react-redux"
+import { AppDispatch } from "../../../../redux/store"
 const rolesJson = [
   { "value": "tenant-admin", "label": "Tenant Admin" },
   { "value": "editor", "label": "Editor" },
@@ -14,20 +16,19 @@ const rolesJson = [
   { "value": "viewer", "label": "Viewer" }
 ]
 
-
 export default function AddUserPage() {
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
-  const [email, setEmail] = useState("")
-  const staticRoles = (rolesJson as unknown as Array<{ value: string; label: string }>)
-  // no default selection — empty string will show placeholder
-  const [role, setRole] = useState("")
-  const [isActive, setIsActive] = useState(true)
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess] = useState("")
-  const [roles, setRoles] = useState<Array<{ value: string; label: string }>>(staticRoles)
-  const [loadingRoles, setLoadingRoles] = useState(false)
+  const dispatch = useDispatch<AppDispatch>();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const staticRoles = (rolesJson as unknown as Array<{ value: string; label: string }>);
+  const [role, setRole] = useState("");
+  const [isActive, setIsActive] = useState(true);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [roles, setRoles] = useState<Array<{ value: string; label: string }>>(staticRoles);
+  const [loadingRoles, setLoadingRoles] = useState(false);
 
   function validate() {
     const e: Record<string, string> = {}
@@ -80,7 +81,7 @@ export default function AddUserPage() {
 
         <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle>Create a new user</CardTitle>
+            <CardTitle>Add a new user</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -111,19 +112,20 @@ export default function AddUserPage() {
                 </div>
               </div>
 
-              <div>
-                <Label htmlFor="email" className="mb-1">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="jane@example.com"
-                />
-                {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                
+                <div>
+                  <Label htmlFor="email" className="mb-1">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="jane@example.com"
+                  />
+                  {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
+                </div>
+
                 <div>
                   <Label htmlFor="role" className="mb-1">Role</Label>
                   <DropdownList
@@ -135,21 +137,21 @@ export default function AddUserPage() {
                     disabled={loadingRoles}
                     placeholder={loadingRoles ? "Loading roles..." : "Select role"}
                     className="w-full"
-                    inputProps={{ id: "role", className: "h-10" }}
+                    inputProps={{ id: "role", className: "h-8" }}
                   />
                 </div>
 
                 <div className="flex items-center">
                   <label className="inline-flex items-center gap-3 cursor-pointer">
-                    <span className="text-sm select-none">Active</span>
+                    <span className="text-sm font-medium select-none">Active</span>
                     <Switch data-size="lg" id="isActive" checked={isActive} onCheckedChange={(v) => setIsActive(Boolean(v))} className="h-14 w-14 cursor-pointer"/>
                   </label>
                 </div>
               </div>
 
               <div className="flex items-center justify-end gap-3">
-                <Button type="submit" disabled={submitting} className="bg-primary">
-                  {submitting ? "Saving..." : "Create User"}
+                <Button type="submit" disabled={submitting} className="bg-primary py-4 px-4">
+                  {submitting ? "Saving..." : "Add User"}
                 </Button>
               </div>
             </form>

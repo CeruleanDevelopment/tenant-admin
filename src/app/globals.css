@@ -141,6 +141,24 @@
   }
 }
 
+/* =========================================
+   React Widgets Theme Customization
+========================================= */
+
+.rw-widget,
+.rw-widget .rw-widget-input,
+.rw-dropdown-list,
+.rw-popup,
+.rw-list {
+  border-radius: var(--radius-lg);
+}
+
+.rw-widget {
+  background-color: transparent !important;
+  border: 1px solid hsl(var(--border)) !important;
+  color: rgb(15, 23, 42);
+}
+
 .rw-widget.rw-dark,
 .rw-dark .rw-widget {
   background-color: rgba(2, 6, 23, 0.85);
@@ -148,8 +166,107 @@
   color: rgb(241, 245, 249);
 }
 
+.rw-widget-container {
+  min-height: 2rem !important;
+  height: 2rem !important;
+  border-radius: 0.5rem !important;
+  background: transparent !important;
+}
+
+.rw-dropdown-list {
+  min-height: 2rem !important;
+}
+
+.rw-dropdown-list-input {
+  height: 2rem !important;
+  padding: 0 0.625rem !important;
+  font-size: 0.875rem !important;
+  /* display: flex !important; */
+  align-items: center !important;
+}
+
+.rw-input {
+  height: 2rem !important;
+}
+
+.rw-picker-caret {
+  height: 2rem !important;
+  width: 2rem !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.rw-popup {
+  overflow: hidden;
+  background-color: rgb(255, 255, 255) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.rw-list {
+  background-color: rgb(255, 255, 255) !important;
+  padding: 4px;
+}
+
+.rw-list-option {
+  padding: 6px 12px !important;
+  border-radius: 0.5rem;
+  background-color: transparent !important;
+  color: rgb(15, 23, 42) !important;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.rw-list-option:hover {
+  background-color: rgba(109, 74, 255, 0.1) !important;
+  color: var(--primary) !important;
+  cursor: pointer;
+}
+
+.rw-state-focus {
+  background-color: rgba(109, 74, 255, 0.12) !important;
+  color: var(--primary) !important;
+}
+
+.rw-state-selected {
+  background-color: var(--primary-light) !important;
+  color: var(--primary-foreground) !important;
+}
+
+.rw-list-option.rw-state-active {
+  background-color: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+}
+
 .rw-dark .rw-popup,
 .rw-dark .rw-list {
-  background-color: rgb(15, 23, 42);
-  color: rgb(241, 245, 249);
+  background-color: rgb(15, 23, 42) !important;
+  color: rgb(241, 245, 249) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.rw-dark .rw-list-option {
+  color: rgb(241, 245, 249) !important;
+}
+
+.rw-dark .rw-list-option:hover {
+  background-color: rgba(154, 130, 255, 0.18) !important;
+  color: white !important;
+}
+
+.rw-dark .rw-state-focus {
+  background-color: rgba(154, 130, 255, 0.22) !important;
+  color: white !important;
+}
+
+.rw-dark .rw-state-selected {
+  background-color: var(--primary-light) !important;
+  color: white !important;
+}
+
+.rw-dark .rw-list-option.rw-state-active {
+  background-color: var(--primary) !important;
+  color: white !important;
 }
