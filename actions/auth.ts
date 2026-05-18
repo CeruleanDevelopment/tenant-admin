@@ -28,6 +28,7 @@ import {
   saveRefreshTokenCookie,
 } from "../utils/authCookies"
 import { tenantAdminConfig } from "../config/config"
+import { bootstrapUserAuth } from "./userAuth"
 
 type TenantMeUser = {
   id: string
@@ -104,6 +105,9 @@ type TenantRegisterResponse = {
   message: string
 }
 
+const TENANT_SIGNIN_PATH = "/tenannt/signin"
+const TENANT_SIGNUP_PATH = "/tenannt/signup"
+
 export type ActiveCountry = {
   id: string
   name: string
@@ -123,7 +127,7 @@ const normalizePostAuthNext = (value?: string | null): string => {
     return fallback
   }
 
-  const blocked = ["/signin", "/signup", "/auth/callback"]
+  const blocked = ["/signin", "/signup", TENANT_SIGNIN_PATH, TENANT_SIGNUP_PATH, "/auth/callback"]
   if (blocked.some((prefix) => candidate === prefix || candidate.startsWith(`${prefix}?`))) {
     return fallback
   }
@@ -224,7 +228,7 @@ const runTenantGoogleAuthPopup = async (
     if (payload?.type === "tenant-auth-error") {
       const authMode = options?.authPath === "signup" || Boolean(options?.tenantName) ? "signup" : "signin"
       const errorText = String(payload.error || "Tenant authentication failed.").trim()
-      const target = authMode === "signup" ? "/signup" : "/signin"
+      const target = authMode === "signup" ? TENANT_SIGNUP_PATH : TENANT_SIGNIN_PATH
 
       cleanup()
       closePopup()
@@ -242,7 +246,7 @@ const runTenantGoogleAuthPopup = async (
     try {
       if (!token || !refreshToken) {
         toast.error("Tenant authentication failed.")
-        redirectTo(browserWindow, "/signin")
+        redirectTo(browserWindow, TENANT_SIGNIN_PATH)
         return
       }
 
@@ -268,7 +272,7 @@ const runTenantGoogleAuthPopup = async (
       dispatch(clearAuthSession())
       dispatch(clearTenantProfile())
       toast.error("Unable to complete tenant authentication. Please try again.")
-      redirectTo(browserWindow, "/signin")
+      redirectTo(browserWindow, TENANT_SIGNIN_PATH)
     } finally {
       closePopup()
     }
@@ -386,6 +390,12 @@ export const bootstrapAuth =
     }
 
     if (!accessToken && !refreshToken) {
+      const userBootstrapped = await dispatch(bootstrapUserAuth())
+      if (userBootstrapped) {
+        dispatch(setAuthInitialized(true))
+        return
+      }
+
       dispatch(clearAuthSession())
       dispatch(clearTenantProfile())
       dispatch(setAuthInitialized(true))
@@ -404,8 +414,11 @@ export const bootstrapAuth =
     } catch {
       const refreshed = await dispatch(refreshTenantSession())
       if (!refreshed) {
-        dispatch(clearAuthSession())
-        dispatch(clearTenantProfile())
+        const userBootstrapped = await dispatch(bootstrapUserAuth())
+        if (!userBootstrapped) {
+          dispatch(clearAuthSession())
+          dispatch(clearTenantProfile())
+        }
       }
     } finally {
       dispatch(setAuthInitialized(true))
@@ -504,7 +517,7 @@ export const signOutTenant =
     dispatch(setAuthInitialized(true))
 
     if (redirectToSignIn && typeof window !== "undefined") {
-      window.location.assign("/signin")
+      window.location.assign(TENANT_SIGNIN_PATH)
     }
   }
 
@@ -573,4 +586,27 @@ export const verifyTenantOtp =
   async () => {
     const response = await axios.post("/tenant/auth/otp/verify", input)
     return response.data as AuthResponse
+  }
+
+  export const addTenantUser =
+  (input: { email: string; firstName?: string; lastName?: string; role?: string; isActive?: number | boolean })
+  : ThunkAction<Promise<any>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const payload: Record<string, any> = {
+      email: input.email,
+      firstName: input.firstName || null,
+      lastName: input.lastName || null,
+      isActive: typeof input.isActive === "boolean" ? (input.isActive ? 1 : 0) : input.isActive,
+    }
+
+    if (typeof input.role !== "undefined" && input.role !== null) {
+      payload.role = input.role
+    }
+
+    const resp = await axios.post("/tenant/add_user", payload, { headers })
+    return resp.data
   }

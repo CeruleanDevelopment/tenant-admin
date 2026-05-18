@@ -8,7 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/"
 
-  const PUBLIC_PATHS = new Set(["/signin", "/signup", "/auth/callback"]) // no header/sidebar
+  const PUBLIC_PATHS = new Set(["/signin", "/signup", "/tenannt/signin", "/tenannt/signup", "/auth/callback"]) // no header/sidebar
   const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
 
   // Do not wrap pages that already use no-layout-pages or layout-pages (they have their own layouts)

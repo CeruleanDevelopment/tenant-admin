@@ -13,6 +13,9 @@ import type { AppDispatch } from "../../redux/store"
 
 type SignupValues = Record<string, never>
 
+const TENANT_SIGNIN_PATH = "/tenannt/signin"
+const TENANT_SIGNUP_PATH = "/tenannt/signup"
+
 export function SignupForm({ className, ...props }: React.ComponentProps<"div">) {
   const searchParams = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
@@ -23,7 +26,7 @@ export function SignupForm({ className, ...props }: React.ComponentProps<"div">)
 
   const onSubmit = handleSubmit(() => {
     // Google sign-up is disabled for now; open the full registration form instead.
-    router.push('/signup')
+    router.push(TENANT_SIGNUP_PATH)
   })
 
   return (
@@ -42,7 +45,7 @@ export function SignupForm({ className, ...props }: React.ComponentProps<"div">)
 
               <div className="text-center text-sm">
                 Already have a tenant?{" "}
-                <Link href="/signin" className="underline underline-offset-4">
+                <Link href={TENANT_SIGNIN_PATH} className="underline underline-offset-4">
                   Sign in
                 </Link>
               </div>

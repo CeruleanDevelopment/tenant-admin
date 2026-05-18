@@ -458,8 +458,8 @@ function resolveUrl(url: string) {
   if (first === "auth") {
     // map common login/register to top-level signin/signup
     if (parts[1] === "basic") {
-      if (parts[2] === "login") return "/signin"
-      if (parts[2] === "register") return "/signup"
+      if (parts[2] === "login") return "/tenannt/signin"
+      if (parts[2] === "register") return "/tenannt/signup"
       return `/no-layout-pages${url}`
     }
     return `/no-layout-pages${url}`

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useDispatch } from "react-redux"
 import { AppDispatch } from "../../../../redux/store"
+import { addTenantUser } from "../../../../actions/auth"
 const rolesJson = [
   { "value": "tenant-admin", "label": "Tenant Admin" },
   { "value": "editor", "label": "Editor" },
@@ -23,7 +24,7 @@ export default function AddUserPage() {
   const [email, setEmail] = useState("");
   const staticRoles = (rolesJson as unknown as Array<{ value: string; label: string }>);
   const [role, setRole] = useState("");
-  const [isActive, setIsActive] = useState(true);
+  const [isActive, setIsActive] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState("");
@@ -49,26 +50,56 @@ export default function AddUserPage() {
     setSubmitting(true)
     setErrors({})
     setSuccess("")
-    const payload = { firstName, lastName, email, role, isActive }
+    const payload: Record<string, any> = {
+      email: email.trim(),
+      firstName: firstName.trim() || null,
+      lastName: lastName.trim() || null,
+      isActive: isActive ? 1 : 0,
+    }
+
+    if (role) payload.role = role
+
     try {
-      // const res = await fetch("/api/users", {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify(payload),
-      // })
-      // if (!res.ok) {
-      //   const text = await res.text().catch(() => "")
-      //   throw new Error(text || "Failed to create user")
-      // }
-      setSuccess("User created successfully.")
+      const resp = await dispatch(addTenantUser(payload as any) as any)
+
+      const message = resp?.message || (resp?.user ? "User created successfully." : "User created.")
+      setSuccess(String(message))
+
+      // Clear form
       setFirstName("")
       setLastName("")
       setEmail("")
-      // reset to placeholder (no selection)
       setRole("")
-      setIsActive(true)
+      setIsActive(false)
     } catch (err: any) {
-      setErrors({ form: err?.message || "Submission failed" })
+      // Normalize backend error responses (ApiError shape: { message, details })
+      let formMessage = "Submission failed"
+      const detailErrors: Record<string, string> = {}
+
+      if (err?.response?.data) {
+        const d = err.response.data
+        if (typeof d === "string") formMessage = d
+        else if (d?.message) formMessage = String(d.message)
+        else if (d?.error) formMessage = String(d.error)
+
+        if (d?.details && typeof d.details === "object") {
+          for (const k of Object.keys(d.details)) {
+            try {
+              detailErrors[k] = String((d.details as any)[k])
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } else if (err?.message) {
+        formMessage = err.message
+      }
+
+      if (Object.keys(detailErrors).length) {
+        setErrors(detailErrors)
+      } else {
+        setErrors({ form: formMessage })
+      }
     } finally {
       setSubmitting(false)
     }
@@ -150,7 +181,7 @@ export default function AddUserPage() {
               </div>
 
               <div className="flex items-center justify-end gap-3">
-                <Button type="submit" disabled={submitting} className="bg-primary py-4 px-4">
+                <Button type="submit" disabled={submitting} className="bg-primary py-4 px-4 cursor-pointer">
                   {submitting ? "Saving..." : "Add User"}
                 </Button>
               </div>

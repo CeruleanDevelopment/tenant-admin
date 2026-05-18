@@ -31,6 +31,8 @@ type AuthValues = {
 }
 
 const OTP_LENGTH = 6
+const TENANT_SIGNIN_PATH = "/tenannt/signin"
+const TENANT_SIGNUP_PATH = "/tenannt/signup"
 
 const resolveCopy = (mode: AuthMode) => {
   if (mode === "signup") {
@@ -40,7 +42,7 @@ const resolveCopy = (mode: AuthMode) => {
       description: "Use a one-time code to create the tenant, then jump straight into the dashboard.",
       primaryButton: "Continue",
       footerPrefix: "Already have a tenant?",
-      footerHref: "/signin",
+      footerHref: TENANT_SIGNIN_PATH,
       footerLabel: "Sign in",
       successMessage: "Tenant created and signed in successfully.",
     }
@@ -52,7 +54,7 @@ const resolveCopy = (mode: AuthMode) => {
     description: "Use a six-digit code to get back into your tenant dashboard fast.",
     primaryButton: "Continue",
     footerPrefix: "Don’t have a tenant yet?",
-    footerHref: "/signup",
+    footerHref: TENANT_SIGNUP_PATH,
     footerLabel: "Create one",
     successMessage: "Signed in successfully.",
   }

@@ -2,8 +2,6 @@
 
 export const dynamic = "force-dynamic"
 
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
-
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
@@ -11,23 +9,24 @@ import { useDispatch } from "react-redux"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
 
-import { Button } from "../../components/ui/button"
-import { Input } from "../../components/ui/input"
-import { Label } from "../../components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card"
-import { cn } from "../../lib/utils"
-import { TenantOtpInput } from "../../components/TenantOtpInput"
+import { Button } from "../../../components/ui/button"
+import { Input } from "../../../components/ui/input"
+import { Label } from "../../../components/ui/label"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card"
+import { cn } from "../../../lib/utils"
+import { TenantOtpInput } from "../../../components/TenantOtpInput"
 import {
-  requestUserOtp,
-  verifyUserOtp,
-} from "../../../actions/userAuth"
-import type { AppDispatch } from "../../../redux/store"
+  hydrateTenantSession,
+  requestTenantOtp,
+  verifyTenantOtp,
+} from "../../../../actions/auth"
+import type { AppDispatch } from "../../../../redux/store"
 import { GalleryVerticalEnd, RefreshCcw, ShieldCheck } from "lucide-react"
 
 type LoginValues = { email?: string }
 
 const OTP_LENGTH = 6
-const RESEND_COOLDOWN_SECONDS = 300
+const RESEND_COOLDOWN_SECONDS = 60
 
 export default function SignInPage() {
   const dispatch = useDispatch<AppDispatch>()
@@ -79,7 +78,12 @@ export default function SignInPage() {
 
     try {
       const response = await dispatch(
-        requestUserOtp({ email }),
+        requestTenantOtp({
+          email,
+          tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
+          tenantName: searchParams.get("tenantName") || undefined,
+          slug: searchParams.get("slug") || undefined,
+        }),
       )
 
       setSessionId(response.sessionId)
@@ -105,13 +109,20 @@ export default function SignInPage() {
     setIsVerifyingOtp(true)
     try {
       const response = await dispatch(
-        verifyUserOtp({
+        verifyTenantOtp({
           sessionId,
           code: otpValue,
+          tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
+          tenantName: searchParams.get("tenantName") || undefined,
+          slug: searchParams.get("slug") || undefined,
         }),
       )
 
-      if (response?.token && response?.refreshToken) {
+      const hydrated = await dispatch(
+        hydrateTenantSession({ token: response.token, refreshToken: response.refreshToken }),
+      )
+
+      if (hydrated) {
         toast.success("Signed in successfully.")
         window.location.assign("/")
         return
@@ -135,7 +146,12 @@ export default function SignInPage() {
     setIsRequestingOtp(true)
     try {
       const response = await dispatch(
-        requestUserOtp({ email: emailValue }),
+        requestTenantOtp({
+          email: emailValue,
+          tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
+          tenantName: searchParams.get("tenantName") || undefined,
+          slug: searchParams.get("slug") || undefined,
+        }),
       )
 
       setSessionId(response.sessionId)
@@ -165,7 +181,7 @@ export default function SignInPage() {
           <div className={cn("flex flex-col gap-6")}>
             <Card>
               <CardHeader className="text-center">
-                <CardTitle className="text-xl">Sign in to your account</CardTitle>
+                <CardTitle className="text-xl">Sign in to your tenant</CardTitle>
                 <CardDescription>
                   {stage === "email"
                     ? "Use your registered email and continue with OTP."
@@ -260,12 +276,12 @@ export default function SignInPage() {
                     </div>
                   )}
 
-                  {/* <div className="text-center text-sm">
+                  <div className="text-center text-sm">
                     Don&apos;t have a tenant yet? {" "}
-                    <Link href={TENANT_SIGNUP_PATH} className="underline underline-offset-4">
+                    <Link href="/signup" className="underline underline-offset-4">
                       Signup
                     </Link>
-                  </div> */}
+                  </div>
                 </div>
               </CardContent>
             </Card>

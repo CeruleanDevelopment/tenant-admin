@@ -8,6 +8,9 @@ import { toast } from "sonner"
 import { hydrateTenantSession } from "../../../../actions/auth"
 import type { AppDispatch } from "../../../../redux/store"
 
+const TENANT_SIGNIN_PATH = "/tenannt/signin"
+const TENANT_SIGNUP_PATH = "/tenannt/signup"
+
 const normalizePostAuthNext = (value?: string | null): string => {
   const fallback = "/"
   const candidate = String(value || "").trim()
@@ -16,7 +19,7 @@ const normalizePostAuthNext = (value?: string | null): string => {
     return fallback
   }
 
-  const blocked = ["/signin", "/signup", "/auth/callback"]
+  const blocked = ["/signin", "/signup", TENANT_SIGNIN_PATH, TENANT_SIGNUP_PATH, "/auth/callback"]
   if (blocked.some((prefix) => candidate === prefix || candidate.startsWith(`${prefix}?`))) {
     return fallback
   }
@@ -39,7 +42,8 @@ export default function AuthCallbackPage() {
         const error = String(params.get("error") || "").trim()
         const rawNext = params.get("next")
         const next = normalizePostAuthNext(rawNext)
-        const isSignup = String(rawNext || "").trim().toLowerCase().startsWith("/signup")
+        const normalizedRawNext = String(rawNext || "").trim().toLowerCase()
+        const isSignup = normalizedRawNext.startsWith("/signup") || normalizedRawNext.startsWith(TENANT_SIGNUP_PATH)
 
         if (error) {
           if (typeof window !== "undefined" && window.opener && window.opener !== window) {
@@ -61,7 +65,7 @@ export default function AuthCallbackPage() {
           }
 
           toast.error(error)
-          const redirectPath = isSignup ? "/signup" : "/signin"
+          const redirectPath = isSignup ? TENANT_SIGNUP_PATH : TENANT_SIGNIN_PATH
           router.replace(redirectPath)
           return
         }
@@ -97,10 +101,10 @@ export default function AuthCallbackPage() {
         }
 
         toast.error("Unable to complete tenant authentication. Please try again.")
-        router.replace("/signin")
+        router.replace(TENANT_SIGNIN_PATH)
       } catch {
         toast.error("Unable to complete tenant authentication. Please try again.")
-        router.replace("/signin")
+        router.replace(TENANT_SIGNIN_PATH)
       }
     }
 
