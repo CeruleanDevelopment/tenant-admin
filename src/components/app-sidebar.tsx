@@ -89,6 +89,7 @@ const data = {
         { title: "View Users", url: "/users/view" },        
       ],
     },
+    /*
     {
       title: "eCommerce",
       url: "#",
@@ -380,6 +381,7 @@ const data = {
         { title: "coming soon", url: "/error/coming-soon" },
       ],
     },
+    */
   ],
   navSecondary: [
     {
