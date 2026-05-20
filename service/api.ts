@@ -30,6 +30,28 @@ const api = axios.create({
   withCredentials: true,
 })
 
+const defaultSuccessMessage = (method?: string): string => {
+  const m = String(method || "GET").toUpperCase()
+  if (m === "POST") return "Created successfully."
+  if (m === "PUT" || m === "PATCH") return "Updated successfully."
+  if (m === "DELETE") return "Deleted successfully."
+  return "Request completed successfully."
+}
+
+const extractApiMessage = (error: any): string => {
+  const payload = error?.response?.data
+  if (payload && typeof payload === "object") {
+    if (typeof payload.message === "string" && payload.message.trim()) return payload.message
+    if (typeof payload.error === "string" && payload.error.trim()) return payload.error
+  }
+
+  if (typeof error?.message === "string" && error.message.trim()) {
+    return error.message
+  }
+
+  return "Request failed. Please try again."
+}
+
 const clearApiAuthHeaders = (): void => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (api.defaults.headers as any)["x-tenant-token"]
@@ -184,7 +206,20 @@ api.interceptors.request.use((config: any) => {
 })
 
 api.interceptors.response.use(
-  (response: any) => response,
+  (response: any) => {
+    const payload = response?.data
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      if (typeof payload.success === "undefined") {
+        payload.success = response.status >= 200 && response.status < 400
+      }
+
+      if (typeof payload.message === "undefined") {
+        payload.message = defaultSuccessMessage(response?.config?.method)
+      }
+    }
+
+    return response
+  },
   async (error: any) => {
     const status = error?.response?.status
     const requestUrl = error?.config?.url || ""
@@ -230,6 +265,16 @@ api.interceptors.response.use(
     if (status === 401) {
       clearClientSession()
     }
+
+    const normalizedMessage = extractApiMessage(error)
+    if (error?.response?.data && typeof error.response.data === "object") {
+      error.response.data.message = normalizedMessage
+      error.response.data.error = normalizedMessage
+      if (typeof error.response.data.success === "undefined") {
+        error.response.data.success = false
+      }
+    }
+    error.message = normalizedMessage
 
     return Promise.reject(error)
   },

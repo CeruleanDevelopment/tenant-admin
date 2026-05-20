@@ -21,6 +21,7 @@ import { useDispatch } from "react-redux"
 import { useRouter } from "next/navigation"
 import { signOutTenant } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
+import { canAccessPath, resolveSessionType } from "@/utils/access-control"
 import {
   BookOpen,
   ChartNoAxesCombined,
@@ -62,20 +63,6 @@ const data = {
         />
       ),
       isActive: true,
-      // items: [
-      //   {
-      //     title: "Analytics",
-      //     url: "/dashboard/analytics",
-      //   },
-      //   {
-      //     title: "CRM",
-      //     url: "/dashboard/crm",
-      //   },
-      //   {
-      //     title: "eCommerce",
-      //     url: "/dashboard/eCommerce",
-      //   },
-      // ],
     },
     {
       title: "Users",
@@ -86,7 +73,18 @@ const data = {
       ),
       items: [
         { title: "Add User", url: "/users/add" },
-        { title: "View Users", url: "/users/view" },        
+        { title: "View Users", url: "/users/view" },
+      ],
+    },
+    {
+      title: "Agents",
+      url: "/agents",
+      icon: (
+        <LayoutGrid
+        />
+      ),
+      items: [
+        { title: "Agents", url: "/agents" },
       ],
     },
     /*
@@ -485,6 +483,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const dispatch = useDispatch<AppDispatch>()
   const reduxUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
+  const sessionType = React.useMemo(
+    () => resolveSessionType({ authUserId: reduxUser?.id, tenantId: tenantProfile?.id }),
+    [reduxUser?.id, tenantProfile?.id],
+  )
+
+  const navMainItems = React.useMemo(() => {
+    return data.navMain.filter((item: any) => canAccessPath(String(item?.url || ""), sessionType))
+  }, [sessionType])
 
   const userForNav = {
     name: reduxUser?.name || data.user.name,
@@ -517,7 +523,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <div className="px-2">
-          <NavMain items={data.navMain} />
+          <NavMain items={navMainItems} />
         </div>
         {/* <div className="border-b border-border">
           <NavProjects projects={data.projects} />
