@@ -13,7 +13,7 @@ import { GlobalSearch } from "../global-search"
 import HeaderUser from "../header-user"
 import { useSelector, useDispatch } from "react-redux"
 import type { RootState } from "../../../redux/reducers"
-import { signOutTenant } from "../../../actions/auth"
+import { signOut } from "../../../actions/auth"
 import type { AppDispatch } from "../../../redux/store"
 
 import Footer from "./Footer"
@@ -162,7 +162,7 @@ export default function AdminLayout({
                           <HeaderUser
                             user={userForHeader}
                             onLogout={async () => {
-                              await dispatch(signOutTenant())
+                              await dispatch(signOut())
                             }}
                           />
                         </div>

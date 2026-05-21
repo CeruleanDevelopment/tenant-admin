@@ -29,12 +29,17 @@ import {
 } from "../utils/authCookies"
 import { tenantAdminConfig } from "../config/config"
 import { bootstrapUserAuth } from "./userAuth"
+import { signOutUser } from "./userAuth"
+import { resolveSessionType } from "@/utils/access-control"
 
 type TenantMeUser = {
   id: string
   email: string
   name: string
   role: string
+  isActive?: boolean | null
+  firstName?: string | null
+  lastName?: string | null
 }
 
 type TenantMeResponse = {
@@ -510,7 +515,6 @@ export const signOutTenant =
     } catch {
       // best effort
     }
-
     persistSession(null)
     dispatch(clearAuthSession())
     dispatch(clearTenantProfile())
@@ -520,6 +524,45 @@ export const signOutTenant =
       window.location.assign(TENANT_SIGNIN_PATH)
     }
   }
+
+  // Generic sign out that chooses tenant vs user session and delegates appropriately
+  export const signOut =
+    (options?: { redirectToSignIn?: boolean }): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
+    async (dispatch, getState) => {
+      const state = getState() as RootState
+      const sessionType = resolveSessionType({
+        authUserId: state.auth.user?.id,
+        tenantId: state.tenant.profile?.id,
+        role: state.auth.user?.role,
+      })
+
+      if (sessionType === "tenant") {
+        // delegate to tenant sign out (keeps existing behavior)
+        // preserve redirect option
+        // @ts-ignore - dispatch accepts thunk
+        return dispatch(signOutTenant(options) as any)
+      }
+
+      if (sessionType === "user") {
+        // delegate to user sign out
+        // @ts-ignore
+        await dispatch(signOutUser() as any)
+        if (options?.redirectToSignIn !== false && typeof window !== "undefined") {
+          window.location.assign("/signin")
+        }
+        return
+      }
+
+      // guest: ensure local cleanup
+      persistSession(null)
+      dispatch(clearAuthSession())
+      dispatch(clearTenantProfile())
+      dispatch(setAuthInitialized(true))
+
+      if (options?.redirectToSignIn !== false && typeof window !== "undefined") {
+        window.location.assign("/signin")
+      }
+    }
 
 export const signInTenantWithGoogle =
   (options?: TenantGoogleAuthOptions): ThunkAction<void, RootState, unknown, AnyAction> =>
@@ -569,6 +612,7 @@ export const fetchTenantUsers =
 
     _fetchTenantUsersPromise = (async () => {
       try {
+        console.debug("fetchTenantUsers: calling /tenant/users with headers:", headers)
         const response = await axios.get("/tenant/users", { headers })
         const users = Array.isArray(response?.data?.users) ? response.data.users : []
         return users as TenantMeUser[]
@@ -607,6 +651,25 @@ export const verifyTenantOtp =
       payload.role = input.role
     }
 
+    console.debug("addTenantUser: calling /tenant/add_user with headers:", headers, "payload:", payload)
     const resp = await axios.post("/tenant/add_user", payload, { headers })
+    return resp.data
+  }
+
+export const setTenantUserActiveStatus =
+  (input: { userId: string; isActive: boolean }): ThunkAction<Promise<any>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const payload = { isActive: input.isActive ? 1 : 0 }
+    console.debug("setTenantUserActiveStatus: calling PATCH /tenant/users/:userId/status", {
+      userId: input.userId,
+      headers,
+      payload,
+    })
+
+    const resp = await axios.patch(`/tenant/users/${encodeURIComponent(String(input.userId || ""))}/status`, payload, { headers })
     return resp.data
   }

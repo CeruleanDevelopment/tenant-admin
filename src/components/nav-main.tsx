@@ -46,6 +46,11 @@ export function NavMain({ items }: { items: any[] }) {
     return i?.href ?? i?.url
   }
 
+  const hrefOrFallback = (i: any): string => {
+    const href = resolveHref(i)
+    return typeof href === "string" && href.trim() ? href : "#"
+  }
+
   return (
     <SidebarMenu>
       {items.map((item: any) => {
@@ -109,7 +114,7 @@ export function NavMain({ items }: { items: any[] }) {
                                     asChild
                                     isActive={isActive(child.url)}
                                   >
-                                    <Link href={resolveHref(child)}>
+                                    <Link href={hrefOrFallback(child)} prefetch={false}>
                                       {child.title}
                                     </Link>
                                   </SidebarMenuButton>
@@ -123,7 +128,7 @@ export function NavMain({ items }: { items: any[] }) {
                             asChild
                             isActive={subActive}
                           >
-                            <Link href={resolveHref(subItem)}>
+                            <Link href={hrefOrFallback(subItem)} prefetch={false}>
                               {subItem.title}
                             </Link>
                           </SidebarMenuButton>
@@ -143,7 +148,7 @@ export function NavMain({ items }: { items: any[] }) {
               asChild
               isActive={isActive(item.url)}
             >
-              <Link href={resolveHref(item)}>
+              <Link href={hrefOrFallback(item)} prefetch={false}>
                 {item.icon}
                 <span>{item.title}</span>
               </Link>

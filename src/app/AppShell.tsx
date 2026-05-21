@@ -14,12 +14,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const authUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const sessionType = React.useMemo(
-    () => resolveSessionType({ authUserId: authUser?.id, tenantId: tenantProfile?.id }),
-    [authUser?.id, tenantProfile?.id],
+    () => resolveSessionType({ authUserId: authUser?.id, tenantId: tenantProfile?.id, role: authUser?.role }),
+    [authUser?.id, authUser?.role, tenantProfile?.id],
   )
 
-  const PUBLIC_PATHS = new Set(["/signin", "/signup", "/tenannt/signin", "/tenannt/signup", "/auth/callback"]) // no header/sidebar
+  const PUBLIC_PATHS = new Set(["/signin", "/signup", "/users/signin", "/tenannt/signin", "/tenannt/signup", "/auth/callback"]) // no header/sidebar
   const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
+
+  React.useEffect(() => {
+    const redirectPath = getUnauthorizedRedirectPath(pathname, sessionType)
+    if (redirectPath && redirectPath !== pathname) {
+      router.replace(redirectPath)
+    }
+  }, [pathname, router, sessionType])
 
   // Do not wrap pages that already use no-layout-pages or layout-pages (they have their own layouts)
   if (
@@ -30,13 +37,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   ) {
     return <>{children}</>
   }
-
-  React.useEffect(() => {
-    const redirectPath = getUnauthorizedRedirectPath(pathname, sessionType)
-    if (redirectPath && redirectPath !== pathname) {
-      router.replace(redirectPath)
-    }
-  }, [pathname, router, sessionType])
 
   return (
     <TooltipProvider delayDuration={0}>

@@ -17,7 +17,7 @@ export default function AgentsPage() {
           <CardContent className="space-y-3 p-6">
             <div className="">
               <Button asChild>
-                <Link href="/">Go to Dashboard</Link>
+                <Link href="/" prefetch={false}>Go to Dashboard</Link>
               </Button>
             </div>
           </CardContent>

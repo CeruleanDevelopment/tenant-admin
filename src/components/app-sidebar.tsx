@@ -19,7 +19,7 @@ import { useSelector } from "react-redux"
 import type { RootState } from "../../redux/reducers"
 import { useDispatch } from "react-redux"
 import { useRouter } from "next/navigation"
-import { signOutTenant } from "../../actions/auth"
+import { signOut } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
 import { canAccessPath, resolveSessionType } from "@/utils/access-control"
 import {
@@ -484,8 +484,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const reduxUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const sessionType = React.useMemo(
-    () => resolveSessionType({ authUserId: reduxUser?.id, tenantId: tenantProfile?.id }),
-    [reduxUser?.id, tenantProfile?.id],
+    () => resolveSessionType({ authUserId: reduxUser?.id, tenantId: tenantProfile?.id, role: reduxUser?.role }),
+    [reduxUser?.id, reduxUser?.role, tenantProfile?.id],
   )
 
   const navMainItems = React.useMemo(() => {
@@ -499,7 +499,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }
 
   const handleLogout = async () => {
-    await dispatch(signOutTenant())
+    await dispatch(signOut())
   }
 
   return (
