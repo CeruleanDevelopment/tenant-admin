@@ -3,11 +3,19 @@
 import * as React from "react"
 import { useEffect, useState } from "react"
 import { useDispatch } from "react-redux"
-import type { ColumnDef } from "@tanstack/react-table"
 import type { AppDispatch } from "../../../../redux/store"
 import { fetchTenantUsers, setTenantUserActiveStatus } from "../../../../actions/auth"
-import { DataTable } from "@/components/data-table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Switch } from "@/components/ui/switch"
 
 type UserRow = {
@@ -38,12 +46,18 @@ type UserTableRow = {
 const statusBadgeClass = (status: string) =>
   status === "Active" ? "bg-green-500/10 text-green-600" : "bg-muted"
 
+const PAGE_SIZE = 10
+
 export default function ViewUsersPage() {
   const dispatch = useDispatch<AppDispatch>()
   const [users, setUsers] = useState<Array<UserRow>>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [updatingById, setUpdatingById] = useState<Record<string, boolean>>({})
+  const [query, setQuery] = useState("")
+  const [page, setPage] = useState(1)
+  const [sortKey, setSortKey] = useState<"name" | "email" | "role" | "status">("name")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
 
   useEffect(() => {
     let mounted = true
@@ -129,6 +143,50 @@ export default function ViewUsersPage() {
     })
   }, [users])
 
+  const filteredUsers = React.useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return tableData
+
+    return tableData.filter((user) => {
+      const hay = `${user.name} ${user.email} ${user.role} ${user.status}`.toLowerCase()
+      return hay.includes(q)
+    })
+  }, [query, tableData])
+
+  const sortedUsers = React.useMemo(() => {
+    const items = [...filteredUsers]
+
+    items.sort((a, b) => {
+      const va = String(a[sortKey] || "")
+      const vb = String(b[sortKey] || "")
+      const result = va.localeCompare(vb)
+      return sortDir === "asc" ? result : -result
+    })
+
+    return items
+  }, [filteredUsers, sortDir, sortKey])
+
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedUsers = React.useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE
+    return sortedUsers.slice(start, start + PAGE_SIZE)
+  }, [currentPage, sortedUsers])
+
+  React.useEffect(() => {
+    setPage(1)
+  }, [query, sortKey, sortDir])
+
+  const toggleSort = (key: "name" | "email" | "role" | "status") => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === "asc" ? "desc" : "asc"))
+      return
+    }
+
+    setSortKey(key)
+    setSortDir("asc")
+  }
+
   const handleToggleActive = async (user: UserRow, next: boolean) => {
     const userId = String(user.id || "")
     if (!userId) return
@@ -161,55 +219,6 @@ export default function ViewUsersPage() {
     }
   }
 
-  const columns = React.useMemo<ColumnDef<UserTableRow>[]>(() => [
-    {
-      accessorKey: "name",
-      header: "Name",
-    },
-    {
-      accessorKey: "email",
-      header: "Email",
-    },
-    {
-      accessorKey: "role",
-      header: "Role",
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ row }) => (
-        <Badge
-          variant="outline"
-          className={statusBadgeClass(row.original.status)}
-        >
-          {row.original.status}
-        </Badge>
-      ),
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      cell: ({ row }) => {
-        const user = row.original
-        const busy = Boolean(updatingById[user.id])
-
-        return (
-          <div className="flex items-center gap-2">
-            <Switch
-              size="default"
-              checked={user.isActive}
-              disabled={busy}
-              onCheckedChange={(checked) => void handleToggleActive(user as any, Boolean(checked))}
-            />
-            <span className="text-xs text-muted-foreground">
-              {busy ? "Updating..." : "Toggle"}
-            </span>
-          </div>
-        )
-      },
-    },
-  ], [handleToggleActive, updatingById])
-
   return (
     <main className="p-6">
       <div className="mx-auto max-w-6xl space-y-4">
@@ -218,15 +227,99 @@ export default function ViewUsersPage() {
           <p className="text-sm text-muted-foreground">Advanced table layout with search, sorting, pagination, and active toggle actions.</p>
         </div>
 
+        {/* <div className="w-full md:max-w-sm">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name, email, role"
+          />
+        </div> */}
+
         {loading && <p>Loading users...</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {!loading && !error && (
           <div className="rounded-2xl border bg-background p-4 shadow-sm">
-            {tableData.length === 0 ? (
+            {sortedUsers.length === 0 ? (
               <p className="text-sm text-muted-foreground">No users found.</p>
             ) : (
-              <DataTable columns={columns} data={tableData} />
+              <div className="space-y-4">
+                <div className="overflow-x-auto rounded-xl border">
+                  <Table>
+                    <TableHeader className="bg-muted/50">
+                      <TableRow>
+                        <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>
+                          Name
+                        </TableHead>
+                        <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("email")}>
+                          Email
+                        </TableHead>
+                        <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("role")}>
+                          Role
+                        </TableHead>
+                        <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("status")}>
+                          Status
+                        </TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      {pagedUsers.map((user) => {
+                        const busy = Boolean(updatingById[user.id])
+
+                        return (
+                          <TableRow key={user.id}>
+                            <TableCell>{user.name}</TableCell>
+                            <TableCell>{user.email}</TableCell>
+                            <TableCell>{user.role}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={statusBadgeClass(user.status)}
+                              >
+                                {user.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  size="default"
+                                  checked={user.isActive}
+                                  disabled={busy}
+                                  onCheckedChange={(checked) => void handleToggleActive(user as any, Boolean(checked))}
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  {busy ? "Updating..." : "Toggle"}
+                                </span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {sortedUsers.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1}
+                    -{Math.min(currentPage * PAGE_SIZE, sortedUsers.length)} of {sortedUsers.length}
+                  </p>
+
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={currentPage <= 1}>
+                      Previous
+                    </Button>
+                    <span className="text-sm">
+                      Page {currentPage} / {totalPages}
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={currentPage >= totalPages}>
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
