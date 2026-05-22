@@ -50,7 +50,7 @@ export default function AddUserPage() {
     setSubmitting(true)
     setErrors({})
     setSuccess("")
-    const payload: Record<string, any> = {
+    const payload: Record<string, unknown> = {
       email: email.trim(),
       firstName: firstName.trim() || null,
       lastName: lastName.trim() || null,
@@ -60,9 +60,15 @@ export default function AddUserPage() {
     if (role) payload.role = role
 
     try {
-      const resp = await dispatch(addTenantUser(payload as any) as any)
+      const resp = await dispatch(addTenantUser(payload as unknown as { email: string; firstName?: string | null; lastName?: string | null; isActive?: number; role?: string }))
 
-      const message = resp?.message || (resp?.user ? "User created successfully." : "User created.")
+      let message = "User created."
+      if (typeof resp === "object" && resp !== null) {
+        const r = resp as { message?: string; user?: unknown }
+        message = r.message ?? (r.user ? "User created successfully." : "User created.")
+      } else if (typeof resp === "string") {
+        message = resp
+      }
       setSuccess(String(message))
 
       // Clear form
@@ -71,28 +77,31 @@ export default function AddUserPage() {
       setEmail("")
       setRole("")
       setIsActive(false)
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Normalize backend error responses (ApiError shape: { message, details })
       let formMessage = "Submission failed"
       const detailErrors: Record<string, string> = {}
 
-      if (err?.response?.data) {
-        const d = err.response.data
-        if (typeof d === "string") formMessage = d
-        else if (d?.message) formMessage = String(d.message)
-        else if (d?.error) formMessage = String(d.error)
+      if (typeof err === "object" && err !== null) {
+        const e = err as { response?: { data?: any }; message?: string }
+        const d = e.response?.data ?? null
+        if (d) {
+          if (typeof d === "string") formMessage = d
+          else if (d?.message) formMessage = String(d.message)
+          else if (d?.error) formMessage = String(d.error)
 
-        if (d?.details && typeof d.details === "object") {
-          for (const k of Object.keys(d.details)) {
-            try {
-              detailErrors[k] = String((d.details as any)[k])
-            } catch {
-              // ignore
+          if (d?.details && typeof d.details === "object") {
+            for (const k of Object.keys(d.details)) {
+              try {
+                detailErrors[k] = String((d.details as Record<string, unknown>)[k])
+              } catch {
+                // ignore
+              }
             }
           }
+        } else if (e.message) {
+          formMessage = e.message
         }
-      } else if (err?.message) {
-        formMessage = err.message
       }
 
       if (Object.keys(detailErrors).length) {

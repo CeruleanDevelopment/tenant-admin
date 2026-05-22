@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { useEffect, useState } from "react"
+import type { ReactNode } from "react"
 import Link from "next/link"
 import { ChevronRight } from "lucide-react"
 
@@ -19,55 +19,55 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 
-export function NavMain({ items }: { items: any[] }) {
-  const pathname = usePathname()
-  const effectivePathname = pathname === "/" ? "/dashboard/analytics" : pathname
+export type NavItem = {
+  title: string
+  url?: string
+  href?: string
+  icon?: ReactNode
+  items?: NavItem[]
+}
 
-  // ✅ active route check
-  const isActive = (url: string) => {
-    return effectivePathname === url || effectivePathname.startsWith(url + "/")
+export function NavMain({ items }: { items: NavItem[] }) {
+  const pathname = usePathname()
+  const rawPathname = pathname ?? "/"
+  const effectivePathname = rawPathname === "/" ? "/dashboard/analytics" : rawPathname
+
+  // active route check
+  const isActive = (url?: string) => {
+    if (!url) return false
+    return effectivePathname === url || effectivePathname.startsWith(`${url}/`)
   }
 
-  // ✅ check if parent should be open
-  const isParentActive = (item: any): boolean => {
+  // check if parent should be open
+  const isParentActive = (item: NavItem): boolean => {
     if (!item.items) return false
 
-    return item.items.some((sub: any) => {
+    return item.items.some((sub) => {
       if (sub.items) {
-        return sub.items.some((child: any) =>
-          effectivePathname.startsWith(child.url)
-        )
+        return sub.items.some((child) => typeof child.url === "string" && child.url && effectivePathname.startsWith(child.url))
       }
-      return effectivePathname.startsWith(sub.url)
+      return typeof sub.url === "string" && sub.url && effectivePathname.startsWith(sub.url)
     })
   }
 
-  const resolveHref = (i: any) => {
+  const resolveHref = (i: NavItem) => {
     return i?.href ?? i?.url
   }
 
-  const hrefOrFallback = (i: any): string => {
+  const hrefOrFallback = (i: NavItem): string => {
     const href = resolveHref(i)
     return typeof href === "string" && href.trim() ? href : "#"
   }
 
   return (
     <SidebarMenu>
-      {items.map((item: any) => {
+      {items.map((item) => {
         const parentActive = isParentActive(item)
-
-        // ✅ control open state dynamically
-        const [open, setOpen] = useState(parentActive)
-
-        useEffect(() => {
-          if (parentActive) setOpen(true)
-        }, [effectivePathname])
 
         return item.items ? (
           <Collapsible
-            key={item.title}
-            open={open}
-            onOpenChange={setOpen}
+            key={`${item.title}-${effectivePathname}`}
+            defaultOpen={parentActive}
           >
             <SidebarMenuItem>
 
@@ -87,16 +87,14 @@ export function NavMain({ items }: { items: any[] }) {
               <CollapsibleContent>
                 <SidebarMenuSub>
 
-                  {item.items.map((subItem: any) => {
+                  {item.items.map((subItem) => {
                     const subActive = isActive(subItem.url)
 
                     return (
                       <SidebarMenuSubItem key={subItem.title}>
                         {subItem.items ? (
                           <Collapsible
-                            defaultOpen={subItem.items.some((child: any) =>
-                              effectivePathname.startsWith(child.url)
-                            )}
+                            defaultOpen={subItem.items.some((child) => typeof child.url === "string" && child.url && effectivePathname.startsWith(child.url))}
                           >
                             <CollapsibleTrigger asChild>
                               <SidebarMenuButton className="group">
@@ -108,7 +106,7 @@ export function NavMain({ items }: { items: any[] }) {
                             <CollapsibleContent>
                               <SidebarMenuSub>
 
-                                {subItem.items.map((child: any) => (
+                                {subItem.items.map((child) => (
                                   <SidebarMenuButton
                                     key={child.title}
                                     asChild

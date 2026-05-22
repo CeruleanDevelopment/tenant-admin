@@ -47,6 +47,16 @@ export default function SignInPage() {
     defaultValues: { email: String(searchParams.get("email") || "") },
   })
 
+  function getErrorMessage(err: unknown) {
+    if (!err) return "An error occurred."
+    if (typeof err === "string") return err
+    if (typeof err === "object" && err !== null) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string }
+      return String(e.response?.data?.error ?? e.message ?? "An error occurred.")
+    }
+    return "An error occurred."
+  }
+
   useEffect(() => {
     if (resendSeconds <= 0) {
       return
@@ -88,8 +98,8 @@ export default function SignInPage() {
       setStage("otp")
       setFormError(null)
       toast.success("OTP sent to your email.")
-    } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || "Failed to send OTP."
+    } catch (error: unknown) {
+      const message = getErrorMessage(error) || "Failed to send OTP."
       setFormError(String(message))
       toast.error(String(message))
     } finally {
@@ -118,8 +128,8 @@ export default function SignInPage() {
       }
 
       toast.error("Unable to complete authentication.")
-    } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || "Invalid OTP code."
+    } catch (error: unknown) {
+      const message = getErrorMessage(error) || "Invalid OTP code."
       setFormError(String(message))
       toast.error(String(message))
     } finally {
@@ -142,8 +152,8 @@ export default function SignInPage() {
       setResendSeconds(Math.max(RESEND_COOLDOWN_SECONDS, Number(response.resendCooldownSeconds) || 0))
       setOtpValue("")
       toast.success("OTP resent.")
-    } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || "Failed to resend OTP."
+    } catch (error: unknown) {
+      const message = getErrorMessage(error) || "Failed to resend OTP."
       setFormError(String(message))
       toast.error(String(message))
     } finally {

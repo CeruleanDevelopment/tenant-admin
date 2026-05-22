@@ -199,7 +199,7 @@ api.interceptors.request.use((config: any) => {
 
   const method = (config.method || "GET").toString().toUpperCase()
   const url = config.url || "/"
-  // eslint-disable-next-line no-console
+   
   console.log(`[tenant-admin] calling API: ${method} ${url}`)
 
   return config

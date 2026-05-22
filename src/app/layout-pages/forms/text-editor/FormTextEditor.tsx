@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type React from "react"
 import Editor from "react-simple-wysiwyg"
 
 import {
@@ -14,7 +15,7 @@ import {
 export default function FormTextEditor() {
   const [html, setHtml] = useState("my <b>HTML</b>")
 
-  function onChange(e: any) {
+  function onChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | { target: { value: string } }) {
     setHtml(e.target.value)
   }
 

@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,13 +31,17 @@ const initialState = {
   saveDetails: false,
 }
 
-export default function CheckoutBillingForm() {
-  const [form, setForm] = useState(initialState)
-  const [errors, setErrors] = useState<any>({})
-  const [touched, setTouched] = useState<any>({})
+type CheckoutForm = typeof initialState
+type FormErrors = Partial<Record<keyof CheckoutForm, string>>
+type Touched = Partial<Record<keyof CheckoutForm, boolean>>
 
-  const validate = () => {
-    const newErrors: any = {}
+export default function CheckoutBillingForm() {
+  const [form, setForm] = useState<CheckoutForm>(initialState)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [touched, setTouched] = useState<Touched>({})
+
+  const validate = (): FormErrors => {
+    const newErrors: FormErrors = {}
 
     if (!form.fullName) newErrors.fullName = "Full name is required"
 
@@ -52,15 +57,10 @@ export default function CheckoutBillingForm() {
     if (!form.state) newErrors.state = "State is required"
     if (!form.zip) newErrors.zip = "Zip code is required"
     if (!form.country) newErrors.country = "Country is required"
-    if (!form.paymentMethod)
-      newErrors.paymentMethod = "Payment method is required"
+    if (!form.paymentMethod) newErrors.paymentMethod = "Payment method is required"
 
-    if (
-      form.paymentMethod === "Credit Card" ||
-      form.paymentMethod === "Debit Card"
-    ) {
-      if (!form.cardNumber)
-        newErrors.cardNumber = "Card number is required"
+    if (form.paymentMethod === "Credit Card" || form.paymentMethod === "Debit Card") {
+      if (!form.cardNumber) newErrors.cardNumber = "Card number is required"
       if (!form.expiry) newErrors.expiry = "Expiry is required"
       if (!form.cvv) newErrors.cvv = "CVV is required"
     }
@@ -68,16 +68,16 @@ export default function CheckoutBillingForm() {
     return newErrors
   }
 
-  const handleChange = (name: string, value: any) => {
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const handleChange = <K extends keyof CheckoutForm>(name: K, value: CheckoutForm[K]) => {
+    setForm((prev) => ({ ...prev, [name]: value } as CheckoutForm))
   }
 
-  const handleBlur = (name: string) => {
-    setTouched((prev: any) => ({ ...prev, [name]: true }))
+  const handleBlur = (name: keyof CheckoutForm) => {
+    setTouched((prev) => ({ ...prev, [name]: true }))
     setErrors(validate())
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const validationErrors = validate()
     setErrors(validationErrors)
@@ -89,7 +89,7 @@ export default function CheckoutBillingForm() {
     }
   }
 
-  const inputStyle = (name: string) =>
+  const inputStyle = (name: keyof CheckoutForm) =>
     touched[name] && errors[name]
       ? "border-red-500 focus-visible:ring-red-500"
       : ""
@@ -105,23 +105,19 @@ export default function CheckoutBillingForm() {
 
         <CardContent className="p-8">
           <form onSubmit={handleSubmit} className="space-y-8">
-            
+
             {/* Full Name */}
             <div className="space-y-2">
               <Label>Full Name</Label>
               <Input
                 placeholder="Enter your full name"
                 value={form.fullName}
-                onChange={(e) =>
-                  handleChange("fullName", e.target.value)
-                }
+                onChange={(e) => handleChange("fullName", e.target.value)}
                 onBlur={() => handleBlur("fullName")}
                 className={inputStyle("fullName")}
               />
               {touched.fullName && errors.fullName && (
-                <p className="text-sm text-red-500">
-                  {errors.fullName}
-                </p>
+                <p className="text-sm text-red-500">{errors.fullName}</p>
               )}
             </div>
 
@@ -133,16 +129,12 @@ export default function CheckoutBillingForm() {
                   type="email"
                   placeholder="Enter your email"
                   value={form.email}
-                  onChange={(e) =>
-                    handleChange("email", e.target.value)
-                  }
+                  onChange={(e) => handleChange("email", e.target.value)}
                   onBlur={() => handleBlur("email")}
                   className={inputStyle("email")}
                 />
                 {touched.email && errors.email && (
-                  <p className="text-sm text-red-500">
-                    {errors.email}
-                  </p>
+                  <p className="text-sm text-red-500">{errors.email}</p>
                 )}
               </div>
 
@@ -151,16 +143,12 @@ export default function CheckoutBillingForm() {
                 <Input
                   placeholder="+91 9876543210"
                   value={form.phone}
-                  onChange={(e) =>
-                    handleChange("phone", e.target.value)
-                  }
+                  onChange={(e) => handleChange("phone", e.target.value)}
                   onBlur={() => handleBlur("phone")}
                   className={inputStyle("phone")}
                 />
                 {touched.phone && errors.phone && (
-                  <p className="text-sm text-red-500">
-                    {errors.phone}
-                  </p>
+                  <p className="text-sm text-red-500">{errors.phone}</p>
                 )}
               </div>
             </div>
@@ -171,39 +159,29 @@ export default function CheckoutBillingForm() {
               <Input
                 placeholder="123 Main St"
                 value={form.address}
-                onChange={(e) =>
-                  handleChange("address", e.target.value)
-                }
+                onChange={(e) => handleChange("address", e.target.value)}
                 onBlur={() => handleBlur("address")}
                 className={inputStyle("address")}
               />
               {touched.address && errors.address && (
-                <p className="text-sm text-red-500">
-                  {errors.address}
-                </p>
+                <p className="text-sm text-red-500">{errors.address}</p>
               )}
             </div>
 
             {/* City / State / Zip */}
             <div className="grid md:grid-cols-3 gap-6">
-              {["city", "state", "zip"].map((field) => (
+              {( ["city", "state", "zip"] as (keyof CheckoutForm)[] ).map((field) => (
                 <div key={field} className="space-y-2">
-                  <Label className="capitalize">
-                    {field}
-                  </Label>
+                  <Label className="capitalize">{String(field)}</Label>
                   <Input
-                    placeholder={`Enter ${field}`}
-                    value={(form as any)[field]}
-                    onChange={(e) =>
-                      handleChange(field, e.target.value)
-                    }
+                    placeholder={`Enter ${String(field)}`}
+                    value={String(form[field] || "")}
+                    onChange={(e) => handleChange(field, e.target.value as CheckoutForm[typeof field])}
                     onBlur={() => handleBlur(field)}
                     className={inputStyle(field)}
                   />
                   {touched[field] && errors[field] && (
-                    <p className="text-sm text-red-500">
-                      {errors[field]}
-                    </p>
+                    <p className="text-sm text-red-500">{errors[field]}</p>
                   )}
                 </div>
               ))}
@@ -212,98 +190,52 @@ export default function CheckoutBillingForm() {
             {/* Country */}
             <div className="space-y-2">
               <Label>Country</Label>
-              <Select
-                onValueChange={(value) =>
-                  handleChange("country", value)
-                }
-              >
+              <Select onValueChange={(value: string) => handleChange("country", value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select Country" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="India">India</SelectItem>
-                  <SelectItem value="United States">
-                    United States
-                  </SelectItem>
-                  <SelectItem value="United Kingdom">
-                    United Kingdom
-                  </SelectItem>
+                  <SelectItem value="United States">United States</SelectItem>
+                  <SelectItem value="United Kingdom">United Kingdom</SelectItem>
                   <SelectItem value="Canada">Canada</SelectItem>
-                  <SelectItem value="Australia">
-                    Australia
-                  </SelectItem>
+                  <SelectItem value="Australia">Australia</SelectItem>
                 </SelectContent>
               </Select>
               {touched.country && errors.country && (
-                <p className="text-sm text-red-500">
-                  {errors.country}
-                </p>
+                <p className="text-sm text-red-500">{errors.country}</p>
               )}
             </div>
 
             {/* Payment Method */}
             <div className="space-y-2">
               <Label>Payment Method</Label>
-              <Select
-                onValueChange={(value) =>
-                  handleChange("paymentMethod", value)
-                }
-              >
+              <Select onValueChange={(value: string) => handleChange("paymentMethod", value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select Payment Method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Credit Card">
-                    Credit Card
-                  </SelectItem>
-                  <SelectItem value="Debit Card">
-                    Debit Card
-                  </SelectItem>
+                  <SelectItem value="Credit Card">Credit Card</SelectItem>
+                  <SelectItem value="Debit Card">Debit Card</SelectItem>
                   <SelectItem value="UPI">UPI</SelectItem>
-                  <SelectItem value="Net Banking">
-                    Net Banking
-                  </SelectItem>
-                  <SelectItem value="COD">
-                    Cash on Delivery
-                  </SelectItem>
+                  <SelectItem value="Net Banking">Net Banking</SelectItem>
+                  <SelectItem value="COD">Cash on Delivery</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {/* Card Details */}
-            {(form.paymentMethod === "Credit Card" ||
-              form.paymentMethod === "Debit Card") && (
+            {(form.paymentMethod === "Credit Card" || form.paymentMethod === "Debit Card") && (
               <div className="grid md:grid-cols-3 gap-6">
-                <Input
-                  placeholder="Card Number"
-                  onChange={(e) =>
-                    handleChange("cardNumber", e.target.value)
-                  }
-                />
-                <Input
-                  placeholder="MM/YY"
-                  onChange={(e) =>
-                    handleChange("expiry", e.target.value)
-                  }
-                />
-                <Input
-                  type="password"
-                  placeholder="CVV"
-                  onChange={(e) =>
-                    handleChange("cvv", e.target.value)
-                  }
-                />
+                <Input placeholder="Card Number" onChange={(e) => handleChange("cardNumber", e.target.value)} />
+                <Input placeholder="MM/YY" onChange={(e) => handleChange("expiry", e.target.value)} />
+                <Input type="password" placeholder="CVV" onChange={(e) => handleChange("cvv", e.target.value)} />
               </div>
             )}
 
             {/* Save Checkbox */}
             <div className="flex items-center space-x-2">
-              <Checkbox
-                checked={form.saveDetails}
-                onCheckedChange={(value) =>
-                  handleChange("saveDetails", value)
-                }
-              />
+              <Checkbox checked={form.saveDetails} onCheckedChange={(value) => handleChange("saveDetails", Boolean(value))} />
               <Label>Save my details for future checkout</Label>
             </div>
 

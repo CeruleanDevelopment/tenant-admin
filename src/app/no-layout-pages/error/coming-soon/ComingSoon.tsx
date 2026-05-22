@@ -10,32 +10,42 @@ import { Sun, Moon } from "lucide-react"
 export default function ComingSoon() {
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
-  const [timeLeft, setTimeLeft] = useState<any>({})
+
+  type TimeLeft = {
+    days: number
+    hours: number
+    minutes: number
+    seconds: number
+  }
+
+  const [timeLeft, setTimeLeft] = useState<TimeLeft>({ days: 0, hours: 0, minutes: 0, seconds: 0 })
   const [email, setEmail] = useState("")
 
   useEffect(() => {
-    setMounted(true)
+    // defer mounted flag to avoid synchronous setState in effect
+    const mountedTimer = setTimeout(() => setMounted(true), 0)
 
     const targetDate = new Date()
     targetDate.setDate(targetDate.getDate() + 5)
 
     const interval = setInterval(() => {
-      const now = new Date().getTime()
+      const now = Date.now()
       const distance = targetDate.getTime() - now
 
       const days = Math.floor(distance / (1000 * 60 * 60 * 24))
       const hours = Math.floor(
         (distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
       )
-      const minutes = Math.floor(
-        (distance % (1000 * 60 * 60)) / (1000 * 60)
-      )
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60))
       const seconds = Math.floor((distance % (1000 * 60)) / 1000)
 
       setTimeLeft({ days, hours, minutes, seconds })
     }, 1000)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearTimeout(mountedTimer)
+      clearInterval(interval)
+    }
   }, [])
 
   const handleNotify = (e: React.FormEvent) => {
@@ -107,7 +117,7 @@ export default function ComingSoon() {
             {["days", "hours", "minutes", "seconds"].map((unit) => (
               <div key={unit}>
                 <div className="text-3xl font-semibold text-foreground">
-                  {timeLeft[unit] ?? "00"}
+                  {String(timeLeft[unit as keyof TimeLeft]).padStart(2, "0")}
                 </div>
                 <div className="text-xs uppercase tracking-wide text-muted-foreground mt-1">
                   {unit}

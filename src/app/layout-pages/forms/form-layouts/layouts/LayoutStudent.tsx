@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -27,13 +28,17 @@ const initialState = {
   confirm: false,
 }
 
-export default function LayoutStudent() {
-  const [form, setForm] = useState(initialState)
-  const [errors, setErrors] = useState<any>({})
-  const [touched, setTouched] = useState<any>({})
+type StudentFormState = typeof initialState
+type FormErrors = Partial<Record<keyof StudentFormState, string>>
+type Touched = Partial<Record<keyof StudentFormState, boolean>>
 
-  const validate = () => {
-    const newErrors: any = {}
+export default function LayoutStudent() {
+  const [form, setForm] = useState<StudentFormState>(initialState)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [touched, setTouched] = useState<Touched>({})
+
+  const validate = (): FormErrors => {
+    const newErrors: FormErrors = {}
 
     if (!form.firstName) newErrors.firstName = "First name is required"
     if (!form.lastName) newErrors.lastName = "Last name is required"
@@ -54,16 +59,16 @@ export default function LayoutStudent() {
     return newErrors
   }
 
-  const handleChange = (name: string, value: any) => {
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const handleChange = <K extends keyof StudentFormState>(name: K, value: StudentFormState[K]) => {
+    setForm((prev) => ({ ...prev, [name]: value } as StudentFormState))
   }
 
-  const handleBlur = (name: string) => {
-    setTouched((prev: any) => ({ ...prev, [name]: true }))
+  const handleBlur = (name: keyof StudentFormState) => {
+    setTouched((prev) => ({ ...prev, [name]: true }))
     setErrors(validate())
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const validationErrors = validate()
@@ -88,7 +93,7 @@ export default function LayoutStudent() {
     }
   }
 
-  const inputStyle = (name: string) =>
+  const inputStyle = (name: keyof StudentFormState) =>
     touched[name] && errors[name]
       ? "border-red-500 focus-visible:ring-red-500"
       : ""
@@ -107,7 +112,7 @@ export default function LayoutStudent() {
 
             {/* First & Last Name */}
             <div className="grid md:grid-cols-2 gap-6">
-              {["firstName", "lastName"].map((field) => (
+              {( ["firstName", "lastName"] as (keyof StudentFormState)[] ).map((field) => (
                 <div key={field} className="space-y-2">
                   <Label>
                     {field === "firstName"
@@ -120,10 +125,8 @@ export default function LayoutStudent() {
                         ? "first"
                         : "last"
                     } name`}
-                    value={(form as any)[field]}
-                    onChange={(e) =>
-                      handleChange(field, e.target.value)
-                    }
+                    value={String(form[field] || "")}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange(field, e.target.value as StudentFormState[typeof field])}
                     onBlur={() => handleBlur(field)}
                     className={inputStyle(field)}
                   />

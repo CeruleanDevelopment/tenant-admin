@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import type { NavItem } from "./nav-main"
 
 import { NavMain } from "./nav-main"
 import { NavProjects } from "./nav-projects"
@@ -47,7 +48,12 @@ import {
 } from "lucide-react"
 
 // nav menues
-const data = {
+const data: {
+  user: { name: string; email: string; avatar: string }
+  navMain: NavItem[]
+  navSecondary: NavItem[]
+  projects: NavItem[]
+} = {
   user: {
     name: "shadcn",
     email: "m@example.com",
@@ -468,7 +474,7 @@ function resolveUrl(url: string) {
   return url
 }
 
-function normalizeItems(items: any[] | undefined) {
+function normalizeItems(items?: NavItem[]) {
   if (!items) return
   for (const it of items) {
     if (typeof it.url === "string") it.url = resolveUrl(it.url)
@@ -488,9 +494,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     [reduxUser?.id, reduxUser?.role, tenantProfile?.id],
   )
 
-  const navMainItems = React.useMemo(() => {
-    return data.navMain.filter((item: any) => canAccessPath(String(item?.url || ""), sessionType))
-  }, [sessionType])
+  const navMainItems = React.useMemo(
+    () => data.navMain.filter((item) => canAccessPath(String(item?.url ?? ""), sessionType)),
+    [sessionType],
+  )
 
   const userForNav = {
     name: reduxUser?.name || data.user.name,

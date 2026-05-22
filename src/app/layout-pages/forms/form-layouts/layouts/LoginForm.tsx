@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -11,14 +12,18 @@ const initialState = {
   password: "",
 }
 
-export default function LoginForm() {
-  const [form, setForm] = useState(initialState)
-  const [errors, setErrors] = useState<any>({})
-  const [touched, setTouched] = useState<any>({})
-  const [showPassword, setShowPassword] = useState(false)
+type LoginFormState = typeof initialState
+type FormErrors = Partial<Record<keyof LoginFormState, string>>
+type Touched = Partial<Record<keyof LoginFormState, boolean>>
 
-  const validate = () => {
-    const newErrors: any = {}
+export default function LoginForm() {
+  const [form, setForm] = useState<LoginFormState>(initialState)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [touched, setTouched] = useState<Touched>({})
+  const [showPassword, setShowPassword] = useState<boolean>(false)
+
+  const validate = (): FormErrors => {
+    const newErrors: FormErrors = {}
 
     if (!form.email) {
       newErrors.email = "Email is required"
@@ -36,16 +41,16 @@ export default function LoginForm() {
     return newErrors
   }
 
-  const handleChange = (name: string, value: string) => {
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const handleChange = <K extends keyof LoginFormState>(name: K, value: LoginFormState[K]) => {
+    setForm((prev) => ({ ...prev, [name]: value } as LoginFormState))
   }
 
-  const handleBlur = (name: string) => {
-    setTouched((prev: any) => ({ ...prev, [name]: true }))
+  const handleBlur = (name: keyof LoginFormState) => {
+    setTouched((prev) => ({ ...prev, [name]: true }))
     setErrors(validate())
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const validationErrors = validate()
@@ -59,7 +64,7 @@ export default function LoginForm() {
     }
   }
 
-  const inputStyle = (name: string) =>
+  const inputStyle = (name: keyof LoginFormState) =>
     touched[name] && errors[name]
       ? "border-red-500 focus-visible:ring-red-500"
       : ""
@@ -93,9 +98,7 @@ export default function LoginForm() {
                   placeholder="Enter your email"
                   className={`pl-10 ${inputStyle("email")}`}
                   value={form.email}
-                  onChange={(e) =>
-                    handleChange("email", e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("email", e.target.value)}
                   onBlur={() => handleBlur("email")}
                 />
               </div>
@@ -115,9 +118,7 @@ export default function LoginForm() {
                   placeholder="Enter your password"
                   className={`pl-10 pr-10 ${inputStyle("password")}`}
                   value={form.password}
-                  onChange={(e) =>
-                    handleChange("password", e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("password", e.target.value)}
                   onBlur={() => handleBlur("password")}
                 />
                 <button

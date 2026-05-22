@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
 import { useDispatch } from "react-redux"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
@@ -58,6 +58,33 @@ const resolveCopy = (mode: AuthMode) => {
     footerLabel: "Create one",
     successMessage: "Signed in successfully.",
   }
+}
+
+function getErrorMessage(err: unknown): string {
+  if (typeof err === "string") return err
+  if (err instanceof Error) return err.message
+  if (typeof err === "object" && err !== null) {
+    const e = err as Record<string, unknown>
+    const resp = e["response"]
+    if (typeof resp === "object" && resp !== null) {
+      const data = (resp as Record<string, unknown>)["data"]
+      if (typeof data === "object" && data !== null) {
+        const error = (data as Record<string, unknown>)["error"]
+        if (typeof error === "string") return error
+      }
+    }
+
+    const msg = e["message"]
+    if (typeof msg === "string") return msg
+
+    try {
+      return JSON.stringify(e)
+    } catch {
+      return "An error occurred"
+    }
+  }
+
+  return String(err)
 }
 
 export function TenantAuthCard({ mode }: TenantAuthCardProps) {
@@ -133,7 +160,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     toast.success("OTP sent. Check your inbox.")
   }
 
-  const completeOtp = async (code: string) => {
+  const completeOtp = useCallback(async (code: string) => {
     if (!sessionId || isRequestingOtp || code.length < OTP_LENGTH || isVerifying) {
       return
     }
@@ -158,19 +185,19 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
       }
 
       toast.error("Unable to complete authentication.")
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Invalid code."
-      toast.error(String(message))
+    } catch (err: unknown) {
+      const message = getErrorMessage(err) || "Invalid code."
+      toast.error(message)
     } finally {
       setIsVerifying(false)
     }
-  }
+  }, [sessionId, isRequestingOtp, isVerifying, dispatch, initialTenantId, tenantName, slug, copy.successMessage])
 
   useEffect(() => {
     if (otpValue.length === OTP_LENGTH) {
       void completeOtp(otpValue)
     }
-  }, [otpValue])
+  }, [otpValue, completeOtp])
 
   const onEmailSubmit = handleSubmit(async (data) => {
     const email = String(data.email || emailValue || "").trim().toLowerCase()
@@ -195,9 +222,9 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
 
     try {
       await requestOtp(email)
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Failed to send OTP."
-      toast.error(String(message))
+    } catch (err: unknown) {
+      const message = getErrorMessage(err) || "Failed to send OTP."
+      toast.error(message)
       setStage("email")
     } finally {
       setIsRequestingOtp(false)
@@ -214,9 +241,9 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     try {
       await requestOtp(emailValue)
       toast.success("OTP resent. Check your inbox.")
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Failed to resend OTP."
-      toast.error(String(message))
+    } catch (err: unknown) {
+      const message = getErrorMessage(err) || "Failed to resend OTP."
+      toast.error(message)
     }
   }
 

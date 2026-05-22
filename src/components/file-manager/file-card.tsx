@@ -1,6 +1,7 @@
 import { FileText, Image, Video } from "lucide-react"
+import type { ComponentType, SVGProps } from "react"
 
-const icons: Record<string, any> = {
+const icons: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   pdf: FileText,
   image: Image,
   video: Video,

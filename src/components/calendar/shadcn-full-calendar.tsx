@@ -6,6 +6,7 @@ import timeGridPlugin from "@fullcalendar/timegrid"
 import interactionPlugin from "@fullcalendar/interaction"
 
 import { useRef, useState } from "react"
+import type { DatesSetArg } from "@fullcalendar/core"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
@@ -22,6 +23,8 @@ export default function ShadcnFullCalendar() {
 
   const [currentView, setCurrentView] =
     useState<"dayGridMonth" | "timeGridWeek" | "timeGridDay">("dayGridMonth")
+
+  const [title, setTitle] = useState<string>("")
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -64,9 +67,7 @@ export default function ShadcnFullCalendar() {
         </div>
 
         {/* Center Title */}
-        <h2 className="text-lg font-semibold">
-          {calendarRef.current?.getApi().view.title}
-        </h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
 
         {/* Right */}
         <div className="flex items-center gap-2">
@@ -112,7 +113,10 @@ export default function ShadcnFullCalendar() {
   editable
   selectable
 
-  datesSet={(arg) => setCurrentView(arg.view.type as any)}
+  datesSet={(arg: DatesSetArg) => {
+    setCurrentView(arg.view.type as "dayGridMonth" | "timeGridWeek" | "timeGridDay")
+    setTitle(arg.view.title ?? "")
+  }}
 
   dateClick={(info) => {
     setSelectedDate(info.dateStr)

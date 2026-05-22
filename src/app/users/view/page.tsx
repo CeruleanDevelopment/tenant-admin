@@ -6,7 +6,6 @@ import { useDispatch } from "react-redux"
 import type { AppDispatch } from "../../../../redux/store"
 import { fetchTenantUsers, setTenantUserActiveStatus } from "../../../../actions/auth"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import {
   Table,
   TableBody,
@@ -100,26 +99,27 @@ export default function ViewUsersPage() {
       setUsers(cached)
       setLoading(false)
     } else {
-      void dispatch(fetchTenantUsers() as any)
-        .then((res: any) => {
+      const p = dispatch(fetchTenantUsers() as unknown as Promise<unknown>)
+      p.then((res: unknown) => {
+        if (!mounted) return
+        const payload = Array.isArray(res) ? (res as UserRow[]) : []
+        setUsers(payload)
+        try {
+          saveToCache(payload)
+        } catch {
+          // ignore
+        }
+      })
+        .catch((err: unknown) => {
           if (!mounted) return
-          const payload = Array.isArray(res) ? (res as UserRow[]) : []
-          setUsers(payload)
-          try {
-            saveToCache(payload)
-          } catch {
-            // ignore
-          }
+          console.error("Failed to fetch tenant users:", err)
+          const em = typeof err === "object" && err !== null ? (err as { message?: string }).message : undefined
+          setError(typeof em === "string" ? em : "Failed to load users")
         })
-      .catch((err: any) => {
-        if (!mounted) return
-        console.error("Failed to fetch tenant users:", err)
-        setError(typeof err?.message === "string" ? err.message : "Failed to load users")
-      })
-      .finally(() => {
-        if (!mounted) return
-        setLoading(false)
-      })
+        .finally(() => {
+          if (!mounted) return
+          setLoading(false)
+        })
     }
 
     return () => {
@@ -196,15 +196,15 @@ export default function ViewUsersPage() {
     setSortDir("asc")
   }
 
-  const handleToggleActive = async (user: UserRow, next: boolean) => {
+  const handleToggleActive = async (user: UserRow | UserTableRow, next: boolean) => {
     const userId = String(user.id || "")
     if (!userId) return
 
     setUpdatingById((prev) => ({ ...prev, [userId]: true }))
     setError(null)
     try {
-      const resp = await dispatch(setTenantUserActiveStatus({ userId, isActive: next }) as any)
-      const updated = (resp && resp.user) ? resp.user : null
+      const resp = await (dispatch(setTenantUserActiveStatus({ userId, isActive: next }) as unknown) as Promise<unknown>)
+      const updated = (typeof resp === "object" && resp !== null && "user" in (resp as object)) ? (resp as { user?: unknown }).user as Partial<UserRow> | null : null
 
       setUsers((prev) =>
         prev.map((u) => {
@@ -220,9 +220,10 @@ export default function ViewUsersPage() {
           }
         }),
       )
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to update user active status:", err)
-      setError(typeof err?.message === "string" ? err.message : "Failed to update user status")
+      const em = typeof err === "object" && err !== null ? (err as { message?: string }).message : undefined
+      setError(typeof em === "string" ? em : "Failed to update user status")
     } finally {
       setUpdatingById((prev) => ({ ...prev, [userId]: false }))
     }
@@ -298,7 +299,7 @@ export default function ViewUsersPage() {
                                   size="default"
                                   checked={Boolean(user.isActive)}
                                   disabled={busy}
-                                  onCheckedChange={(checked) => void handleToggleActive(user as any, Boolean(checked))}
+                                  onCheckedChange={(checked) => void handleToggleActive(user, Boolean(checked))}
                                   aria-label={`Toggle user ${user.name} status`}
                                   className="h-9 w-12 cursor-pointer"
                                 />
