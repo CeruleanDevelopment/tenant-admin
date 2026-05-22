@@ -17,6 +17,12 @@ export default function UsersPage() {
           <Link href="/users/add" prefetch={false} className="rounded-lg border px-4 py-2 bg-white shadow-sm">
             Add User
           </Link>
+          <Link href="/users/agents" prefetch={false} className="rounded-lg border px-4 py-2 bg-white shadow-sm">
+            User Agents
+          </Link>
+          <Link href="/users/agents/chat" prefetch={false} className="rounded-lg border px-4 py-2 bg-white shadow-sm">
+            User Chatbot
+          </Link>
         </div>
       </div>
     </main>

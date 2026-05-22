@@ -84,13 +84,14 @@ const data: {
     },
     {
       title: "Agents",
-      url: "/agents",
+      url: "/users/agents",
       icon: (
         <LayoutGrid
         />
       ),
       items: [
-        { title: "Agents", url: "/agents" },
+        { title: "Agents", url: "/users/agents" },
+        { title: "Agent Chatbot", url: "/users/agents/chat" },
       ],
     },
     /*

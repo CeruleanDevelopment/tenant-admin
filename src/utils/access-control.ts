@@ -27,14 +27,14 @@ export const routeAccessConfig: RouteAccessConfig = {
   tenantOnlyPrefixes: ["/users"],
 
   // Add new user-only pages here (future-proof)
-  userOnlyPrefixes: ["/agents"],
+  userOnlyPrefixes: ["/users/agents", "/agents"],
 
   // Shared public auth pages (no folder guard)
   publicPaths: ["/signin", "/signup", "/tenannt/signin", "/tenannt/signup", "/auth/callback", "/users/signin"],
 
   defaultRedirectBySession: {
     tenant: "/users",
-    user: "/agents",
+    user: "/users/agents",
     guest: "/tenannt/signin",
   },
 }
@@ -70,11 +70,12 @@ export const canAccessPath = (pathname: string, sessionType: SessionType): boole
   const isTenantOnly = routeAccessConfig.tenantOnlyPrefixes.some((p) => matchPrefix(normalizedPath, p))
   const isUserOnly = routeAccessConfig.userOnlyPrefixes.some((p) => matchPrefix(normalizedPath, p))
 
-  if (isTenantOnly && sessionType !== "tenant") {
-    return false
+  // More specific user-only routes should override broader tenant prefixes (e.g. /users/agents).
+  if (isUserOnly) {
+    return sessionType === "user"
   }
 
-  if (isUserOnly && sessionType !== "user") {
+  if (isTenantOnly && sessionType !== "tenant") {
     return false
   }
 

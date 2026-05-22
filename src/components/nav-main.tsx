@@ -33,8 +33,11 @@ export function NavMain({ items }: { items: NavItem[] }) {
   const effectivePathname = rawPathname === "/" ? "/dashboard/analytics" : rawPathname
 
   // active route check
-  const isActive = (url?: string) => {
+  // `exact` controls whether we require an exact pathname match.
+  // Use `exact = true` for leaf/sub-menu items so a child route doesn't also mark the parent sibling as active.
+  const isActive = (url?: string, exact = false) => {
     if (!url) return false
+    if (exact) return effectivePathname === url
     return effectivePathname === url || effectivePathname.startsWith(`${url}/`)
   }
 
@@ -88,7 +91,10 @@ export function NavMain({ items }: { items: NavItem[] }) {
                 <SidebarMenuSub>
 
                   {item.items.map((subItem) => {
-                    const subActive = isActive(subItem.url)
+                    // For sub-items, require exact match so that when visiting
+                    // `/users/agents/chat` only that exact entry is highlighted
+                    // (and not the `/users/agents` sibling).
+                    const subActive = isActive(subItem.url, true)
 
                     return (
                       <SidebarMenuSubItem key={subItem.title}>
@@ -110,7 +116,7 @@ export function NavMain({ items }: { items: NavItem[] }) {
                                   <SidebarMenuButton
                                     key={child.title}
                                     asChild
-                                    isActive={isActive(child.url)}
+                                    isActive={isActive(child.url, true)}
                                   >
                                     <Link href={hrefOrFallback(child)} prefetch={false}>
                                       {child.title}

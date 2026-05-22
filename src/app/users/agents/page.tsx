@@ -15,9 +15,12 @@ export default function AgentsPage() {
             <CardTitle>Agents</CardTitle>
           </CardHeader> */}
           <CardContent className="space-y-3 p-6">
-            <div className="">
+            <div className="flex flex-wrap gap-2">
               <Button asChild>
                 <Link href="/" prefetch={false}>Go to Dashboard</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/users/agents/chat" prefetch={false}>Open Agent Chatbot</Link>
               </Button>
             </div>
           </CardContent>
