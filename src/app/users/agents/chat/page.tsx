@@ -384,7 +384,7 @@ export default function FloatingAIChatWidget() {
         <div className="relative flex h-[min(760px,90vh)] w-[min(96vw,980px)] overflow-hidden rounded-[34px] border border-white/35 bg-transparent shadow-[0_28px_120px_rgba(15,23,42,0.28)] backdrop-blur-3xl">
           <div className="hidden w-70 flex-col border-r-2 border-slate-200/20 bg-white/40 p-4 lg:flex">
             <div className="flex items-center gap-3 sm:gap-4 mb-4 w-full">
-              <div className="relative shrink-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light shadow-lg shadow-primary/20">
+              <div className="relative shrink-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20">
                 <Sparkles className="h-5 w-5 text-white" />
                 <div className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-400" />
               </div>
@@ -408,7 +408,7 @@ export default function FloatingAIChatWidget() {
               />
             </div>
 
-            <button className="mb-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-primary to-primary-light px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/20">
+            <button className="mb-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/20">
               <Sparkles className="h-4 w-4" />
               New Conversation
             </button>
@@ -551,7 +551,7 @@ export default function FloatingAIChatWidget() {
                       }`}
                     >
                       {!isUser ? (
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary-light shadow-md shadow-primary/20">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary shadow-md shadow-primary/20">
                           <Bot className="h-4 w-4 text-white" />
                         </div>
                       ) : null}
@@ -559,7 +559,7 @@ export default function FloatingAIChatWidget() {
                       <div
                         className={`max-w-[84%] rounded-[22px] px-4 py-3 shadow-md ${
                           isUser
-                            ? "rounded-br-md bg-linear-to-r from-primary to-primary-light text-white"
+                            ? "rounded-br-md bg-primary text-white"
                             : "rounded-tl-md border border-white/55 bg-white/75 text-slate-700 backdrop-blur-2xl"
                         }`}
                       >
@@ -580,7 +580,7 @@ export default function FloatingAIChatWidget() {
                       </div>
 
                       {isUser ? (
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-800/90 text-white">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white">
                           <User className="h-4 w-4" />
                         </div>
                       ) : null}
