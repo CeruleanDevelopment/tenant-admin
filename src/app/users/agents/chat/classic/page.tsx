@@ -33,12 +33,16 @@ type Message = {
 	role: "assistant" | "user";
 	text: string;
 	time: string;
+	attachments?: Attachment[];
 };
 
 type Attachment = {
 	id: string;
 	name: string;
 	kind: "document" | "image" | "media" | "file";
+	mimeType?: string;
+	previewUrl?: string;
+	sizeLabel?: string;
 };
 
 const THREADS: Thread[] = [
@@ -107,6 +111,109 @@ const INITIAL_MESSAGES: Record<string, Message[]> = {
 	],
 };
 
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".svg"];
+
+function formatFileSize(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageAttachment(attachment: Attachment): boolean {
+	const name = attachment.name.toLowerCase();
+	return Boolean(
+		attachment.previewUrl &&
+			(attachment.mimeType?.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext))),
+	);
+}
+
+function isMediaAttachment(attachment: Attachment): boolean {
+	return Boolean(
+		attachment.mimeType?.startsWith("audio/") ||
+			attachment.mimeType?.startsWith("video/") ||
+			attachment.kind === "media",
+	);
+}
+
+function AttachmentImageTile({ attachment, isUser }: { attachment: Attachment; isUser: boolean }) {
+	return (
+		<div className="overflow-hidden rounded-2xl border border-white/55 bg-white/90 shadow-sm">
+			<img
+				src={attachment.previewUrl}
+				alt={attachment.name}
+				className="h-44 w-full object-cover sm:h-52"
+			/>
+			<div className={`flex items-center justify-between gap-3 px-3 py-2 ${isUser ? "bg-linear-to-r from-primary to-primary-light text-white" : "bg-white text-slate-700"}`}>
+				<div className="min-w-0">
+					<p className="truncate text-sm font-medium">{attachment.name}</p>
+					<p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>{attachment.sizeLabel ?? "Image"}</p>
+				</div>
+				<Image className="h-4 w-4 shrink-0" />
+			</div>
+		</div>
+	);
+}
+
+function AttachmentCard({ attachment, isUser }: { attachment: Attachment; isUser: boolean }) {
+	const MediaIcon = isMediaAttachment(attachment) ? Video : FileText;
+
+	return (
+		<div className={`flex items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-white/60 bg-white/90 text-slate-700"}`}>
+			<div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : "bg-primary/10"}`}>
+				<MediaIcon className={`h-5 w-5 ${isUser ? "text-white" : "text-primary"}`} />
+			</div>
+			<div className="min-w-0 flex-1">
+				<p className="truncate text-sm font-medium">{attachment.name}</p>
+				<p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>{attachment.sizeLabel ?? (isMediaAttachment(attachment) ? "Media" : "File")}</p>
+			</div>
+		</div>
+	);
+}
+
+function AttachmentGallery({ attachments, isUser }: { attachments: Attachment[]; isUser: boolean }) {
+	const images = attachments.filter(isImageAttachment);
+	const media = attachments.filter((attachment) => !isImageAttachment(attachment) && isMediaAttachment(attachment));
+	const files = attachments.filter((attachment) => !isImageAttachment(attachment) && !isMediaAttachment(attachment));
+
+	const imageGridClass = images.length === 1 ? "grid-cols-1" : "grid-cols-2";
+	const mediaGridClass = media.length > 1 ? "sm:grid-cols-2" : "grid-cols-1";
+	const fileGridClass = files.length > 1 ? "sm:grid-cols-2" : "grid-cols-1";
+
+	return (
+		<div className="mb-2 grid gap-2">
+			{images.length ? (
+				<div className={`grid gap-2 ${imageGridClass}`}>
+					{images.map((attachment, index) => (
+						<div key={attachment.id} className={images.length > 1 && images.length % 2 === 1 && index === 0 ? "sm:col-span-2" : ""}>
+							<AttachmentImageTile attachment={attachment} isUser={isUser} />
+						</div>
+					))}
+				</div>
+			) : null}
+
+			{media.length ? (
+				<div className={`grid gap-2 ${mediaGridClass}`}>
+					{media.map((attachment, index) => (
+						<div key={attachment.id} className={media.length > 1 && media.length % 2 === 1 && index === media.length - 1 ? "sm:col-span-2" : ""}>
+							<AttachmentCard attachment={attachment} isUser={isUser} />
+						</div>
+					))}
+				</div>
+			) : null}
+
+			{files.length ? (
+				<div className={`grid gap-2 ${fileGridClass}`}>
+					{files.map((attachment, index) => (
+						<div key={attachment.id} className={files.length > 1 && files.length % 2 === 1 && index === files.length - 1 ? "sm:col-span-2" : ""}>
+							<AttachmentCard attachment={attachment} isUser={isUser} />
+						</div>
+					))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
 export default function ClassicChatPage() {
 	const [activeThreadId, setActiveThreadId] = useState(THREADS[0].id);
 	const [messages, setMessages] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
@@ -172,6 +279,7 @@ export default function ClassicChatPage() {
 			role: "user",
 			text: userText,
 			time: nowTime(),
+			attachments: attachments.length ? attachments : undefined,
 		};
 
 		setMessages((prev) => ({
@@ -210,6 +318,9 @@ export default function ClassicChatPage() {
 			id: `${kind}-${Date.now()}-${file.name}`,
 			name: file.name,
 			kind,
+			mimeType: file.type || undefined,
+			previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+			sizeLabel: formatFileSize(file.size),
 		}));
 
 		setAttachments((prev) => [...prev, ...mapped]);
@@ -218,16 +329,14 @@ export default function ClassicChatPage() {
 	};
 
 	return (
-		<div className="box-border h-svh overflow-hidden bg-[#ecf4ff] rounded-3xl p-2 sm:p-3 lg:p-2 ">
+		<div className="box-border h-svh overflow-hidden bg-transparent rounded-3xl p-2 sm:p-3 lg:p-2 ">
 			<div className="relative mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/65 shadow-[0_30px_120px_rgba(15,23,42,0.24)] backdrop-blur-3xl">
-				<div className="pointer-events-none absolute -left-20 top-12 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(14,165,233,0.32),transparent_65%)]" />
-				<div className="pointer-events-none absolute -right-16 bottom-0 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(245,158,11,0.28),transparent_62%)]" />
 
 				<div className="relative grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] overflow-hidden ">
 					<aside className="flex h-full min-h-0 flex-col overflow-hidden border-r-2 border-slate-300/70 bg-white/35 px-0">
-						<div className="mb-4 min-h-18 rounded-0 border border-white/60 bg-linear-to-r from-slate-100/90 via-cyan-50/70 to-sky-100/80 px-3 py-3">
+						<div className="mb-4 min-h-18 rounded-0 border border-white/60 bg-linear-to-r from-primary/10 via-white/70 to-primary-light/10 px-3 py-3">
 							<div className="flex h-full items-center gap-3">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-cyan-500 via-sky-500 to-amber-400 shadow-lg shadow-cyan-200">
+								<div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light shadow-lg shadow-primary/20">
                                     <Bot className="h-5 w-5 text-white" />
                                 </div>
                                 <div>
@@ -237,7 +346,7 @@ export default function ClassicChatPage() {
                             </div>
 						</div>
                         <div className=" px-4">
-                            <div className="mb-3 flex items-center gap-2 rounded-2xl border border-cyan-100/70 bg-linear-to-r from-cyan-50/80 via-white/60 to-sky-100/70 px-3 py-2 shadow-sm">
+							<div className="mb-3 flex items-center gap-2 rounded-2xl border border-primary/10 bg-linear-to-r from-primary/10 via-white/60 to-primary-light/10 px-3 py-2 shadow-sm">
                                 <Search className="h-4 w-4 text-slate-500" />
                                 <input
                                     placeholder="Search sessions"
@@ -245,7 +354,7 @@ export default function ClassicChatPage() {
                                 />
                             </div>
 
-                            <button className="mb-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-cyan-500 via-sky-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-200/70 transition hover:scale-[1.02]">
+							<button className="mb-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-primary to-primary-light px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition hover:scale-[1.02]">
                                 <Sparkles className="h-4 w-4" />
                                 New Chat
                             </button>
@@ -261,7 +370,7 @@ export default function ClassicChatPage() {
                                             onClick={() => setActiveThreadId(thread.id)}
                                             className={`w-full cursor-pointer rounded-2xl border p-3 text-left transition ${
                                                 active
-                                                    ? "border-cyan-200 bg-white/90 shadow"
+													? "border-primary/20 bg-white/90 shadow"
                                                     : "border-transparent bg-white/55 hover:bg-white/85"
                                             }`}
                                         >
@@ -276,14 +385,14 @@ export default function ClassicChatPage() {
                             </div>
 
                             <div className="mt-3 shrink-0 rounded-2xl border border-white/55 bg-white/85 p-3 shadow-sm">
-                                <p className="text-xs font-semibold text-slate-700">Creative Hint</p>
+								<p className="text-xs font-semibold text-primary">Creative Hint</p>
                                 <p className="mt-1 text-xs leading-5 text-slate-500">Use screenshots + docs together for more contextual outputs.</p>
                             </div>
                         </div>
 					</aside>
 
 					<main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-						<div className="relative min-h-18 border-b border-white/40 bg-linear-to-r from-slate-100/90 via-cyan-50/70 to-sky-100/80 px-4 py-3 sm:px-6">
+						<div className="relative min-h-18 border-b border-white/40 bg-linear-to-r from-primary/10 via-white/75 to-primary-light/10 px-4 py-3 sm:px-6">
 							<div className="flex h-full items-center justify-between gap-3">
 								<div className="flex min-w-0 items-center gap-3">
 									<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white shadow-sm">
@@ -360,7 +469,7 @@ export default function ClassicChatPage() {
 							</div>
 						</div> */}
 
-						<div className="min-h-0 flex-1 overflow-y-auto bg-linear-to-b from-[#f7fbff] via-[#f0f7ff] to-[#edf6ff] px-4 py-5 sm:px-6">
+						<div className="min-h-0 flex-1 overflow-y-auto bg-transparent px-4 py-5 sm:px-6">
 							<div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
 								{activeMessages.map((message) => {
 									const isUser = message.role === "user";
@@ -371,7 +480,7 @@ export default function ClassicChatPage() {
 											className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}
 										>
 											{!isUser ? (
-												<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-200">
+												<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary-light text-white shadow-md shadow-primary/20">
 													<Bot className="h-4 w-4" />
 												</div>
 											) : null}
@@ -379,12 +488,15 @@ export default function ClassicChatPage() {
 											<div
 												className={`max-w-[84%] rounded-[22px] px-4 py-3 shadow-md ${
 													isUser
-														? "rounded-br-md bg-linear-to-r from-cyan-500 via-sky-500 to-blue-600 text-white"
+														? "rounded-br-md bg-linear-to-r from-primary to-primary-light text-white"
 														: "rounded-tl-md border border-white/60 bg-white/85 text-slate-700"
 												}`}
 											>
+												{message.attachments && message.attachments.length ? (
+													<AttachmentGallery attachments={message.attachments} isUser={isUser} />
+												) : null}
 												<p className="text-sm leading-6 sm:text-[15px]">{message.text}</p>
-												<div className={`mt-1 text-[11px] ${isUser ? "text-cyan-50" : "text-slate-500"}`}>
+												<div className={`mt-1 text-[11px] ${isUser ? "text-primary-foreground/80" : "text-slate-500"}`}>
 													{message.time}
 												</div>
 											</div>
@@ -426,9 +538,9 @@ export default function ClassicChatPage() {
 
 							<div
 								ref={attachmentAreaRef}
-								className="relative z-20 overflow-visible rounded-[22px] border border-white/50 bg-[#d9e8ff]/80 p-2 shadow-[0_18px_46px_rgba(59,130,246,0.18)]"
+								className="relative z-20 overflow-visible rounded-[22px] border border-white/50 bg-transparent p-2 shadow-[0_18px_46px_rgba(109,74,255,0.18)]"
 							>
-								<div className="absolute inset-0 bg-linear-to-r from-cyan-100/35 via-white/20 to-amber-100/35" />
+								<div className="absolute inset-0 rounded-[22px] bg-linear-to-r from-primary/10 via-white/20 to-primary-light/10" />
 
 								{attachmentMenuOpen ? (
 									<div className="absolute bottom-full left-2 z-50 mb-2 w-52 rounded-2xl border border-white/60 bg-white/92 p-2 shadow-xl backdrop-blur-2xl">
@@ -457,9 +569,9 @@ export default function ClassicChatPage() {
 											<button
 												key={item.label}
 												onClick={item.onClick}
-												className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+												className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-primary/5 hover:text-primary"
 											>
-												<item.icon className="h-4 w-4 text-cyan-600" />
+												<item.icon className="h-4 w-4 text-primary" />
 												{item.label}
 											</button>
 										))}
@@ -469,7 +581,7 @@ export default function ClassicChatPage() {
 								<div className="relative flex items-center gap-2">
 									<button
 										onClick={() => setAttachmentMenuOpen((prev) => !prev)}
-										className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/60 transition hover:bg-white"
+										className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/60 transition hover:bg-primary/5"
 									>
 										<Paperclip className="h-4 w-4 text-slate-600" />
 									</button>
@@ -492,12 +604,12 @@ export default function ClassicChatPage() {
 										/>
 									</div>
 
-									<button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/60 transition hover:bg-white">
+									<button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/60 transition hover:bg-primary/5">
 										<Mic className="h-4 w-4 text-slate-600" />
 									</button>
 									<button
 										onClick={sendMessage}
-										className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-linear-to-br from-cyan-500 via-sky-500 to-blue-600 text-white shadow-[0_10px_24px_rgba(6,182,212,0.35)] transition hover:scale-105"
+										className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-primary text-white shadow-[0_10px_24px_rgba(109,74,255,0.35)] transition hover:scale-105"
 									>
 										<SendHorizonal className="h-4 w-4" />
 									</button>
@@ -544,3 +656,4 @@ export default function ClassicChatPage() {
 		</div>
 	);
 }
+

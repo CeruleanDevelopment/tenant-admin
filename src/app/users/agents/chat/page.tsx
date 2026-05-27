@@ -21,6 +21,7 @@ import {
   SendHorizonal,
   Sparkles,
   TerminalSquare,
+  Video,
   User,
   X,
 } from "lucide-react";
@@ -31,6 +32,7 @@ type ChatThread = {
   preview: string;
   updatedAt: string;
   unread?: number;
+  contactName?: string;
 };
 
 type ChatMessage = {
@@ -38,12 +40,16 @@ type ChatMessage = {
   role: "assistant" | "user";
   text: string;
   time: string;
+  attachments?: AttachmentItem[];
 };
 
 type AttachmentItem = {
   id: string;
   name: string;
   kind: "documents" | "photos" | "media" | "files";
+  mimeType?: string;
+  previewUrl?: string;
+  sizeLabel?: string;
 };
 
 const THREADS: ChatThread[] = [
@@ -53,18 +59,21 @@ const THREADS: ChatThread[] = [
     preview: "Summarize findings and define release goals",
     updatedAt: "2m",
     unread: 2,
+    contactName: "Ashvin Parmar",
   },
   {
     id: "ui-revamp",
     title: "UI Revamp",
     preview: "Create a floating support widget concept",
     updatedAt: "12m",
+    contactName: "Rohan Mehta",
   },
   {
     id: "ops-handbook",
     title: "Ops Handbook",
     preview: "Draft the runbook for onboarding",
     updatedAt: "1h",
+    contactName: "Nisha Patel",
   },
 ];
 
@@ -112,9 +121,117 @@ const MESSAGES_BY_THREAD: Record<string, ChatMessage[]> = {
   ],
 };
 
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".svg"];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageAttachment(attachment: AttachmentItem): boolean {
+  const name = attachment.name.toLowerCase();
+  return Boolean(
+    attachment.previewUrl &&
+      (attachment.mimeType?.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext))),
+  );
+}
+
+function isMediaAttachment(attachment: AttachmentItem): boolean {
+  return Boolean(
+    attachment.mimeType?.startsWith("audio/") ||
+      attachment.mimeType?.startsWith("video/") ||
+      attachment.kind === "media",
+  );
+}
+
+function AttachmentImageTile({ attachment, isUser }: { attachment: AttachmentItem; isUser: boolean }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/55 bg-white/80 shadow-sm">
+      <img
+        src={attachment.previewUrl}
+        alt={attachment.name}
+        className="h-44 w-full object-cover sm:h-52"
+      />
+      <div className={`flex items-center justify-between gap-3 px-3 py-2 ${isUser ? "bg-primary/95 text-white" : "bg-white text-slate-700"}`}>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{attachment.name}</p>
+          <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>
+            {attachment.sizeLabel ?? "Image"}
+          </p>
+        </div>
+        <Image className="h-4 w-4 shrink-0" />
+      </div>
+    </div>
+  );
+}
+
+function AttachmentCard({ attachment, isUser }: { attachment: AttachmentItem; isUser: boolean }) {
+  const MediaIcon = isMediaAttachment(attachment) ? Video : FileText;
+
+  return (
+    <div className={`flex items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-white/60 bg-white/90 text-slate-700"}`}>
+      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : "bg-primary/10"}`}>
+        <MediaIcon className={`h-5 w-5 ${isUser ? "text-white" : "text-primary"}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{attachment.name}</p>
+        <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>
+          {attachment.sizeLabel ?? (isMediaAttachment(attachment) ? "Media" : "File")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AttachmentGallery({ attachments, isUser }: { attachments: AttachmentItem[]; isUser: boolean }) {
+  const images = attachments.filter(isImageAttachment);
+  const media = attachments.filter((attachment) => !isImageAttachment(attachment) && isMediaAttachment(attachment));
+  const files = attachments.filter((attachment) => !isImageAttachment(attachment) && !isMediaAttachment(attachment));
+
+  const imageGridClass = images.length === 1 ? "grid-cols-1" : "grid-cols-2";
+  const mediaGridClass = media.length > 1 ? "sm:grid-cols-2" : "grid-cols-1";
+  const fileGridClass = files.length > 1 ? "sm:grid-cols-2" : "grid-cols-1";
+
+  return (
+    <div className="mb-2 grid gap-2">
+      {images.length ? (
+        <div className={`grid gap-2 ${imageGridClass}`}>
+          {images.map((attachment, index) => (
+            <div key={attachment.id} className={images.length > 1 && images.length % 2 === 1 && index === 0 ? "sm:col-span-2" : ""}>
+              <AttachmentImageTile attachment={attachment} isUser={isUser} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {media.length ? (
+        <div className={`grid gap-2 ${mediaGridClass}`}>
+          {media.map((attachment, index) => (
+            <div key={attachment.id} className={media.length > 1 && media.length % 2 === 1 && index === media.length - 1 ? "sm:col-span-2" : ""}>
+              <AttachmentCard attachment={attachment} isUser={isUser} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {files.length ? (
+        <div className={`grid gap-2 ${fileGridClass}`}>
+          {files.map((attachment, index) => (
+            <div key={attachment.id} className={files.length > 1 && files.length % 2 === 1 && index === files.length - 1 ? "sm:col-span-2" : ""}>
+              <AttachmentCard attachment={attachment} isUser={isUser} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function FloatingAIChatWidget() {
   const [open, setOpen] = useState(true);
   const [activeThreadId, setActiveThreadId] = useState(THREADS[0].id);
+  const [groupName, setGroupName] = useState("Any name");
   const [input, setInput] = useState("");
   const [showCommands, setShowCommands] = useState(true);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -129,6 +246,24 @@ export default function FloatingAIChatWidget() {
   const photosInputRef = useRef<HTMLInputElement | null>(null);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
   const filesInputRef = useRef<HTMLInputElement | null>(null);
+  const [displayedUserName, setDisplayedUserName] = useState<string | undefined>(
+    THREADS[0].contactName,
+  );
+
+  const getInitials = (name?: string) => {
+    if (!name) return "";
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  };
+
+  const activeThread = useMemo(
+    () => THREADS.find((t) => t.id === activeThreadId) ?? THREADS[0],
+    [activeThreadId],
+  );
 
   useEffect(() => {
     if (!attachmentMenuOpen) {
@@ -174,6 +309,7 @@ export default function FloatingAIChatWidget() {
         trimmed ||
         `Attached ${attachments.length} file${attachments.length > 1 ? "s" : ""}`,
       time,
+      attachments: attachments.length ? attachments : undefined,
     };
 
     setMessages((prev) => ({
@@ -218,6 +354,9 @@ export default function FloatingAIChatWidget() {
       id: `att-${Date.now()}-${file.name}`,
       name: file.name,
       kind,
+      mimeType: file.type || undefined,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+      sizeLabel: formatFileSize(file.size),
     }));
 
     setAttachments((prev) => [...prev, ...pickedItems]);
@@ -230,29 +369,46 @@ export default function FloatingAIChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="group relative flex h-16 w-16 items-center justify-center rounded-3xl bg-linear-to-br from-sky-500 via-cyan-500 to-indigo-600 shadow-[0_24px_50px_rgba(6,182,212,0.4)] transition-all duration-300 hover:scale-110 cursor-pointer"
+          className="group relative flex h-16 w-16 cursor-pointer items-center justify-center rounded-3xl bg-linear-to-br from-primary via-primary-light to-primary/90 shadow-[0_24px_50px_rgba(109,74,255,0.34)] transition-all duration-300 hover:scale-110"
         >
           <Bot className="h-7 w-7 text-white" />
           <span className="absolute -right-1 -top-1 rounded-full border-2 border-white bg-rose-500 px-1.5 text-[10px] font-semibold leading-5 text-white">
             3
           </span>
 
-          <div className="absolute inset-0 rounded-3xl bg-cyan-400/30 blur-2xl transition-all duration-300 group-hover:scale-150" />
+          <div className="absolute inset-0 rounded-3xl bg-primary/30 blur-2xl transition-all duration-300 group-hover:scale-150" />
         </button>
       )}
 
       {open && (
-        <div className="relative flex h-[min(760px,90vh)] w-[min(96vw,980px)] overflow-hidden rounded-[34px] border border-white/35 bg-[#f2f7ff]/75 shadow-[0_28px_120px_rgba(15,23,42,0.28)] backdrop-blur-3xl">
-          <div className="hidden w-70 flex-col border-r border-white/30 bg-white/40 p-4 lg:flex">
-            <div className="mb-4 flex items-center gap-2 rounded-2xl border border-white/50 bg-white/70 px-3 py-2">
+        <div className="relative flex h-[min(760px,90vh)] w-[min(96vw,980px)] overflow-hidden rounded-[34px] border border-white/35 bg-transparent shadow-[0_28px_120px_rgba(15,23,42,0.28)] backdrop-blur-3xl">
+          <div className="hidden w-70 flex-col border-r-2 border-slate-200/20 bg-white/40 p-4 lg:flex">
+            <div className="flex items-center gap-3 sm:gap-4 mb-4 w-full">
+              <div className="relative shrink-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light shadow-lg shadow-primary/20">
+                <Sparkles className="h-5 w-5 text-white" />
+                <div className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-400" />
+              </div>
+
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-slate-900 sm:text-base truncate">
+                  Agent Copilot
+                </h2>
+                <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500 sm:text-sm">
+                  <Globe className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">Web + Files enabled</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-white/80 px-3 py-2 w-full">
               <Search className="h-4 w-4 text-slate-500" />
               <input
                 placeholder="Search threads"
-                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-500"
               />
             </div>
 
-            <button className="mb-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-sky-500 to-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-200/70">
+            <button className="mb-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-primary to-primary-light px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/20">
               <Sparkles className="h-4 w-4" />
               New Conversation
             </button>
@@ -263,24 +419,28 @@ export default function FloatingAIChatWidget() {
                 return (
                   <button
                     key={thread.id}
-                    onClick={() => setActiveThreadId(thread.id)}
+                    onClick={() => {
+                      setActiveThreadId(thread.id);
+                      setDisplayedUserName(thread.contactName);
+                    }}
                     className={`w-full cursor-pointer rounded-2xl border p-3 text-left transition ${
                       active
-                        ? "border-cyan-200 bg-white shadow-md"
+                        ? "border-primary/20 bg-white shadow-md"
                         : "border-transparent bg-white/55 hover:border-white hover:bg-white/80"
                     }`}
                   >
                     <div className="mb-1 flex items-center justify-between gap-2">
-                      <h3 className="line-clamp-1 text-sm font-semibold text-slate-800">
-                        {thread.title}
-                      </h3>
+                      <div className="min-w-0">
+                        <h3 className="line-clamp-1 text-sm font-semibold text-slate-800">
+                          {thread.title}
+                        </h3>
+                        <div className="text-xs text-slate-500">{thread.contactName}</div>
+                      </div>
                       <span className="text-xs text-slate-500">{thread.updatedAt}</span>
                     </div>
-                    <p className="line-clamp-2 text-xs leading-5 text-slate-500">
-                      {thread.preview}
-                    </p>
+                    <p className="line-clamp-2 text-xs leading-5 text-slate-500">{thread.preview}</p>
                     {thread.unread ? (
-                      <span className="mt-2 inline-flex rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-700">
+                      <span className="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
                         {thread.unread} new
                       </span>
                     ) : null}
@@ -291,7 +451,7 @@ export default function FloatingAIChatWidget() {
 
             <div className="mt-4 rounded-2xl border border-white/50 bg-white/70 p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <Bell className="h-4 w-4 text-cyan-600" />
+                <Bell className="h-4 w-4 text-primary" />
                 Smart Notices
               </div>
               <p className="text-xs leading-5 text-slate-500">
@@ -303,8 +463,8 @@ export default function FloatingAIChatWidget() {
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="relative border-b border-white/30 bg-white/35 px-4 py-4 backdrop-blur-3xl sm:px-6">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-cyan-500 to-indigo-600 shadow-lg shadow-cyan-200">
+                {/* <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light shadow-lg shadow-primary/20">
                     <Sparkles className="h-5 w-5 text-white" />
                     <div className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-400" />
                   </div>
@@ -317,6 +477,18 @@ export default function FloatingAIChatWidget() {
                       <Globe className="h-3.5 w-3.5" />
                       Web + Docs + Files enabled
                     </p>
+                  </div>
+                </div> */}
+
+                <div className="hidden sm:flex items-center gap-3 mr-3">
+                  <div className="inline-flex items-center gap-3 rounded-full bg-white/5 px-3 py-1">
+                    <div className="h-9 w-9 rounded-full bg-primary text-white flex items-center justify-center text-xs font-semibold">
+                      {getInitials(displayedUserName)}
+                    </div>
+                    <div className="min-w-0 text-left">
+                      <div className="text-sm font-semibold text-slate-900">{displayedUserName ?? "—"}</div>
+                      <div className="text-[11px] text-slate-500">Selected user</div>
+                    </div>
                   </div>
                 </div>
 
@@ -337,26 +509,36 @@ export default function FloatingAIChatWidget() {
               </div>
             </div>
 
-            <div className="border-b border-white/30 bg-white/25 px-4 py-3 sm:px-6">
-              <div className="flex flex-wrap items-center gap-2">
-                {[
-                  { icon: Command, label: "/summarize" },
-                  { icon: TerminalSquare, label: "/generate-ui" },
-                  { icon: LayoutPanelTop, label: "/draft-layout" },
-                  { icon: History, label: "View history" },
-                ].map((chip) => (
-                  <button
-                    key={chip.label}
-                    className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-white/60 bg-white/65 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-white"
-                  >
-                    <chip.icon className="h-3.5 w-3.5" />
-                    {chip.label}
-                  </button>
-                ))}
+            <div className="border-b border-white/30 bg-transparent px-4 py-3 sm:px-6">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-slate-600">Suggestions</div>
+                <div className="text-xs text-slate-400">Quick commands</div>
+              </div>
+
+              <div className="mt-3 overflow-x-auto pb-2">
+                <div className="flex items-center gap-2 px-1 min-w-max">
+                  {[
+                    { icon: Command, label: "/summarize" },
+                    { icon: TerminalSquare, label: "/generate-ui" },
+                    { icon: LayoutPanelTop, label: "/draft-layout" },
+                    { icon: History, label: "View history" },
+                  ].map((chip) => (
+                    <button
+                      key={chip.label}
+                      type="button"
+                      aria-label={chip.label}
+                      onClick={() => setInput((prev) => (prev ? prev + " " + chip.label : chip.label))}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/65 px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <chip.icon className="h-4 w-4 text-slate-700" />
+                      <span className="whitespace-nowrap">{chip.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto bg-linear-to-b from-[#f8fbff] via-[#f2f8ff] to-[#edf6ff] px-4 py-5 sm:px-6">
+            <div className="flex-1 overflow-y-auto bg-transparent px-4 py-5 sm:px-6">
               <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
                 {activeMessages.map((message) => {
                   const isUser = message.role === "user";
@@ -369,7 +551,7 @@ export default function FloatingAIChatWidget() {
                       }`}
                     >
                       {!isUser ? (
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-sky-500 to-indigo-600 shadow-md shadow-cyan-200">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary-light shadow-md shadow-primary/20">
                           <Bot className="h-4 w-4 text-white" />
                         </div>
                       ) : null}
@@ -377,16 +559,20 @@ export default function FloatingAIChatWidget() {
                       <div
                         className={`max-w-[84%] rounded-[22px] px-4 py-3 shadow-md ${
                           isUser
-                            ? "rounded-br-md bg-linear-to-r from-cyan-500 to-blue-600 text-white"
+                            ? "rounded-br-md bg-linear-to-r from-primary to-primary-light text-white"
                             : "rounded-tl-md border border-white/55 bg-white/75 text-slate-700 backdrop-blur-2xl"
                         }`}
                       >
+                        {message.attachments && message.attachments.length ? (
+                          <AttachmentGallery attachments={message.attachments} isUser={isUser} />
+                        ) : null}
+
                         <p className="text-sm leading-6 sm:text-[15px]">
                           {message.text}
                         </p>
                         <div
                           className={`mt-1 text-[11px] ${
-                            isUser ? "text-cyan-50" : "text-slate-500"
+                            isUser ? "text-primary-foreground/80" : "text-slate-500"
                           }`}
                         >
                           {message.time}
@@ -404,14 +590,14 @@ export default function FloatingAIChatWidget() {
 
                 {isTyping ? (
                   <div className="flex items-end gap-2">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-sky-500 to-indigo-600 shadow-md shadow-cyan-200">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary-light shadow-md shadow-primary/20">
                       <Bot className="h-4 w-4 text-white" />
                     </div>
                     <div className="rounded-[22px] rounded-tl-md border border-white/55 bg-white/80 px-4 py-3">
                       <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-cyan-500 [animation-delay:-0.2s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-cyan-500 [animation-delay:-0.1s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-cyan-500" />
+                        <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
+                        <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
+                        <span className="h-2 w-2 animate-bounce rounded-full bg-primary" />
                       </div>
                     </div>
                   </div>
@@ -430,7 +616,7 @@ export default function FloatingAIChatWidget() {
                     ].map((action) => (
                       <button
                         key={action.label}
-                        className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-xl bg-slate-900 px-2 py-2 text-xs font-medium text-white transition hover:bg-slate-700"
+                        className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-xl bg-primary px-2 py-2 text-xs font-medium text-white transition hover:bg-primary-light"
                       >
                         <action.icon className="h-3.5 w-3.5" />
                         {action.label}
@@ -443,37 +629,42 @@ export default function FloatingAIChatWidget() {
 
             <div className="border-t border-white/35 bg-white/40 px-4 pb-4 pt-3 backdrop-blur-3xl sm:px-6 sm:pb-5">
               <button
+                type="button"
+                aria-expanded={showCommands}
                 onClick={() => setShowCommands((prev) => !prev)}
-                className="mb-2 inline-flex cursor-pointer items-center gap-1 rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-slate-600"
+                className="mb-2 inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 transition hover:text-primary"
               >
                 <MessageSquare className="h-3.5 w-3.5" />
-                Suggested prompts
-                <ChevronDown className="h-3.5 w-3.5" />
+                <span>Suggested prompts</span>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showCommands ? "rotate-180" : ""}`} />
               </button>
 
               {showCommands ? (
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {[
-                    "Design a floating support widget",
-                    "Summarize this conversation",
-                    "Generate React + Tailwind component",
-                  ].map((prompt) => (
-                    <button
-                      key={prompt}
-                      onClick={() => setInput(prompt)}
-                      className="cursor-pointer rounded-xl border border-white/60 bg-white/70 px-3 py-1.5 text-xs text-slate-700 transition hover:bg-white"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
+                <div className="mt-2 overflow-x-auto pb-2">
+                  <div className="flex items-center gap-2 px-1 min-w-max">
+                    {[
+                      "Design a floating support widget",
+                      "Summarize this conversation",
+                      "Generate React + Tailwind component",
+                    ].map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => setInput(prompt)}
+                        className="inline-flex items-center cursor-pointer gap-2 rounded-full border border-white/60 bg-white/70 px-3 py-1.5 text-xs text-slate-700 transition hover:border-primary/20 hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : null}
 
               <div
                 ref={attachmentAreaRef}
-                className="relative rounded-[28px] border border-white/40 bg-[#dce8ff]/75 p-2 shadow-[0_20px_60px_rgba(59,130,246,0.17)] backdrop-blur-3xl"
+                className="relative rounded-[28px] border border-white/40 bg-transparent p-2 shadow-[0_20px_60px_rgba(109,74,255,0.17)] backdrop-blur-3xl"
               >
-                <div className="absolute inset-0 rounded-[28px] bg-linear-to-r from-sky-100/30 via-white/20 to-blue-100/30" />
+                <div className="absolute inset-0 rounded-[28px] bg-linear-to-r from-primary/10 via-white/20 to-primary-light/10" />
                 {attachmentMenuOpen ? (
                   <div className="absolute bottom-full left-2 mb-2 w-52 rounded-2xl border border-white/60 bg-white/90 p-2 shadow-xl backdrop-blur-2xl">
                     {[
@@ -501,9 +692,9 @@ export default function FloatingAIChatWidget() {
                       <button
                         key={item.label}
                         onClick={item.onClick}
-                        className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-primary/5 hover:text-primary"
                       >
-                        <item.icon className="h-4 w-4 text-cyan-600" />
+                        <item.icon className="h-4 w-4 text-primary" />
                         {item.label}
                       </button>
                     ))}
@@ -513,11 +704,11 @@ export default function FloatingAIChatWidget() {
                 <div className="relative flex items-end gap-2">
                   <button
                     onClick={() => setAttachmentMenuOpen((prev) => !prev)}
-                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-white"
+                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5"
                   >
                     <Paperclip className="h-4 w-4 text-slate-600" />
                   </button>
-                  <div className="flex min-h-11 flex-1 items-center rounded-2xl border border-white/40 bg-[#f9fcff]/85 px-3">
+                  <div className="flex min-h-11 flex-1 items-center rounded-2xl border border-white/40 bg-transparent px-3">
                     <textarea
                       rows={1}
                       value={input}
@@ -534,12 +725,12 @@ export default function FloatingAIChatWidget() {
                       className="max-h-28 w-full resize-none bg-transparent py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 sm:text-[15px]"
                     />
                   </div>
-                  <button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-white">
+                  <button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5">
                     <Mic className="h-4 w-4 text-slate-600" />
                   </button>
                   <button
                     onClick={sendMessage}
-                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-linear-to-br from-cyan-500 to-blue-600 shadow-[0_12px_25px_rgba(6,182,212,0.35)] transition hover:scale-105"
+                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-primary shadow-[0_12px_25px_rgba(109,74,255,0.35)] transition hover:scale-105"
                   >
                     <SendHorizonal className="h-4 w-4 text-white" />
                   </button>
@@ -610,7 +801,7 @@ export default function FloatingAIChatWidget() {
               </div>
             </div>
           </div>
-          <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_10%,rgba(56,189,248,0.22),transparent_45%),radial-gradient(circle_at_90%_90%,rgba(59,130,246,0.22),transparent_45%)]" />
+          {/* page background and decorative gradients removed for a cleaner UI */}
         </div>
       )}
     </div>
