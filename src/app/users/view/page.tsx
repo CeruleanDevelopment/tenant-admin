@@ -99,7 +99,8 @@ export default function ViewUsersPage() {
       setUsers(cached)
       setLoading(false)
     } else {
-      const p = dispatch(fetchTenantUsers() as unknown as Promise<unknown>)
+      // dispatch returns the thunk's return value (a Promise); await directly instead
+      const p = dispatch(fetchTenantUsers()) as Promise<unknown>
       p.then((res: unknown) => {
         if (!mounted) return
         const payload = Array.isArray(res) ? (res as UserRow[]) : []
@@ -203,7 +204,7 @@ export default function ViewUsersPage() {
     setUpdatingById((prev) => ({ ...prev, [userId]: true }))
     setError(null)
     try {
-      const resp = await (dispatch(setTenantUserActiveStatus({ userId, isActive: next }) as unknown) as Promise<unknown>)
+      const resp = await dispatch(setTenantUserActiveStatus({ userId, isActive: next }))
       const updated = (typeof resp === "object" && resp !== null && "user" in (resp as object)) ? (resp as { user?: unknown }).user as Partial<UserRow> | null : null
 
       setUsers((prev) =>
