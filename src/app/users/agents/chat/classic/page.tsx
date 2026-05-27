@@ -336,7 +336,7 @@ export default function ClassicChatPage() {
 					<aside className="flex h-full min-h-0 flex-col overflow-hidden border-r-2 border-slate-300/70 bg-white/35 px-0">
 						<div className="mb-4 min-h-18 rounded-0 border border-white/60 bg-linear-to-r from-primary/10 via-white/70 to-primary-light/10 px-3 py-3">
 							<div className="flex h-full items-center gap-3">
-								<div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light shadow-lg shadow-primary/20">
+								<div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20">
                                     <Bot className="h-5 w-5 text-white" />
                                 </div>
                                 <div>
@@ -354,7 +354,7 @@ export default function ClassicChatPage() {
                                 />
                             </div>
 
-							<button className="mb-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-primary to-primary-light px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition hover:scale-[1.02]">
+							<button className="mb-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-primary/20 transition hover:scale-[1.02]">
                                 <Sparkles className="h-4 w-4" />
                                 New Chat
                             </button>
@@ -480,7 +480,7 @@ export default function ClassicChatPage() {
 											className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}
 										>
 											{!isUser ? (
-												<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary-light text-white shadow-md shadow-primary/20">
+												<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white shadow-md shadow-primary/20">
 													<Bot className="h-4 w-4" />
 												</div>
 											) : null}
@@ -488,7 +488,7 @@ export default function ClassicChatPage() {
 											<div
 												className={`max-w-[84%] rounded-[22px] px-4 py-3 shadow-md ${
 													isUser
-														? "rounded-br-md bg-linear-to-r from-primary to-primary-light text-white"
+														? "rounded-br-md bg-primary text-white"
 														: "rounded-tl-md border border-white/60 bg-white/85 text-slate-700"
 												}`}
 											>
@@ -502,7 +502,7 @@ export default function ClassicChatPage() {
 											</div>
 
 											{isUser ? (
-												<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-white">
+												<div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white">
 													<User className="h-4 w-4" />
 												</div>
 											) : null}
