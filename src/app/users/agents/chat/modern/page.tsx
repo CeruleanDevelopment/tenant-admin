@@ -432,7 +432,7 @@ export default function ModernChatWidgetPage() {
           <div className="border-b border-slate-200/80 bg-linear-to-r from-primary/10 via-white to-primary-light/10 px-5 py-4 dark:border-white/10 dark:from-primary/15 dark:via-transparent dark:to-primary-light/10 sm:px-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light text-white shadow-lg shadow-primary/20">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">
                   <Bot className="h-6 w-6" />
                 </div>
                 <div>
@@ -496,7 +496,7 @@ export default function ModernChatWidgetPage() {
                   return (
                     <div key={message.id} className={`flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
                       {!isUser ? (
-                        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300" : "bg-linear-to-br from-primary to-primary-light text-white"}`}>
+                        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300" : "bg-primary text-white"}`}>
                           {isSystem ? <Star className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                         </div>
                       ) : null}
@@ -504,7 +504,7 @@ export default function ModernChatWidgetPage() {
                       <div
                         className={`max-w-[86%] rounded-[26px] px-4 py-3 shadow-[0_14px_30px_rgba(15,23,42,0.08)] ${
                           isUser
-                            ? "rounded-br-md bg-linear-to-br from-primary to-primary-light text-white"
+                            ? "rounded-br-md bg-primary text-white"
                             : isSystem
                               ? "rounded-tl-md border border-dashed border-slate-300 bg-white text-slate-600 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-300"
                               : "rounded-tl-md border border-white/80 bg-white text-slate-700 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-200"

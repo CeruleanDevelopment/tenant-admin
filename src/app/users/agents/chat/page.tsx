@@ -369,7 +369,7 @@ export default function FloatingAIChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="group relative flex h-16 w-16 cursor-pointer items-center justify-center rounded-3xl bg-linear-to-br from-primary via-primary-light to-primary/90 shadow-[0_24px_50px_rgba(109,74,255,0.34)] transition-all duration-300 hover:scale-110"
+          className="group relative flex h-14 w-14 cursor-pointer items-center justify-center rounded-3xl bg-linear-to-br from-primary via-primary-light to-primary/90 shadow-[0_24px_50px_rgba(109,74,255,0.34)] transition-all duration-300 hover:scale-110"
         >
           <Bot className="h-7 w-7 text-white" />
           <span className="absolute -right-1 -top-1 rounded-full border-2 border-white bg-rose-500 px-1.5 text-[10px] font-semibold leading-5 text-white">
@@ -449,7 +449,7 @@ export default function FloatingAIChatWidget() {
               })}
             </div>
 
-            <div className="mt-4 rounded-2xl border border-white/50 bg-white/70 p-3">
+            {/* <div className="mt-4 rounded-2xl border border-white/50 bg-white/70 p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <Bell className="h-4 w-4 text-primary" />
                 Smart Notices
@@ -457,7 +457,7 @@ export default function FloatingAIChatWidget() {
               <p className="text-xs leading-5 text-slate-500">
                 Auto summarize long conversations every 10 messages.
               </p>
-            </div>
+            </div> */}
           </div>
 
           <div className="flex min-w-0 flex-1 flex-col">
@@ -704,11 +704,11 @@ export default function FloatingAIChatWidget() {
                 <div className="relative flex items-end gap-2">
                   <button
                     onClick={() => setAttachmentMenuOpen((prev) => !prev)}
-                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5"
+                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5 border"
                   >
                     <Paperclip className="h-4 w-4 text-slate-600" />
                   </button>
-                  <div className="flex min-h-11 flex-1 items-center rounded-2xl border border-white/40 bg-transparent px-3">
+                  <div className="flex min-h-11 flex-1 items-center rounded-2xl border border-gray-200 bg-transparent px-3">
                     <textarea
                       rows={1}
                       value={input}
@@ -721,11 +721,11 @@ export default function FloatingAIChatWidget() {
                           sendMessage();
                         }
                       }}
-                      placeholder="Message Agent Copilot..."
+                      placeholder="Message Your Assistant..."
                       className="max-h-28 w-full resize-none bg-transparent py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 sm:text-[15px]"
                     />
                   </div>
-                  <button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5">
+                  <button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5 border">
                     <Mic className="h-4 w-4 text-slate-600" />
                   </button>
                   <button
@@ -792,13 +792,13 @@ export default function FloatingAIChatWidget() {
                 />
               </div>
 
-              <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-slate-500">
-                {/* <span>Model: gpt-5.3-codex</span> */}
+              {/* <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-slate-500">
+                <span>Model: gpt-5.3-codex</span>
                 <span className="inline-flex items-center gap-1">
                   <Command className="h-3.5 w-3.5" />
                   Press Enter to send
                 </span>
-              </div>
+              </div> */}
             </div>
           </div>
           {/* page background and decorative gradients removed for a cleaner UI */}
