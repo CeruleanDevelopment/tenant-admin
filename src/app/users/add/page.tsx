@@ -50,17 +50,17 @@ export default function AddUserPage() {
     setSubmitting(true)
     setErrors({})
     setSuccess("")
-    const payload: Record<string, unknown> = {
+    const payload: { email: string; firstName?: string; lastName?: string; isActive?: number | boolean; role?: string } = {
       email: email.trim(),
-      firstName: firstName.trim() || null,
-      lastName: lastName.trim() || null,
+      firstName: firstName.trim() || undefined,
+      lastName: lastName.trim() || undefined,
       isActive: isActive ? 1 : 0,
     }
 
     if (role) payload.role = role
 
     try {
-      const resp = await dispatch(addTenantUser(payload as unknown as { email: string; firstName?: string | null; lastName?: string | null; isActive?: number; role?: string }))
+      const resp = await dispatch(addTenantUser(payload))
 
       let message = "User created."
       if (typeof resp === "object" && resp !== null) {

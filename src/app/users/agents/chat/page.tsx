@@ -25,6 +25,8 @@ import {
   User,
   X,
 } from "lucide-react";
+import { useDispatch } from "react-redux";
+import { AppDispatch } from "../../../../../redux/store";
 
 type ChatThread = {
   id: string;
@@ -229,6 +231,8 @@ function AttachmentGallery({ attachments, isUser }: { attachments: AttachmentIte
 }
 
 export default function FloatingAIChatWidget() {
+
+  const dispatch = useDispatch<AppDispatch>();
   const [open, setOpen] = useState(true);
   const [activeThreadId, setActiveThreadId] = useState(THREADS[0].id);
   const [groupName, setGroupName] = useState("Any name");
