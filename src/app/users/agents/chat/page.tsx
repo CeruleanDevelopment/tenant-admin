@@ -254,6 +254,12 @@ export default function FloatingAIChatWidget() {
     THREADS[0].contactName,
   );
 
+  // Header search state and refs
+  const [headerSearchOpen, setHeaderSearchOpen] = useState(false);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState("");
+  const headerSearchRef = useRef<HTMLDivElement | null>(null);
+  const headerSearchInputRef = useRef<HTMLInputElement | null>(null);
+
   const getInitials = (name?: string) => {
     if (!name) return "";
     return name
@@ -289,6 +295,30 @@ export default function FloatingAIChatWidget() {
       document.removeEventListener("touchstart", handleClickOutside);
     };
   }, [attachmentMenuOpen]);
+
+    useEffect(() => {
+      if (!headerSearchOpen) {
+        return;
+      }
+
+      const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+        const target = event.target as Node;
+        if (headerSearchRef.current && !headerSearchRef.current.contains(target)) {
+          setHeaderSearchOpen(false);
+        }
+      };
+
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("touchstart", handleClickOutside);
+
+      // autofocus the input when opened
+      setTimeout(() => headerSearchInputRef.current?.focus(), 50);
+
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+        document.removeEventListener("touchstart", handleClickOutside);
+      };
+    }, [headerSearchOpen]);
 
   const activeMessages = useMemo(
     () => messages[activeThreadId] ?? [],
@@ -497,6 +527,34 @@ export default function FloatingAIChatWidget() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button
+                      onClick={() => setHeaderSearchOpen((p) => !p)}
+                      aria-label="Search"
+                      className="hidden h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-white/55 transition hover:bg-white sm:flex"
+                    >
+                      <Search className="h-4 w-4 text-slate-600" />
+                    </button>
+
+                    {headerSearchOpen ? (
+                      <div
+                        ref={headerSearchRef}
+                        className="absolute right-0 top-full z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white/80 p-2 shadow-xl"
+                      >
+                        <input
+                          ref={headerSearchInputRef}
+                          value={headerSearchQuery}
+                          onChange={(e) => setHeaderSearchQuery(e.target.value)}
+                          placeholder="Search messages"
+                          className="w-full rounded-xl bg-transparent px-3 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-500"
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setHeaderSearchOpen(false);
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
                   <button className="hidden h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-white/55 transition hover:bg-white sm:flex">
                     <Maximize2 className="h-4 w-4 text-slate-600" />
                   </button>
