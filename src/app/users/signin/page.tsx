@@ -50,6 +50,7 @@ export default function SignInPage() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
   const errorMessage = String(searchParams.get("error") || "").trim()
+  const nextPath = String(searchParams.get("next") || "").trim()
 
   const [stage, setStage] = useState<"email" | "otp">("email")
   const [emailValue, setEmailValue] = useState(String(searchParams.get("email") || ""))
@@ -130,7 +131,8 @@ export default function SignInPage() {
 
       if (response?.token && response?.refreshToken) {
         toast.success("Signed in successfully.")
-        window.location.assign("/")
+        const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/users/agents"
+        window.location.assign(safeNext)
         return
       }
 

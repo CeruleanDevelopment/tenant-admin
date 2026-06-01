@@ -284,7 +284,7 @@ export default function LayoutStudent() {
               <Checkbox
                 checked={form.confirm}
                 onCheckedChange={(value) =>
-                  handleChange("confirm", value)
+                  handleChange("confirm", value === true)
                 }
               />
               <Label className="text-sm font-normal">

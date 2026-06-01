@@ -14,9 +14,9 @@ type SessionType = "tenant" | "user" | "guest"
 const TENANT_SESSION_COOKIE = "TENANT_ADMIN_SESSION"
 const USER_SESSION_COOKIE = "TENANT_ADMIN_USER_SESSION"
 
-const TENANT_ONLY_PREFIXES = ["/users"]
-const USER_ONLY_PREFIXES = ["/agents"]
-const PUBLIC_PATHS = ["/users/signin"]
+const TENANT_ONLY_PREFIXES = ["/tenant"]
+const USER_ONLY_PREFIXES = ["/users/agents"]
+const PUBLIC_PATHS = ["/users/signin", "/tenant/signin", "/tenant/signup", "/auth/callback", "/signin", "/signup"]
 
 const matchesPrefix = (pathname: string, prefix: string): boolean => {
   if (!prefix || prefix === "/") {
@@ -75,18 +75,18 @@ const getUnauthorizedRedirect = (pathname: string, sessionType: SessionType): st
   const isTenantOnly = TENANT_ONLY_PREFIXES.some((prefix) => matchesPrefix(pathname, prefix))
   const isUserOnly = USER_ONLY_PREFIXES.some((prefix) => matchesPrefix(pathname, prefix))
 
-  if (isTenantOnly && sessionType !== "tenant") {
-    if (sessionType === "user") {
-      return "/agents"
-    }
-    return "/tenannt/signin"
-  }
-
   if (isUserOnly && sessionType !== "user") {
     if (sessionType === "tenant") {
-      return "/users"
+      return "/tenant/agents"
     }
     return "/users/signin"
+  }
+
+  if (isTenantOnly && sessionType !== "tenant") {
+    if (sessionType === "user") {
+      return "/users/agents"
+    }
+    return "/tenant/signin"
   }
 
   return null
@@ -105,5 +105,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/users/:path*", "/agents/:path*"],
+  matcher: ["/users/:path*", "/tenant/:path*"],
 }

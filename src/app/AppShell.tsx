@@ -10,7 +10,7 @@ import { getUnauthorizedRedirectPath, resolveSessionType } from "@/utils/access-
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/"
-  const router = useRouter()
+  const router = useRouter() as { replace: (href: string) => void }
   const authUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const sessionType = React.useMemo(
@@ -18,7 +18,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     [authUser?.id, authUser?.role, tenantProfile?.id],
   )
 
-  const PUBLIC_PATHS = new Set(["/signin", "/signup", "/users/signin", "/tenannt/signin", "/tenannt/signup", "/auth/callback"]) // no header/sidebar
+  const PUBLIC_PATHS = new Set(["/signin", "/signup", "/users/signin", "/tenant/signin", "/tenant/signup", "/auth/callback"]) // no header/sidebar
   const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
 
   React.useEffect(() => {

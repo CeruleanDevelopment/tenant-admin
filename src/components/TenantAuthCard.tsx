@@ -31,8 +31,8 @@ type AuthValues = {
 }
 
 const OTP_LENGTH = 6
-const TENANT_SIGNIN_PATH = "/tenannt/signin"
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
 
 const resolveCopy = (mode: AuthMode) => {
   if (mode === "signup") {

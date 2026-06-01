@@ -8,8 +8,8 @@ import { toast } from "sonner"
 import { hydrateTenantSession } from "../../../../actions/auth"
 import type { AppDispatch } from "../../../../redux/store"
 
-const TENANT_SIGNIN_PATH = "/tenannt/signin"
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
 
 const normalizePostAuthNext = (value?: string | null): string => {
   const fallback = "/"
@@ -28,7 +28,7 @@ const normalizePostAuthNext = (value?: string | null): string => {
 }
 
 export default function AuthCallbackPage() {
-  const router = useRouter()
+  const router = useRouter() as { replace: (href: string) => void }
   const dispatch = useDispatch<AppDispatch>()
 
   useEffect(() => {

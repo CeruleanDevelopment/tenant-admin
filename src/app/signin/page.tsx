@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic"
 
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
 
 import Link from "next/link"
 import { useEffect, useState } from "react"

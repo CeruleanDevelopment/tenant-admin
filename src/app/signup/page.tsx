@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic"
 
-const TENANT_SIGNIN_PATH = "/tenannt/signin"
+const TENANT_SIGNIN_PATH = "/tenant/signin"
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
@@ -54,7 +54,7 @@ const LIMITS = {
 };
 
 export default function SignUpPage() {
-  const router = useRouter()
+  const router = useRouter() as { replace: (href: string) => void }
   const dispatch = useDispatch<AppDispatch>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoadingCountries, setIsLoadingCountries] = useState(true)

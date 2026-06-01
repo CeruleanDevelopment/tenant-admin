@@ -24,18 +24,18 @@ type RouteAccessConfig = {
 
 export const routeAccessConfig: RouteAccessConfig = {
   // Add new tenant-only pages here (future-proof)
-  tenantOnlyPrefixes: ["/users"],
+  tenantOnlyPrefixes: ["/tenant"],
 
   // Add new user-only pages here (future-proof)
-  userOnlyPrefixes: ["/users/agents", "/agents"],
+  userOnlyPrefixes: ["/users/agents"],
 
   // Shared public auth pages (no folder guard)
-  publicPaths: ["/signin", "/signup", "/tenannt/signin", "/tenannt/signup", "/auth/callback", "/users/signin"],
+  publicPaths: ["/signin", "/signup", "/tenant/signin", "/tenant/signup", "/auth/callback", "/users/signin"],
 
   defaultRedirectBySession: {
-    tenant: "/users",
+    tenant: "/tenant/agents",
     user: "/users/agents",
-    guest: "/tenannt/signin",
+    guest: "/tenant/signin",
   },
 }
 
@@ -100,7 +100,7 @@ export const getUnauthorizedRedirectPath = (
       return "/users/signin"
     }
     if (isTenantOnly) {
-      return "/tenannt/signin"
+      return "/tenant/signin"
     }
   }
 

@@ -13,8 +13,8 @@ import type { AppDispatch } from "../../redux/store"
 
 type LoginValues = Record<string, never>
 
-const TENANT_SIGNIN_PATH = "/tenannt/signin"
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
 
 export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRef<"div">) {
   const searchParams = useSearchParams()

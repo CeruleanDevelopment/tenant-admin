@@ -5,19 +5,43 @@ export interface TenantProfile {
   slug: string
   companyName: string
   status?: string
+  apiKey?: string | null
+  apiSecretHash?: string | null
+  secretKey?: string | null
   allowedOrigins?: string[]
+  phone?: string | null
+  address1?: string | null
+  address2?: string | null
+  city?: string | null
+  state?: string | null
+  postalCode?: string | null
+  countryId?: string | null
+  email?: string | null
+  googleProvider?: string | null
+  providerId?: string | null
+  isActive?: 0 | 1
   settings?: {
     defaultTopK?: number
     chunkSize?: number
     chunkOverlap?: number
   }
+  oauth?: {
+    clientId?: string
+    clientSecret?: string
+    authorizationURL?: string
+    tokenURL?: string
+    callbackURL?: string
+    scope?: string[]
+  }
   picture?: string | null
-  users?: Array<{
-    id: string
-    email: string
-    name: string
-    role: string
-  }>
+  createdAt?: string
+  updatedAt?: string
+  // users?: Array<{
+  //   id: string
+  //   email: string
+  //   name: string
+  //   role: string
+  // }>
 }
 
 export interface TenantState {

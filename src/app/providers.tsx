@@ -9,17 +9,34 @@ import type { RootState } from "../../redux/reducers"
 import type { AppDispatch } from "../../redux/store"
 import { store } from "../../redux/store"
 
-const TENANT_SIGNIN_PATH = "/tenannt/signin"
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
-const AUTH_PATHS = ["/signin", "/signup", TENANT_SIGNIN_PATH, TENANT_SIGNUP_PATH]
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
+const USER_SIGNIN_PATH = "/users/signin"
+const AUTH_PATHS = ["/signin", "/signup", TENANT_SIGNIN_PATH, TENANT_SIGNUP_PATH, USER_SIGNIN_PATH]
 const PUBLIC_PATHS = new Set([...AUTH_PATHS, "/auth/callback"])
 const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
 
+const isUserAreaPath = (pathname: string): boolean => {
+  return pathname === "/users/agents" || pathname.startsWith("/users/agents/")
+}
+
+const isTenantAreaPath = (pathname: string): boolean => {
+  if (pathname === "/tenant" || pathname.startsWith("/tenant/")) return true
+  return false
+}
+
+const getGuestSignInPath = (pathname: string): string => {
+  if (isUserAreaPath(pathname)) return USER_SIGNIN_PATH
+  if (isTenantAreaPath(pathname)) return TENANT_SIGNIN_PATH
+  return TENANT_SIGNIN_PATH
+}
+
 function AuthGuard({ children }: PropsWithChildren) {
   const pathname = usePathname()
-  const router = useRouter()
+  const router = useRouter() as { replace: (href: string) => void }
   const authenticated = useSelector((state: RootState) => state.auth.authenticated)
   const isAuthInitialized = useSelector((state: RootState) => state.auth.isAuthInitialized)
+  const tenantId = useSelector((state: RootState) => String(state.tenant?.profile?.id || "").trim())
 
   useEffect(() => {
     if (!pathname || !isAuthInitialized) {
@@ -29,14 +46,15 @@ function AuthGuard({ children }: PropsWithChildren) {
     const isPublicPath = PUBLIC_PATHS.has(pathname) || AUTH_CALLBACK_PREFIXES.some((prefix) => pathname.startsWith(prefix))
 
     if (!authenticated && !isPublicPath) {
-      router.replace(`${TENANT_SIGNIN_PATH}?next=${encodeURIComponent(pathname)}`)
+      const signInPath = getGuestSignInPath(pathname)
+      router.replace(`${signInPath}?next=${encodeURIComponent(pathname)}`)
       return
     }
 
     if (authenticated && AUTH_PATHS.includes(pathname)) {
-      router.replace("/")
+      router.replace(tenantId ? "/tenant/agents" : "/users/agents")
     }
-  }, [authenticated, isAuthInitialized, pathname, router])
+  }, [authenticated, isAuthInitialized, pathname, router, tenantId])
 
   if (!isAuthInitialized) {
     return <div className="p-6 text-sm text-muted-foreground">Checking session...</div>

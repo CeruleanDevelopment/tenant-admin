@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useDispatch } from "react-redux"
-import { AppDispatch } from "../../../../redux/store"
-import { addTenantUser } from "../../../../actions/auth"
+import { AppDispatch } from "../../../../../redux/store"
+import { addTenantUser } from "../../../../../actions/auth"
 const rolesJson = [
   { "value": "tenant-admin", "label": "Tenant Admin" },
   { "value": "editor", "label": "Editor" },

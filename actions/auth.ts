@@ -28,6 +28,7 @@ import {
   saveRefreshTokenCookie,
 } from "../utils/authCookies"
 import { tenantAdminConfig } from "../config/config"
+import { loadUserAuthTokenCookie } from "../utils/userAuthCookies"
 import { bootstrapUserAuth } from "./userAuth"
 import { signOutUser } from "./userAuth"
 import { resolveSessionType } from "@/utils/access-control"
@@ -47,12 +48,36 @@ type TenantMeResponse = {
   slug: string
   companyName: string
   status: string
+  apiKey?: string | null
+  apiSecretHash?: string | null
+  secretKey?: string | null
   allowedOrigins: string[]
+  phone?: string | null
+  address1?: string | null
+  address2?: string | null
+  city?: string | null
+  state?: string | null
+  postalCode?: string | null
+  countryId?: string | null
+  email?: string | null
+  googleProvider?: string | null
+  providerId?: string | null
+  isActive?: 0 | 1
   settings: {
     defaultTopK?: number
     chunkSize?: number
     chunkOverlap?: number
   }
+  oauth?: {
+    clientId?: string
+    clientSecret?: string
+    authorizationURL?: string
+    tokenURL?: string
+    callbackURL?: string
+    scope?: string[]
+  }
+  createdAt?: string
+  updatedAt?: string
   picture?: string | null
   // users: TenantMeUser[]
 }
@@ -110,8 +135,45 @@ type TenantRegisterResponse = {
   message: string
 }
 
-const TENANT_SIGNIN_PATH = "/tenannt/signin"
-const TENANT_SIGNUP_PATH = "/tenannt/signup"
+type TenantAgentCreateInput = {
+  name: string
+  description?: string
+  systemPrompt?: string
+  topK?: number
+  isActive?: 0 | 1
+  allowedCollections?: string[]
+}
+
+type TenantAgentAssignmentInput = {
+  agentId: string
+  aiProvider: "openai" | "openrouter"
+  aiModel: string
+  authMode: "tenant_shared_connection" | "user_personal_connection"
+  executionMode: "manual" | "scheduled"
+  executionTime?: string
+  timezone?: string
+  lookbackHours: number
+  maxEmails: number
+  managerCanRun: boolean
+  memberCanRun: boolean
+  assignedUserIds: string[]
+}
+
+type TenantGmailStatus = {
+  connected: boolean
+  provider: string
+  updatedAt?: string | null
+}
+
+type TenantAgentListItem = Record<string, unknown>
+
+type TenantAgentAssignmentView = {
+  configured?: boolean
+  [key: string]: unknown
+}
+
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
 
 export type ActiveCountry = {
   id: string
@@ -346,6 +408,58 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
   }
 }
 
+// Fetch assigned agents for the current authenticated user
+let _fetchAssignedAgentsPromise: Promise<unknown[]> | null = null
+
+export const fetchAssignedAgents = (): ThunkAction<Promise<unknown[]>, RootState, unknown, AnyAction> => {
+  return async (dispatch: any, getState: () => RootState): Promise<unknown[]> => {
+    // Deduplicate concurrent requests
+    if (_fetchAssignedAgentsPromise) return _fetchAssignedAgentsPromise
+
+    _fetchAssignedAgentsPromise = (async () => {
+      try {
+        const headers: Record<string, string> = {}
+        const userToken = String(loadUserAuthTokenCookie() || "").trim()
+        if (userToken) {
+          headers.user = userToken
+          headers.Authorization = `Bearer ${userToken}`
+        }
+        const response = await axios.get("/api/users/agents/assigned", { headers })
+        const agents = (response?.data?.agents || []) as unknown[]
+        return agents
+      } finally {
+        // allow subsequent calls after completion
+        _fetchAssignedAgentsPromise = null
+      }
+    })()
+
+    return _fetchAssignedAgentsPromise
+  }
+}
+
+export const startUserGmailIntegration = (
+  next = "/users/agents",
+  tenantId?: string,
+): ThunkAction<Promise<string>, RootState, unknown, AnyAction> => {
+  return async (dispatch: any): Promise<string> => {
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+    if (tenantId) headers["x-tenant-id"] = tenantId
+
+    const frontend = typeof window !== "undefined" ? window.location.origin : undefined
+    const body: Record<string, unknown> = { next }
+    if (frontend) body.frontend = frontend
+
+    const response = await axios.post("/integrations/gmail/start/user", body, { headers })
+    const startUrl = String(response?.data?.startUrl || "")
+    return startUrl
+  }
+}
+
 const buildTenantGoogleAuthUrl = (
   authPath: "signin" | "signup",
   options?: TenantGoogleAuthOptions,
@@ -390,6 +504,7 @@ export const bootstrapAuth =
       } else {
         dispatch(clearTenantProfile())
       }
+      void dispatch(hydrateTenantSession({ token: session.token, refreshToken: session.refreshToken }))
       dispatch(setAuthInitialized(true))
       return
     }
@@ -466,7 +581,7 @@ export const hydrateTenantSession =
           "x-tenant-token": token,
         },
       })
-      const tenantProfile = resp.data as TenantMeResponse
+      const tenantProfile = (resp.data?.tenant || resp.data) as TenantMeResponse
 
       const decoded = decodeJwtPayload(token)
       const decodedEmail = String(decoded?.email || "").trim().toLowerCase()
@@ -475,11 +590,28 @@ export const hydrateTenantSession =
       const profile: TenantProfile = {
         id: tenantProfile.id,
         slug: tenantProfile.slug,
-        companyName: (tenantProfile as any).companyName || (tenantProfile as any).name || "",
+        companyName: tenantProfile.companyName || "",
         status: tenantProfile.status,
+        apiKey: tenantProfile.apiKey || null,
+        apiSecretHash: tenantProfile.apiSecretHash || null,
+        secretKey: tenantProfile.secretKey || null,
         allowedOrigins: tenantProfile.allowedOrigins,
+        phone: tenantProfile.phone || null,
+        address1: tenantProfile.address1 || null,
+        address2: tenantProfile.address2 || null,
+        city: tenantProfile.city || null,
+        state: tenantProfile.state || null,
+        postalCode: tenantProfile.postalCode || null,
+        countryId: tenantProfile.countryId || null,
+        email: tenantProfile.email || null,
+        googleProvider: tenantProfile.googleProvider || null,
+        providerId: tenantProfile.providerId || null,
+        isActive: tenantProfile.isActive,
         settings: tenantProfile.settings,
+        oauth: tenantProfile.oauth,
         picture: tenantProfile.picture || null,
+        createdAt: tenantProfile.createdAt,
+        updatedAt: tenantProfile.updatedAt,
       }
 
       const session: AuthSession = {
@@ -607,8 +739,13 @@ export const fetchTenantUsers =
     if (_fetchTenantUsersPromise) return _fetchTenantUsersPromise
 
     const token = loadAuthTokenCookie()
+    if (!token) {
+      console.debug("fetchTenantUsers: skipping request because tenant token is not available yet")
+      return []
+    }
+
     const headers: Record<string, string> = {}
-    if (token) headers["x-tenant-token"] = token
+    headers["x-tenant-token"] = token
 
     _fetchTenantUsersPromise = (async () => {
       try {
@@ -616,6 +753,9 @@ export const fetchTenantUsers =
         const response = await axios.get("/tenant/users", { headers })
         const users = Array.isArray(response?.data?.users) ? response.data.users : []
         return users as TenantMeUser[]
+      } catch (error) {
+        console.error("fetchTenantUsers failed:", error)
+        return []
       } finally {
         // clear promise so subsequent calls after completion will re-fetch
         _fetchTenantUsersPromise = null
@@ -672,4 +812,111 @@ export const setTenantUserActiveStatus =
 
     const resp = await axios.patch(`/tenant/users/${encodeURIComponent(String(input.userId || ""))}/status`, payload, { headers })
     return resp.data
+  }
+
+export const createTenantAgent =
+  (input: TenantAgentCreateInput): ThunkAction<Promise<{ agent?: { id?: string } }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.post(
+      "/ai/agents",
+      {
+        name: input.name,
+        description: input.description || "",
+        systemPrompt: input.systemPrompt || "",
+        topK: input.topK ?? 6,
+        isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
+        allowedCollections: Array.isArray(input.allowedCollections) ? input.allowedCollections : [],
+      },
+      { headers },
+    )
+
+    return (resp?.data || {}) as { agent?: { id?: string } }
+  }
+
+export const upsertTenantAgentAssignment =
+  (input: TenantAgentAssignmentInput): ThunkAction<Promise<{ assignment?: unknown }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.post(
+      `/ai/agents/${encodeURIComponent(String(input.agentId || ""))}/assignments`,
+      {
+        aiProvider: input.aiProvider,
+        aiModel: input.aiModel,
+        authMode: input.authMode,
+        executionMode: input.executionMode,
+        executionTime: input.executionTime,
+        timezone: input.timezone,
+        lookbackHours: input.lookbackHours,
+        maxEmails: input.maxEmails,
+        managerCanRun: input.managerCanRun,
+        memberCanRun: input.memberCanRun,
+        assignedUserIds: input.assignedUserIds,
+      },
+      { headers },
+    )
+
+    return (resp?.data || {}) as { assignment?: unknown }
+  }
+
+export const fetchTenantGmailStatus =
+  (): ThunkAction<Promise<TenantGmailStatus>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.get("/integrations/gmail/status", { headers })
+    return (resp?.data?.status || { connected: false, provider: "google" }) as TenantGmailStatus
+  }
+
+export const fetchTenantAgents =
+  (): ThunkAction<Promise<TenantAgentListItem[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.get("/ai/agents", { headers })
+    const rows = Array.isArray(resp?.data?.agents) ? resp.data.agents : []
+    return rows as TenantAgentListItem[]
+  }
+
+export const fetchTenantAgentAssignment =
+  (agentId: string): ThunkAction<Promise<TenantAgentAssignmentView | null>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.get(`/ai/agents/${encodeURIComponent(String(agentId || ""))}/assignments`, { headers })
+    return (resp?.data?.assignment || null) as TenantAgentAssignmentView | null
+  }
+
+export const startTenantGmailIntegration =
+  (input?: { next?: string }): ThunkAction<Promise<{ startUrl?: string }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.post("/integrations/gmail/start", { next: input?.next || "/tenant/agents" }, { headers })
+    return (resp?.data || {}) as { startUrl?: string }
+  }
+
+export const disconnectTenantGmailIntegration =
+  (): ThunkAction<Promise<{ disconnected?: boolean }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.delete("/integrations/gmail", { headers })
+    return (resp?.data || {}) as { disconnected?: boolean }
   }

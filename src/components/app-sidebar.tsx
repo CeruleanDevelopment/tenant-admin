@@ -50,7 +50,8 @@ import {
 // nav menues
 const data: {
   user: { name: string; email: string; avatar: string }
-  navMain: NavItem[]
+  tenantNavMain: NavItem[]
+  userNavMain: NavItem[]
   navSecondary: NavItem[]
   projects: NavItem[]
 } = {
@@ -59,7 +60,7 @@ const data: {
     email: "m@example.com",
     avatar: "/products/01.png",
   },
-  navMain: [
+  tenantNavMain: [
     {
       title: "Dashboard",
       url: "/dashboard/analytics",
@@ -72,26 +73,25 @@ const data: {
     },
     {
       title: "Users",
-      url: "/users",
+      url: "/tenant/users",
       icon: (
         <CircleUserRound
         />
       ),
       items: [
-        { title: "Add User", url: "/users/add" },
-        { title: "View Users", url: "/users/view" },
+        { title: "Add User", url: "/tenant/users/add" },
+        { title: "View Users", url: "/tenant/users/view" },
       ],
     },
     {
       title: "Agents",
-      url: "/users/agents",
+      url: "/tenant/agents",
       icon: (
         <LayoutGrid
         />
       ),
       items: [
-        { title: "Agents", url: "/users/agents" },
-        { title: "Agent Chatbot", url: "/users/agents/chat" },
+        { title: "Agents", url: "/tenant/agents" },
       ],
     },
     /*
@@ -388,6 +388,20 @@ const data: {
     },
     */
   ],
+  userNavMain: [
+    {
+      title: "My Agents",
+      url: "/users/agents",
+      icon: (
+        <LayoutGrid
+        />
+      ),
+      isActive: true,
+      items: [
+        { title: "Assigned Agents", url: "/users/agents" },
+      ],
+    },
+  ],
   navSecondary: [
     {
       title: "Support",
@@ -465,8 +479,8 @@ function resolveUrl(url: string) {
   if (first === "auth") {
     // map common login/register to top-level signin/signup
     if (parts[1] === "basic") {
-      if (parts[2] === "login") return "/tenannt/signin"
-      if (parts[2] === "register") return "/tenannt/signup"
+      if (parts[2] === "login") return "/tenant/signin"
+      if (parts[2] === "register") return "/tenant/signup"
       return `/no-layout-pages${url}`
     }
     return `/no-layout-pages${url}`
@@ -483,7 +497,8 @@ function normalizeItems(items?: NavItem[]) {
   }
 }
 
-normalizeItems(data.navMain)
+normalizeItems(data.tenantNavMain)
+normalizeItems(data.userNavMain)
 normalizeItems(data.navSecondary)
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -495,10 +510,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     [reduxUser?.id, reduxUser?.role, tenantProfile?.id],
   )
 
-  const navMainItems = React.useMemo(
-    () => data.navMain.filter((item) => canAccessPath(String(item?.url ?? ""), sessionType)),
-    [sessionType],
-  )
+  const navMainItems = React.useMemo(() => {
+    const source = sessionType === "user" ? data.userNavMain : data.tenantNavMain
+    return source.filter((item) => canAccessPath(String(item?.url ?? ""), sessionType))
+  }, [sessionType])
 
   const userForNav = {
     name: reduxUser?.name || data.user.name,

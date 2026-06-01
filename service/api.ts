@@ -177,7 +177,9 @@ api.interceptors.request.use((config: any) => {
       return authHeader.slice(7).trim()
     })()
 
-  const token = stateOrCookieToken || explicitHeaderToken
+  // Prefer an explicit token provided on the request (e.g. Authorization header)
+  // so callers can override the stored tenant/user tokens when needed.
+  const token = explicitHeaderToken || stateOrCookieToken
 
   if (token) {
     if (!isAccountRequest) {
