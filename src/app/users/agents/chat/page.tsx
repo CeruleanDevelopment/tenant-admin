@@ -28,8 +28,15 @@ import {
   X,
 } from "lucide-react"
 
-import { fetchAssignedAgents, fetchTenantAgentChatHistory, sendTenantAgentChat, ensureTenantChatSession } from "../../../../../actions/auth"
-import api from "../../../../../service/api"
+import {
+  deleteTenantAgentConversationUser,
+  ensureTenantChatSession,
+  fetchAssignedAgents,
+  fetchTenantAgentChatHistory,
+  fetchUserChatSessions,
+  renameTenantAgentConversationUser,
+  sendTenantAgentChat,
+} from "../../../../../actions/auth"
 import type { AppDispatch } from "../../../../../redux/store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -81,6 +88,10 @@ type ChatAttachment = {
   file: File
   kind: "image" | "media" | "document"
 }
+
+let assignedAgentsCache: TenantAgentCard[] | null = null
+let assignedAgentsLastFetchAt = 0
+let assignedAgentsRequestPromise: Promise<Record<string, unknown>[]> | null = null
 
 const GENERIC_QUICK_PROMPTS = [
   "Summarize the latest activity in 3 bullets.",
@@ -175,16 +186,17 @@ const buildChatUrl = (agentId: string, chatId?: string): string => {
   return query ? `/users/agents/chat?${query}` : "/users/agents/chat"
 }
 
-const buildInitialMessages = (agentName?: string, connected?: boolean): ChatMessage[] => [
-  {
-    id: "welcome",
-    role: "assistant",
-    text: connected
-      ? `${agentName || "This agent"} is ready. Ask me to summarize, analyze, and suggest next actions.`
-      : "Complete required integrations, then use this workspace to chat with the agent.",
-    time: "Now",
-  },
-]
+const getInitialMessages = (): ChatMessage[] => []
+// const buildInitialMessages = (agentName?: string, connected?: boolean): ChatMessage[] => [
+//   {
+//     id: "welcome",
+//     role: "assistant",
+//     text: connected
+//       ? `${agentName || "This agent"} is ready. Ask me to summarize, analyze, and suggest next actions.`
+//       : "Complete required integrations, then use this workspace to chat with the agent.",
+//     time: "Now",
+//   },
+// ]
 
 export default function UserAgentChatPage() {
   const dispatch = useDispatch<AppDispatch>()
@@ -220,33 +232,39 @@ export default function UserAgentChatPage() {
   const mediaInputRef = useRef<HTMLInputElement | null>(null)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
+  const lastAgentsFetchAtRef = useRef(0)
+  const lastSessionsFetchAtRef = useRef(0)
+  const agentsRequestInFlightRef = useRef(false)
+  const sessionsRequestInFlightRef = useRef(false)
 
-  const loadUserSessions = useCallback(async () => {
+  const AGENTS_REFRESH_COOLDOWN_MS = 60000
+  const SESSIONS_REFRESH_COOLDOWN_MS = 30000
+
+  const loadUserSessions = useCallback(async (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastSessionsFetchAtRef.current < SESSIONS_REFRESH_COOLDOWN_MS) return
+    if (sessionsRequestInFlightRef.current) return
+
+    sessionsRequestInFlightRef.current = true
+    lastSessionsFetchAtRef.current = now
     setLoadingUserSessions(true)
     try {
-      const resp = await api.get("/api/chat/sessions")
-      const rows = Array.isArray(resp?.data?.sessions) ? resp.data.sessions : []
-      const mapped = rows
-        .map((row: Record<string, unknown>) => ({
-          id: String(row.id || "").trim(),
-          message_id: row.message_id ? String(row.message_id) : null,
-          created_at: String(row.created_at || ""),
-          title: String(row.title || "New chat"),
-        }))
-        .filter((row: UserChatSession) => Boolean(row.id))
+      const rows = (await dispatch(fetchUserChatSessions() as any)) as UserChatSession[]
+      const mapped = Array.isArray(rows) ? rows : []
       setUserSessions(mapped)
     } catch {
       setUserSessions([])
     } finally {
+      sessionsRequestInFlightRef.current = false
       setLoadingUserSessions(false)
     }
-  }, [])
+  }, [dispatch])
 
-  const loadAgents = useCallback(async () => {
-    setLoadingAgents(true)
-    try {
-      const rows = (await dispatch(fetchAssignedAgents() as any)) as Record<string, unknown>[]
-      const nextAgents = rows
+  const loadAgents = useCallback(async (force = false) => {
+    const now = Date.now()
+
+    const mapAgents = (rows: Record<string, unknown>[]): TenantAgentCard[] =>
+      rows
         .filter((row) => Boolean(row && row.id))
         .map((row) => ({
           id: String(row.id || ""),
@@ -274,6 +292,32 @@ export default function UserAgentChatPage() {
           memberCanRun: Boolean(row.memberCanRun ?? false),
           assignedUserIds: Array.isArray(row.assignedUserIds) ? row.assignedUserIds.map((value: unknown) => String(value)) : [],
         })) as TenantAgentCard[]
+
+    if (!force && assignedAgentsCache && now - assignedAgentsLastFetchAt < AGENTS_REFRESH_COOLDOWN_MS) {
+      setAgents(assignedAgentsCache)
+      return
+    }
+
+    if (!force && now - lastAgentsFetchAtRef.current < AGENTS_REFRESH_COOLDOWN_MS) return
+    if (agentsRequestInFlightRef.current) return
+
+    if (assignedAgentsRequestPromise) {
+      const rows = await assignedAgentsRequestPromise
+      const nextAgents = mapAgents(rows)
+      assignedAgentsCache = nextAgents
+      setAgents(nextAgents)
+      return
+    }
+
+    agentsRequestInFlightRef.current = true
+    lastAgentsFetchAtRef.current = now
+    setLoadingAgents(true)
+    try {
+      assignedAgentsRequestPromise = Promise.resolve(dispatch(fetchAssignedAgents() as any) as any)
+      const rows = (await assignedAgentsRequestPromise) as Record<string, unknown>[]
+      const nextAgents = mapAgents(rows)
+      assignedAgentsCache = nextAgents
+      assignedAgentsLastFetchAt = Date.now()
       setAgents(nextAgents)
     } catch (loadError: unknown) {
       const messageText =
@@ -283,6 +327,8 @@ export default function UserAgentChatPage() {
       setError(messageText)
       setAgents([])
     } finally {
+      assignedAgentsRequestPromise = null
+      agentsRequestInFlightRef.current = false
       setLoadingAgents(false)
     }
   }, [dispatch])
@@ -294,28 +340,6 @@ export default function UserAgentChatPage() {
   useEffect(() => {
     void loadUserSessions()
   }, [loadUserSessions])
-
-  useEffect(() => {
-    const handleFocus = () => {
-      void loadAgents()
-      void loadUserSessions()
-    }
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        void loadAgents()
-        void loadUserSessions()
-      }
-    }
-
-    window.addEventListener("focus", handleFocus)
-    document.addEventListener("visibilitychange", handleVisibility)
-
-    return () => {
-      window.removeEventListener("focus", handleFocus)
-      document.removeEventListener("visibilitychange", handleVisibility)
-    }
-  }, [loadAgents])
 
   useEffect(() => {
     if (initialAgentId && initialAgentId !== selectedAgentId) {
@@ -433,13 +457,13 @@ export default function UserAgentChatPage() {
           if (prev[selectedAgentId]) return prev
           return {
             ...prev,
-            [selectedAgentId]: buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+            [selectedAgentId]: getInitialMessages(),
           }
         })
       } catch {
         setMessagesByAgent((prev) => ({
           ...prev,
-          [selectedAgentId]: prev[selectedAgentId] || buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+          [selectedAgentId]: prev[selectedAgentId] || getInitialMessages(),
         }))
       } finally {
         setLoadingHistory(false)
@@ -459,7 +483,7 @@ export default function UserAgentChatPage() {
   }, [activeChatId, userSessions])
 
   const activeMessages = useMemo(
-    () => (selectedAgentId ? messagesByAgent[selectedAgentId] ?? buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)) : []),
+    () => (selectedAgentId ? messagesByAgent[selectedAgentId] ?? getInitialMessages() : []),
     [messagesByAgent, selectedAgent, selectedAgentId],
   )
 
@@ -545,15 +569,18 @@ export default function UserAgentChatPage() {
     }
 
     try {
-      await api.patch(
-        `/ai/agents/${encodeURIComponent(String(selectedAgentId))}/conversations/${encodeURIComponent(session.id)}/user`,
-        { title },
+      await dispatch(
+        renameTenantAgentConversationUser({
+          agentId: String(selectedAgentId),
+          conversationId: String(session.id),
+          title,
+        }) as any,
       )
 
       if (activeChatId === session.id) {
         setConversationTitle(title)
       }
-      await loadUserSessions()
+      await loadUserSessions(true)
       setError(null)
     } catch (err) {
       setError(
@@ -580,8 +607,11 @@ export default function UserAgentChatPage() {
     }
 
     try {
-      await api.delete(
-        `/ai/agents/${encodeURIComponent(String(selectedAgentId))}/conversations/${encodeURIComponent(session.id)}/user`,
+      await dispatch(
+        deleteTenantAgentConversationUser({
+          agentId: String(selectedAgentId),
+          conversationId: String(session.id),
+        }) as any,
       )
 
       if (activeChatId === session.id) {
@@ -593,12 +623,12 @@ export default function UserAgentChatPage() {
         router.replace(buildChatUrl(selectedAgentId, nextChatId))
         setMessagesByAgent((prev) => ({
           ...prev,
-          [selectedAgentId]: buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+          [selectedAgentId]: getInitialMessages(),
         }))
         setConversationTitle(null)
       }
 
-      await loadUserSessions()
+      await loadUserSessions(true)
       setError(null)
     } catch (err) {
       setError(
@@ -684,7 +714,7 @@ export default function UserAgentChatPage() {
       setAttachments([])
       setAttachmentMenuOpen(false)
       setIsMicActive(false)
-      void loadUserSessions()
+      void loadUserSessions(true)
     } catch (chatError: unknown) {
       const messageText =
         typeof chatError === "object" && chatError !== null && "message" in chatError
@@ -752,7 +782,7 @@ export default function UserAgentChatPage() {
         {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
 
         <div className="grid gap-4 lg:items-stretch lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="flex h-full flex-col rounded-3xl border-white/80 bg-white/90 shadow-sm">
+          <Card className="relative z-20 flex h-full flex-col rounded-3xl border-white/80 bg-white/90 shadow-sm">
             <CardHeader>
               <CardTitle>Configured Agents</CardTitle>
               <CardDescription>Choose the agent you want to talk to.</CardDescription>
@@ -829,7 +859,7 @@ export default function UserAgentChatPage() {
                   <p className="text-xs text-muted-foreground">No conversation history found yet.</p>
                 ) : null}
 
-                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-3">
                   {userSessions.map((session) => {
                     const isActiveSession = activeChatId === session.id
                     return (
@@ -870,7 +900,7 @@ export default function UserAgentChatPage() {
                             </button>
 
                             {openSessionMenuId === session.id ? (
-                              <div className="absolute right-0 top-8 z-20 w-32 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                              <div className="absolute -right-10 top-full z-50 mt-1 w-36 origin-top-right rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
                                 <button
                                   type="button"
                                   className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-slate-100"
@@ -899,7 +929,7 @@ export default function UserAgentChatPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex h-full flex-col rounded-3xl border-white/80 bg-white/90 shadow-sm overflow-hidden">
+          <Card className="flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-3xl border-white/80 bg-white/90 shadow-sm">
             <CardHeader className="border-b bg-linear-to-r from-primary/5 via-white to-sky-50/60">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -929,7 +959,7 @@ export default function UserAgentChatPage() {
               </div>
             </CardHeader>
 
-            <CardContent className="space-y-4 p-0 sm:p-2">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/30 p-0 sm:p-2">
               {/* <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border bg-muted/20 p-3">
                   <div className="flex items-center gap-2 text-sm font-medium">
@@ -979,7 +1009,7 @@ export default function UserAgentChatPage() {
                       router.replace(buildChatUrl(selectedAgentId, nextChatId))
                       setMessagesByAgent((prev) => ({
                         ...prev,
-                        [selectedAgentId]: buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+                        [selectedAgentId]: getInitialMessages(),
                       }))
                     }}
                   >
@@ -988,7 +1018,7 @@ export default function UserAgentChatPage() {
                   </Button>
                 </div> */}
 
-                <div className="min-h-[52vh] max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                   {activeMessages.map((message) => {
                     const isUser = message.role === "user"
                     const isSystem = message.role === "system"
@@ -1061,7 +1091,13 @@ export default function UserAgentChatPage() {
                   ))}
                 </div> */}
 
-                <div className="mt-4 rounded-[26px] border border-slate-200 bg-white p-3 shadow-sm">
+                {selectedAgentIsGmail && !selectedAgent?.oauthReady ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Required Google integration is not connected yet. Use the assigned agents page to complete login, then return here and refresh.
+                  </div>
+                ) : null}
+
+                <div className="rounded-[26px] border border-slate-200 p-3 bg-white shadow-sm">
                   <input
                     ref={documentsInputRef}
                     type="file"
@@ -1211,11 +1247,6 @@ export default function UserAgentChatPage() {
                   </div>
                 </div>
 
-                {selectedAgentIsGmail && !selectedAgent?.oauthReady ? (
-                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    Required Google integration is not connected yet. Use the assigned agents page to complete login, then return here and refresh.
-                  </div>
-                ) : null}
               {/* </div> */}
             </CardContent>
           </Card>

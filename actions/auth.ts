@@ -191,6 +191,13 @@ type TenantAgentChatHistoryMessage = {
   created_at: string
 }
 
+export type UserChatSessionItem = {
+  id: string
+  message_id?: string | null
+  created_at: string
+  title: string
+}
+
 const TENANT_SIGNIN_PATH = "/tenant/signin"
 const TENANT_SIGNUP_PATH = "/tenant/signup"
 
@@ -1121,3 +1128,80 @@ export const disconnectTenantGmailIntegration =
     const resp = await axios.delete("/integrations/gmail", { headers })
     return (resp?.data || {}) as { disconnected?: boolean }
   }
+export const fetchUserChatSessions = (): ThunkAction<Promise<UserChatSessionItem[]>, RootState, unknown, AnyAction> => {
+  return async (): Promise<UserChatSessionItem[]> => {
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+
+    const response = await axios.get("/api/chat/sessions", { headers })
+    const rows = Array.isArray(response?.data?.sessions) ? response.data.sessions : []
+
+    return rows
+      .map((row: Record<string, unknown>) => ({
+        id: String(row.id || "").trim(),
+        message_id: row.message_id ? String(row.message_id) : null,
+        created_at: String(row.created_at || ""),
+        title: String(row.title || "New chat"),
+      }))
+      .filter((row: UserChatSessionItem) => Boolean(row.id))
+  }
+}
+
+export const renameTenantAgentConversationUser = (
+  input: { agentId: string; conversationId: string; title: string },
+): ThunkAction<Promise<{ updated?: boolean }>, RootState, unknown, AnyAction> => {
+  return async (): Promise<{ updated?: boolean }> => {
+    const agentId = String(input.agentId || "").trim()
+    const conversationId = String(input.conversationId || "").trim()
+    const title = String(input.title || "").trim()
+
+    if (!agentId) throw new Error("Agent id is required.")
+    if (!conversationId) throw new Error("Conversation id is required.")
+    if (!title) throw new Error("Title is required.")
+
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+
+    const response = await axios.patch(
+      `/ai/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/user`,
+      { title },
+      { headers },
+    )
+
+    return (response?.data || {}) as { updated?: boolean }
+  }
+}
+
+export const deleteTenantAgentConversationUser = (
+  input: { agentId: string; conversationId: string },
+): ThunkAction<Promise<{ deleted?: boolean }>, RootState, unknown, AnyAction> => {
+  return async (): Promise<{ deleted?: boolean }> => {
+    const agentId = String(input.agentId || "").trim()
+    const conversationId = String(input.conversationId || "").trim()
+
+    if (!agentId) throw new Error("Agent id is required.")
+    if (!conversationId) throw new Error("Conversation id is required.")
+
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+
+    const response = await axios.delete(
+      `/ai/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/user`,
+      { headers },
+    )
+
+    return (response?.data || {}) as { deleted?: boolean }
+  }
+}
