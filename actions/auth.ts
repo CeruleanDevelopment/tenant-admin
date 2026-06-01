@@ -172,6 +172,25 @@ type TenantAgentAssignmentView = {
   [key: string]: unknown
 }
 
+type TenantAgentChatResponse = {
+  response?: string
+  reply?: string
+  answer?: string
+  chatId?: string
+  title?: string
+  messageId?: string
+  runId?: string
+  runStatus?: string
+  approvalId?: string
+}
+
+type TenantAgentChatHistoryMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  created_at: string
+}
+
 const TENANT_SIGNIN_PATH = "/tenant/signin"
 const TENANT_SIGNUP_PATH = "/tenant/signup"
 
@@ -408,32 +427,39 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
   }
 }
 
-// Fetch assigned agents for the current authenticated user
-let _fetchAssignedAgentsPromise: Promise<unknown[]> | null = null
-
 export const fetchAssignedAgents = (): ThunkAction<Promise<unknown[]>, RootState, unknown, AnyAction> => {
-  return async (dispatch: any, getState: () => RootState): Promise<unknown[]> => {
-    // Deduplicate concurrent requests
-    if (_fetchAssignedAgentsPromise) return _fetchAssignedAgentsPromise
+  return async (): Promise<unknown[]> => {
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+    try {
+      const response = await axios.get("/api/users/agents/assigned", { headers })
+      const agents = (response?.data?.agents || []) as unknown[]
+      return agents
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: string }).message || "")
+          : ""
 
-    _fetchAssignedAgentsPromise = (async () => {
-      try {
-        const headers: Record<string, string> = {}
-        const userToken = String(loadUserAuthTokenCookie() || "").trim()
-        if (userToken) {
-          headers.user = userToken
-          headers.Authorization = `Bearer ${userToken}`
-        }
-        const response = await axios.get("/api/users/agents/assigned", { headers })
-        const agents = (response?.data?.agents || []) as unknown[]
-        return agents
-      } finally {
-        // allow subsequent calls after completion
-        _fetchAssignedAgentsPromise = null
+      const responseMessage =
+        typeof error === "object" && error !== null && "response" in error
+          ? String(
+              (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.message ||
+                (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.error ||
+                "",
+            ).trim()
+          : ""
+
+      if (!responseMessage) {
+        throw new Error(message || `Network error while loading assigned agents from ${tenantAdminConfig.apiUrl}. Ensure backend is running and reachable.`)
       }
-    })()
 
-    return _fetchAssignedAgentsPromise
+      throw new Error(responseMessage || message || "Failed to load assigned agents.")
+    }
   }
 }
 
@@ -457,6 +483,165 @@ export const startUserGmailIntegration = (
     const response = await axios.post("/integrations/gmail/start/user", body, { headers })
     const startUrl = String(response?.data?.startUrl || "")
     return startUrl
+  }
+}
+
+export const sendTenantAgentChat = (
+  input: { agentId: string; message: string; chatId?: string; topK?: number; collections?: string[]; workflowType?: string },
+): ThunkAction<Promise<TenantAgentChatResponse>, RootState, unknown, AnyAction> => {
+  return async (): Promise<TenantAgentChatResponse> => {
+    const agentId = String(input.agentId || "").trim()
+    if (!agentId) {
+      throw new Error("Agent id is required.")
+    }
+
+    const payload: Record<string, unknown> = {
+      message: String(input.message || "").trim(),
+    }
+
+    if (input.chatId) payload.chatId = String(input.chatId)
+
+    if (typeof input.topK === "number") payload.topK = input.topK
+    if (Array.isArray(input.collections)) payload.collections = input.collections
+    if (input.workflowType) payload.workflowType = input.workflowType
+
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+
+    try {
+      const response = await axios.post(`/ai/agents/${encodeURIComponent(agentId)}/chat`, payload, { headers })
+      const raw = (response?.data || {}) as Record<string, unknown>
+      const reply = raw.reply && typeof raw.reply === "object" ? (raw.reply as Record<string, unknown>) : null
+      const answer = String(raw.response || reply?.answer || reply?.reply || raw.answer || "").trim()
+
+      return {
+        ...raw,
+        chatId: String(raw.chatId || "").trim() || undefined,
+        reply: typeof raw.reply === "string" ? raw.reply : answer,
+        answer,
+        response: String(raw.response || answer || "").trim(),
+      } as TenantAgentChatResponse
+    } catch (error: unknown) {
+      const normalizeOAuthError = (value: string): string => {
+        const text = String(value || "").trim()
+        const lower = text.toLowerCase()
+        if (
+          lower.includes("no refresh token") ||
+          lower.includes("refresh token is set") ||
+          lower.includes("missing_refresh_token") ||
+          lower.includes("no access token")
+        ) {
+          return "Google OAuth refresh token missing or expired. Please reconnect Google (tenant or user) from the Assigned Agents page and refresh this page."
+        }
+        return text
+      }
+
+      const fallbackMessage = "I could not reach the agent chat endpoint. Please try again."
+      const payload =
+        typeof error === "object" && error !== null && "response" in error
+          ? (error as { response?: { data?: unknown } }).response?.data
+          : undefined
+
+      const payloadMessage =
+        typeof payload === "string"
+          ? payload.trim()
+          : payload && typeof payload === "object"
+            ? String(
+                (payload as { message?: string; error?: string }).message ||
+                  (payload as { message?: string; error?: string }).error ||
+                  "",
+              ).trim()
+            : ""
+
+      const apiMessage =
+        typeof error === "object" && error !== null && "response" in error
+          ? String(
+              (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.message ||
+                (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.error ||
+                "",
+            ).trim()
+          : ""
+
+      const rawMessage =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: string }).message || "").trim()
+          : ""
+
+      const pickedMessage = payloadMessage || apiMessage || rawMessage || fallbackMessage
+      const lowerPicked = pickedMessage.toLowerCase()
+      const networkMessage =
+        !payloadMessage && (lowerPicked === "network error" || lowerPicked.includes("err_network") || lowerPicked.includes("econn"))
+          ? `Network error: could not reach API at ${tenantAdminConfig.apiUrl}/ai/agents/${encodeURIComponent(agentId)}/chat. Ensure agent-api is running and reachable.`
+          : pickedMessage
+
+      throw new Error(normalizeOAuthError(networkMessage))
+    }
+  }
+}
+
+export const fetchTenantAgentChatHistory = (
+  input: { agentId: string; chatId: string },
+): ThunkAction<Promise<{ chatId: string; history: TenantAgentChatHistoryMessage[] }>, RootState, unknown, AnyAction> => {
+  return async (): Promise<{ chatId: string; history: TenantAgentChatHistoryMessage[] }> => {
+    const agentId = String(input.agentId || "").trim()
+    const chatId = String(input.chatId || "").trim()
+
+    if (!agentId || !chatId) {
+      return { chatId, history: [] }
+    }
+
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+
+    const response = await axios.get(
+      `/ai/agents/${encodeURIComponent(agentId)}/chat/history/${encodeURIComponent(chatId)}`,
+      { headers },
+    )
+
+    const payload = (response?.data || {}) as Record<string, unknown>
+    const historyRaw = Array.isArray(payload.history) ? payload.history : []
+
+    return {
+      chatId: String(payload.chatId || chatId),
+      history: historyRaw
+        .map((row) => ({
+          id: String((row as Record<string, unknown>).id || ""),
+          role: (String((row as Record<string, unknown>).role || "assistant") === "user" ? "user" : "assistant") as "user" | "assistant",
+          content: String((row as Record<string, unknown>).content || ""),
+          created_at: String((row as Record<string, unknown>).created_at || ""),
+        }))
+        .filter((row) => Boolean(row.id || row.content)),
+    }
+  }
+}
+
+export const ensureTenantChatSession = (
+  input: { agentId: string; chatId?: string },
+): ThunkAction<Promise<{ chatId?: string }>, RootState, unknown, AnyAction> => {
+  return async (): Promise<{ chatId?: string }> => {
+    const agentId = String(input.agentId || "").trim()
+    if (!agentId) throw new Error("Agent id is required.")
+
+    const headers: Record<string, string> = {}
+    const userToken = String(loadUserAuthTokenCookie() || "").trim()
+    if (userToken) {
+      headers.user = userToken
+      headers.Authorization = `Bearer ${userToken}`
+    }
+
+    const payload: Record<string, unknown> = {}
+    if (input.chatId) payload.chatId = String(input.chatId)
+
+    const response = await axios.post(`/ai/agents/${encodeURIComponent(agentId)}/chat/session`, payload, { headers })
+    return response?.data || {}
   }
 }
 
@@ -874,6 +1059,22 @@ export const fetchTenantGmailStatus =
 
     const resp = await axios.get("/integrations/gmail/status", { headers })
     return (resp?.data?.status || { connected: false, provider: "google" }) as TenantGmailStatus
+  }
+
+export const fetchUserGmailMessages =
+  (input?: { max?: number }): ThunkAction<Promise<any[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const max = Math.max(1, Math.min(100, Number(input?.max || 20)))
+    const resp = await axios.get(`/integrations/gmail/messages/user?max=${encodeURIComponent(String(max))}`)
+    return Array.isArray(resp?.data?.messages) ? resp.data.messages : []
+  }
+
+export const fetchTenantGmailMessages =
+  (input?: { max?: number }): ThunkAction<Promise<any[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const max = Math.max(1, Math.min(100, Number(input?.max || 20)))
+    const resp = await axios.get(`/integrations/gmail/messages/tenant?max=${encodeURIComponent(String(max))}`)
+    return Array.isArray(resp?.data?.messages) ? resp.data.messages : []
   }
 
 export const fetchTenantAgents =

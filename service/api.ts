@@ -28,6 +28,7 @@ import { clearTenantProfile, setTenantProfile } from "../redux/reducers/Tenant"
 const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
+  timeout: 30000,
 })
 
 const defaultSuccessMessage = (method?: string): string => {
@@ -38,15 +39,61 @@ const defaultSuccessMessage = (method?: string): string => {
   return "Request completed successfully."
 }
 
+const normalizeOAuthErrorMessage = (value: string): string => {
+  const text = String(value || "").trim()
+  const lower = text.toLowerCase()
+  if (!lower) return ""
+
+  if (
+    lower.includes("no refresh token") ||
+    lower.includes("refresh token is set") ||
+    lower.includes("missing_refresh_token") ||
+    lower.includes("no access token")
+  ) {
+    return "Google OAuth refresh token missing or expired. Please reconnect Google (tenant or user) from the Assigned Agents page and refresh this page."
+  }
+
+  return text
+}
+
 const extractApiMessage = (error: any): string => {
+  if (axios.isAxiosError(error) && !error.response) {
+    const code = String(error.code || "").trim()
+    const baseTarget = String(API_URL || "").trim() || "http://localhost:4054"
+    const endpoint = String(error?.config?.url || "").trim()
+    const target = endpoint ? `${baseTarget}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}` : baseTarget
+
+    if (typeof window !== "undefined" && window.location.protocol === "https:" && baseTarget.startsWith("http://")) {
+      return `Network error: browser blocked mixed-content request to ${target}. Use an HTTPS API URL or run the app on HTTP locally.`
+    }
+
+    if (code === "ECONNABORTED") {
+      return `Request timed out while contacting ${target}. Ensure the API service is running and reachable.`
+    }
+
+    return `Network error: could not reach API at ${target}. Ensure agent-api is running and NEXT_PUBLIC_API_URL is correct.`
+  }
+
   const payload = error?.response?.data
+
+  const normalize = (value: unknown): string => normalizeOAuthErrorMessage(String(value || ""))
+
+  if (typeof payload === "string" && payload.trim()) {
+    return normalize(payload)
+  }
+
   if (payload && typeof payload === "object") {
-    if (typeof payload.message === "string" && payload.message.trim()) return payload.message
-    if (typeof payload.error === "string" && payload.error.trim()) return payload.error
+    if (typeof payload.message === "string" && payload.message.trim()) return normalize(payload.message)
+    if (typeof payload.error === "string" && payload.error.trim()) return normalize(payload.error)
+
+    if (payload.error && typeof payload.error === "object") {
+      if (typeof payload.error.message === "string" && payload.error.message.trim()) return normalize(payload.error.message)
+      if (typeof payload.error.error === "string" && payload.error.error.trim()) return normalize(payload.error.error)
+    }
   }
 
   if (typeof error?.message === "string" && error.message.trim()) {
-    return error.message
+    return normalize(error.message)
   }
 
   return "Request failed. Please try again."

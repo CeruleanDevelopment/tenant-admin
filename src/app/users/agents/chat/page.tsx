@@ -1,871 +1,1226 @@
-"use client";
+"use client"
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useDispatch } from "react-redux"
 import {
-  Bell,
+  ArrowLeft,
   Bot,
-  ChevronDown,
-  Command,
+  CheckCircle2,
+  Clock3,
   FileText,
   FolderClosed,
   Globe,
-  History,
   Image,
-  LayoutPanelTop,
-  Maximize2,
-  MessageSquare,
+  ImageIcon,
+  Mail,
   Mic,
-  MoreHorizontal,
+  MoreVertical,
+  MessageSquare,
   Paperclip,
-  Search,
+  Pencil,
+  RefreshCw,
   SendHorizonal,
+  ShieldCheck,
   Sparkles,
-  TerminalSquare,
-  Video,
-  User,
+  Trash2,
+  Wand2,
   X,
-} from "lucide-react";
-import { useDispatch } from "react-redux";
-import { AppDispatch } from "../../../../../redux/store";
+} from "lucide-react"
 
-type ChatThread = {
-  id: string;
-  title: string;
-  preview: string;
-  updatedAt: string;
-  unread?: number;
-  contactName?: string;
-};
+import { fetchAssignedAgents, fetchTenantAgentChatHistory, sendTenantAgentChat, ensureTenantChatSession } from "../../../../../actions/auth"
+import api from "../../../../../service/api"
+import type { AppDispatch } from "../../../../../redux/store"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+
+type TenantAgentCard = {
+  id: string
+  name: string
+  description: string
+  type?: string
+  workflowType?: string
+  status?: string
+  isActive: 0 | 1
+  oauthReady?: boolean
+  requiresGoogleLogin?: boolean
+  canRun?: boolean
+  authMode: "tenant_shared_connection" | "user_personal_connection"
+  executionMode: "manual" | "scheduled"
+  executionTime?: string | null
+  timezone?: string
+  aiProvider: "openai" | "openrouter"
+  aiModel: string
+  lookbackHours: number
+  maxEmails: number
+  managerCanRun: boolean
+  memberCanRun: boolean
+  assignedUserIds: string[]
+}
 
 type ChatMessage = {
-  id: string;
-  role: "assistant" | "user";
-  text: string;
-  time: string;
-  attachments?: AttachmentItem[];
-};
+  id: string
+  role: "assistant" | "user" | "system"
+  text: string
+  time: string
+  meta?: string
+  source?: "ai" | "server"
+  persistedId?: string
+}
 
-type AttachmentItem = {
-  id: string;
-  name: string;
-  kind: "documents" | "photos" | "media" | "files";
-  mimeType?: string;
-  previewUrl?: string;
-  sizeLabel?: string;
-};
+type UserChatSession = {
+  id: string
+  message_id?: string | null
+  created_at: string
+  title: string
+}
 
-const THREADS: ChatThread[] = [
+type ChatAttachment = {
+  id: string
+  file: File
+  kind: "image" | "media" | "document"
+}
+
+const GENERIC_QUICK_PROMPTS = [
+  "Summarize the latest activity in 3 bullets.",
+  "What should I prioritize next?",
+  "Draft a concise response for the top priority.",
+  "List blockers and suggested next actions.",
+]
+
+const GMAIL_QUICK_PROMPTS = [
+  "Summarize the latest Gmail activity in 3 bullets.",
+  "Find the most important unanswered emails and suggest next actions.",
+  "Draft a short reply to the newest thread.",
+  "List any urgent emails from VIP senders.",
+]
+
+const isGmailAnalysisType = (value?: string): boolean => String(value || "").toLowerCase() === "gmail_analysis"
+
+
+const normalizeOAuthErrorMessage = (value: string): string => {
+  const text = String(value || "").trim()
+  const lower = text.toLowerCase()
+  if (!lower) return ""
+
+  if (
+    lower.includes("no refresh token") ||
+    lower.includes("refresh token is set") ||
+    lower.includes("missing_refresh_token") ||
+    lower.includes("no access token")
+  ) {
+    return "Google OAuth refresh token missing or expired. Please reconnect Google (tenant or user) from the Assigned Agents page and refresh this page."
+  }
+
+  return text
+}
+
+const sanitizeAssistantText = (value: string): string => {
+  const text = String(value || "")
+  return text
+    .replace(/`?#sym:[A-Za-z0-9_.:-]+`?/g, "")
+    .replace(/`?#file:[A-Za-z0-9_./\\:-]+`?/g, "")
+    .replace(/`?sym:[A-Za-z0-9_.:-]+`?/g, "")
+    .replace(/`?file:[A-Za-z0-9_./\\:-]+`?/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+const nowTime = (): string => {
+  const now = new Date()
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+}
+
+const formatTimeFromIso = (value?: string): string => {
+  if (!value) return nowTime()
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return nowTime()
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+}
+
+const formatSessionDate = (value?: string): string => {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return `${date.toLocaleDateString()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+}
+
+const formatFileSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const inferAttachmentKind = (file: File): ChatAttachment["kind"] => {
+  const type = String(file.type || "").toLowerCase()
+  if (type.startsWith("image/")) return "image"
+  if (type.startsWith("audio/") || type.startsWith("video/")) return "media"
+  return "document"
+}
+
+const createChatId = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  return `chat-${Date.now()}`
+}
+
+const buildChatUrl = (agentId: string, chatId?: string): string => {
+  const params = new URLSearchParams()
+  if (agentId) params.set("agentId", agentId)
+  if (chatId) params.set("chatId", chatId)
+  const query = params.toString()
+  return query ? `/users/agents/chat?${query}` : "/users/agents/chat"
+}
+
+const buildInitialMessages = (agentName?: string, connected?: boolean): ChatMessage[] => [
   {
-    id: "product-strategy",
-    title: "Product Strategy Sprint",
-    preview: "Summarize findings and define release goals",
-    updatedAt: "2m",
-    unread: 2,
-    contactName: "Ashvin Parmar",
+    id: "welcome",
+    role: "assistant",
+    text: connected
+      ? `${agentName || "This agent"} is ready. Ask me to summarize, analyze, and suggest next actions.`
+      : "Complete required integrations, then use this workspace to chat with the agent.",
+    time: "Now",
   },
-  {
-    id: "ui-revamp",
-    title: "UI Revamp",
-    preview: "Create a floating support widget concept",
-    updatedAt: "12m",
-    contactName: "Rohan Mehta",
-  },
-  {
-    id: "ops-handbook",
-    title: "Ops Handbook",
-    preview: "Draft the runbook for onboarding",
-    updatedAt: "1h",
-    contactName: "Nisha Patel",
-  },
-];
+]
 
-const MESSAGES_BY_THREAD: Record<string, ChatMessage[]> = {
-  "product-strategy": [
-    {
-      id: "m-1",
-      role: "assistant",
-      time: "10:20",
-      text:
-        "I can run this as a full copilot-style chat flow: thread history, slash commands, files, voice, and follow-up suggestions in one floating panel.",
-    },
-    {
-      id: "m-2",
-      role: "user",
-      time: "10:21",
-      text:
-        "Great. Build an attractive floating chatbot UI with all core chat-app features and responsive behavior.",
-    },
-    {
-      id: "m-3",
-      role: "assistant",
-      time: "10:22",
-      text:
-        "Done. I am preparing a bold glass-and-neon interface with compact thread navigation, smart composer controls, and quick command chips.",
-    },
-  ],
-  "ui-revamp": [
-    {
-      id: "m-4",
-      role: "assistant",
-      time: "09:50",
-      text:
-        "For UI revamp: use layered cards, dynamic gradients, and a visible state hierarchy between assistant, user, and system actions.",
-    },
-  ],
-  "ops-handbook": [
-    {
-      id: "m-5",
-      role: "assistant",
-      time: "08:15",
-      text:
-        "Need me to generate a deployment checklist and incident runbook in this thread?",
-    },
-  ],
-};
+export default function UserAgentChatPage() {
+  const dispatch = useDispatch<AppDispatch>()
+  const router = useRouter() as { push: (href: string) => void; replace: (href: string) => void }
+  const searchParams = useSearchParams()
+  const initialAgentId = searchParams.get("agentId")?.trim() || ""
+  const initialChatId = searchParams.get("chatId")?.trim() || ""
 
-const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif", ".svg"];
+  const [agents, setAgents] = useState<TenantAgentCard[]>([])
+  const [loadingAgents, setLoadingAgents] = useState(false)
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+  const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId)
+  const [chatIdByAgent, setChatIdByAgent] = useState<Record<string, string>>({})
+  const [messagesByAgent, setMessagesByAgent] = useState<Record<string, ChatMessage[]>>({})
+  const [input, setInput] = useState("")
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false)
+  const [isMicActive, setIsMicActive] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [sessionPersisted, setSessionPersisted] = useState(false)
+  const [userSessions, setUserSessions] = useState<UserChatSession[]>([])
+  const [loadingUserSessions, setLoadingUserSessions] = useState(false)
+  // auto-analysis disabled; no auto-run on page load
+  const [conversationTitle, setConversationTitle] = useState<string | null>(null)
+  const [openSessionMenuId, setOpenSessionMenuId] = useState<string | null>(null)
+  const loadedHistoryRef = useRef<Set<string>>(new Set())
+  const activeChatIdRef = useRef("")
+  const loadingHistoryFlagRef = useRef(false)
+  const documentsInputRef = useRef<HTMLInputElement | null>(null)
+  const photosInputRef = useRef<HTMLInputElement | null>(null)
+  const mediaInputRef = useRef<HTMLInputElement | null>(null)
+  const filesInputRef = useRef<HTMLInputElement | null>(null)
+  const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
 
-function isImageAttachment(attachment: AttachmentItem): boolean {
-  const name = attachment.name.toLowerCase();
-  return Boolean(
-    attachment.previewUrl &&
-      (attachment.mimeType?.startsWith("image/") || IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext))),
-  );
-}
+  const loadUserSessions = useCallback(async () => {
+    setLoadingUserSessions(true)
+    try {
+      const resp = await api.get("/api/chat/sessions")
+      const rows = Array.isArray(resp?.data?.sessions) ? resp.data.sessions : []
+      const mapped = rows
+        .map((row: Record<string, unknown>) => ({
+          id: String(row.id || "").trim(),
+          message_id: row.message_id ? String(row.message_id) : null,
+          created_at: String(row.created_at || ""),
+          title: String(row.title || "New chat"),
+        }))
+        .filter((row: UserChatSession) => Boolean(row.id))
+      setUserSessions(mapped)
+    } catch {
+      setUserSessions([])
+    } finally {
+      setLoadingUserSessions(false)
+    }
+  }, [])
 
-function isMediaAttachment(attachment: AttachmentItem): boolean {
-  return Boolean(
-    attachment.mimeType?.startsWith("audio/") ||
-      attachment.mimeType?.startsWith("video/") ||
-      attachment.kind === "media",
-  );
-}
-
-function AttachmentImageTile({ attachment, isUser }: { attachment: AttachmentItem; isUser: boolean }) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-white/55 bg-white/80 shadow-sm">
-      <img
-        src={attachment.previewUrl}
-        alt={attachment.name}
-        className="h-44 w-full object-cover sm:h-52"
-      />
-      <div className={`flex items-center justify-between gap-3 px-3 py-2 ${isUser ? "bg-primary/95 text-white" : "bg-white text-slate-700"}`}>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{attachment.name}</p>
-          <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>
-            {attachment.sizeLabel ?? "Image"}
-          </p>
-        </div>
-        <Image className="h-4 w-4 shrink-0" />
-      </div>
-    </div>
-  );
-}
-
-function AttachmentCard({ attachment, isUser }: { attachment: AttachmentItem; isUser: boolean }) {
-  const MediaIcon = isMediaAttachment(attachment) ? Video : FileText;
-
-  return (
-    <div className={`flex items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-white/60 bg-white/90 text-slate-700"}`}>
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : "bg-primary/10"}`}>
-        <MediaIcon className={`h-5 w-5 ${isUser ? "text-white" : "text-primary"}`} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{attachment.name}</p>
-        <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>
-          {attachment.sizeLabel ?? (isMediaAttachment(attachment) ? "Media" : "File")}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function AttachmentGallery({ attachments, isUser }: { attachments: AttachmentItem[]; isUser: boolean }) {
-  const images = attachments.filter(isImageAttachment);
-  const media = attachments.filter((attachment) => !isImageAttachment(attachment) && isMediaAttachment(attachment));
-  const files = attachments.filter((attachment) => !isImageAttachment(attachment) && !isMediaAttachment(attachment));
-
-  const imageGridClass = images.length === 1 ? "grid-cols-1" : "grid-cols-2";
-  const mediaGridClass = media.length > 1 ? "sm:grid-cols-2" : "grid-cols-1";
-  const fileGridClass = files.length > 1 ? "sm:grid-cols-2" : "grid-cols-1";
-
-  return (
-    <div className="mb-2 grid gap-2">
-      {images.length ? (
-        <div className={`grid gap-2 ${imageGridClass}`}>
-          {images.map((attachment, index) => (
-            <div key={attachment.id} className={images.length > 1 && images.length % 2 === 1 && index === 0 ? "sm:col-span-2" : ""}>
-              <AttachmentImageTile attachment={attachment} isUser={isUser} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {media.length ? (
-        <div className={`grid gap-2 ${mediaGridClass}`}>
-          {media.map((attachment, index) => (
-            <div key={attachment.id} className={media.length > 1 && media.length % 2 === 1 && index === media.length - 1 ? "sm:col-span-2" : ""}>
-              <AttachmentCard attachment={attachment} isUser={isUser} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {files.length ? (
-        <div className={`grid gap-2 ${fileGridClass}`}>
-          {files.map((attachment, index) => (
-            <div key={attachment.id} className={files.length > 1 && files.length % 2 === 1 && index === files.length - 1 ? "sm:col-span-2" : ""}>
-              <AttachmentCard attachment={attachment} isUser={isUser} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export default function FloatingAIChatWidget() {
-
-  const dispatch = useDispatch<AppDispatch>();
-  const [open, setOpen] = useState(true);
-  const [activeThreadId, setActiveThreadId] = useState(THREADS[0].id);
-  const [groupName, setGroupName] = useState("Any name");
-  const [input, setInput] = useState("");
-  const [showCommands, setShowCommands] = useState(true);
-  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
-  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
-  const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(
-    MESSAGES_BY_THREAD,
-  );
-  const typingTimeoutRef = useRef<number | null>(null);
-  const attachmentAreaRef = useRef<HTMLDivElement | null>(null);
-  const documentsInputRef = useRef<HTMLInputElement | null>(null);
-  const photosInputRef = useRef<HTMLInputElement | null>(null);
-  const mediaInputRef = useRef<HTMLInputElement | null>(null);
-  const filesInputRef = useRef<HTMLInputElement | null>(null);
-  const [displayedUserName, setDisplayedUserName] = useState<string | undefined>(
-    THREADS[0].contactName,
-  );
-
-  // Header search state and refs
-  const [headerSearchOpen, setHeaderSearchOpen] = useState(false);
-  const [headerSearchQuery, setHeaderSearchQuery] = useState("");
-  const headerSearchRef = useRef<HTMLDivElement | null>(null);
-  const headerSearchInputRef = useRef<HTMLInputElement | null>(null);
-
-  const getInitials = (name?: string) => {
-    if (!name) return "";
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase();
-  };
-
-  const activeThread = useMemo(
-    () => THREADS.find((t) => t.id === activeThreadId) ?? THREADS[0],
-    [activeThreadId],
-  );
+  const loadAgents = useCallback(async () => {
+    setLoadingAgents(true)
+    try {
+      const rows = (await dispatch(fetchAssignedAgents() as any)) as Record<string, unknown>[]
+      const nextAgents = rows
+        .filter((row) => Boolean(row && row.id))
+        .map((row) => ({
+          id: String(row.id || ""),
+          name: String(row.name || "AI Agent"),
+          description: String(row.description || ""),
+          type: String(row.type || row.workflowType || "direct"),
+          workflowType: String(row.workflowType || row.type || "direct"),
+          status: String(row.status || "active"),
+          isActive: Number(row.isActive ?? 1) === 0 ? 0 : 1,
+          oauthReady: Boolean(row.oauthReady ?? false),
+          requiresGoogleLogin: Boolean(row.requiresGoogleLogin ?? false),
+          canRun: Boolean(row.canRun ?? true),
+          authMode:
+            row.authMode === "user_personal_connection"
+              ? "user_personal_connection"
+              : "tenant_shared_connection",
+          executionMode: String(row.executionMode || "manual") === "scheduled" ? "scheduled" : "manual",
+          executionTime: row.executionTime ? String(row.executionTime) : null,
+          timezone: String(row.timezone || "UTC"),
+          aiProvider: row.aiProvider === "openrouter" ? "openrouter" : "openai",
+          aiModel: String(row.aiModel || "gpt-4.1-mini"),
+          lookbackHours: Number(row.lookbackHours || 24),
+          maxEmails: Number(row.maxEmails || 75),
+          managerCanRun: Boolean(row.managerCanRun ?? true),
+          memberCanRun: Boolean(row.memberCanRun ?? false),
+          assignedUserIds: Array.isArray(row.assignedUserIds) ? row.assignedUserIds.map((value: unknown) => String(value)) : [],
+        })) as TenantAgentCard[]
+      setAgents(nextAgents)
+    } catch (loadError: unknown) {
+      const messageText =
+        typeof loadError === "object" && loadError !== null && "message" in loadError
+          ? String((loadError as { message?: string }).message || "Failed to load assigned agents.")
+          : "Failed to load assigned agents."
+      setError(messageText)
+      setAgents([])
+    } finally {
+      setLoadingAgents(false)
+    }
+  }, [dispatch])
 
   useEffect(() => {
-    if (!attachmentMenuOpen) {
-      return;
+    void loadAgents()
+  }, [loadAgents])
+
+  useEffect(() => {
+    void loadUserSessions()
+  }, [loadUserSessions])
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void loadAgents()
+      void loadUserSessions()
     }
 
-    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node;
-      if (attachmentAreaRef.current && !attachmentAreaRef.current.contains(target)) {
-        setAttachmentMenuOpen(false);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void loadAgents()
+        void loadUserSessions()
       }
-    };
+    }
 
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("touchstart", handleClickOutside);
+    window.addEventListener("focus", handleFocus)
+    document.addEventListener("visibilitychange", handleVisibility)
 
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("touchstart", handleClickOutside);
-    };
-  }, [attachmentMenuOpen]);
+      window.removeEventListener("focus", handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
+  }, [loadAgents])
 
-    useEffect(() => {
-      if (!headerSearchOpen) {
-        return;
+  useEffect(() => {
+    if (initialAgentId && initialAgentId !== selectedAgentId) {
+      setSelectedAgentId(initialAgentId)
+    }
+  }, [initialAgentId, selectedAgentId])
+
+  useEffect(() => {
+    if (selectedAgentId || agents.length === 0) {
+      return
+    }
+
+    setSelectedAgentId(agents[0].id)
+    router.replace(buildChatUrl(agents[0].id, chatIdByAgent[agents[0].id]))
+  }, [agents, router, selectedAgentId])
+
+  useEffect(() => {
+    if (!selectedAgentId) return
+
+    setChatIdByAgent((prev) => {
+      if (prev[selectedAgentId]) {
+        return prev
       }
 
-      const handleClickOutside = (event: MouseEvent | TouchEvent) => {
-        const target = event.target as Node;
-        if (headerSearchRef.current && !headerSearchRef.current.contains(target)) {
-          setHeaderSearchOpen(false);
+      const nextChatId = initialAgentId === selectedAgentId && initialChatId ? initialChatId : createChatId()
+      return {
+        ...prev,
+        [selectedAgentId]: nextChatId,
+      }
+    })
+  }, [initialAgentId, initialChatId, selectedAgentId])
+
+  const selectedAgent = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [agents, selectedAgentId],
+  )
+  const selectedAgentIsGmail = isGmailAnalysisType(selectedAgent?.type || selectedAgent?.workflowType)
+  const selectedWorkflowType = String(selectedAgent?.workflowType || selectedAgent?.type || "direct")
+  const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
+  const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId
+  }, [activeChatId])
+
+  useEffect(() => {
+    loadingHistoryFlagRef.current = loadingHistory
+  }, [loadingHistory])
+
+  useEffect(() => {
+    if (!selectedAgentId || !activeChatId) {
+      return
+    }
+
+    const cacheKey = `${selectedAgentId}:${activeChatId}`
+    if (loadedHistoryRef.current.has(cacheKey)) {
+      return
+    }
+
+    loadedHistoryRef.current.add(cacheKey)
+    setLoadingHistory(true)
+
+    void (async () => {
+      try {
+        // Ensure a server-side conversation exists for this chatId (best-effort)
+        try {
+          // import thunk dynamically to avoid top-level import cycles
+          const ensured = await dispatch((ensureTenantChatSession as any)({ agentId: selectedAgentId, chatId: activeChatId }))
+          const serverChatId = String(ensured?.chatId || "").trim()
+          if (serverChatId && serverChatId !== activeChatId) {
+            setChatIdByAgent((prev) => ({
+              ...prev,
+              [selectedAgentId]: serverChatId,
+            }))
+            router.replace(buildChatUrl(selectedAgentId, serverChatId))
+          }
+        } catch {
+          // ignore ensure errors and continue to fetch history
         }
-      };
 
-      document.addEventListener("mousedown", handleClickOutside);
-      document.addEventListener("touchstart", handleClickOutside);
+        const payload = await dispatch(
+          fetchTenantAgentChatHistory({
+            agentId: selectedAgentId,
+            chatId: activeChatId,
+          }) as any,
+        )
 
-      // autofocus the input when opened
-      setTimeout(() => headerSearchInputRef.current?.focus(), 50);
+        const historyRows = Array.isArray(payload?.history) ? payload.history : []
+        const normalizedChatId = String(payload?.chatId || activeChatId || "").trim()
 
-      return () => {
-        document.removeEventListener("mousedown", handleClickOutside);
-        document.removeEventListener("touchstart", handleClickOutside);
-      };
-    }, [headerSearchOpen]);
+        if (normalizedChatId && normalizedChatId !== activeChatId) {
+          setChatIdByAgent((prev) => ({
+            ...prev,
+            [selectedAgentId]: normalizedChatId,
+          }))
+          router.replace(buildChatUrl(selectedAgentId, normalizedChatId))
+        }
+
+        if (historyRows.length) {
+          const mapped = historyRows.map((row: Record<string, unknown>) => ({
+            id: String(row.id || `history-${Date.now()}`),
+            role: String(row.role || "assistant") === "user" ? "user" : "assistant",
+            text: String(row.content || ""),
+            time: formatTimeFromIso(String(row.created_at || "")),
+          })) as ChatMessage[]
+
+          setMessagesByAgent((prev) => ({
+            ...prev,
+            [selectedAgentId]: mapped,
+          }))
+          return
+        }
+
+        setMessagesByAgent((prev) => {
+          if (prev[selectedAgentId]) return prev
+          return {
+            ...prev,
+            [selectedAgentId]: buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+          }
+        })
+      } catch {
+        setMessagesByAgent((prev) => ({
+          ...prev,
+          [selectedAgentId]: prev[selectedAgentId] || buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+        }))
+      } finally {
+        setLoadingHistory(false)
+      }
+    })()
+  }, [activeChatId, dispatch, router, selectedAgent?.name, selectedAgent?.oauthReady, selectedAgentId])
+
+  // Resolve title for active chat from user sessions.
+  useEffect(() => {
+    if (!activeChatId) {
+      setConversationTitle(null)
+      return
+    }
+
+    const matched = userSessions.find((session) => session.id === activeChatId)
+    setConversationTitle(matched ? String(matched.title || "") : null)
+  }, [activeChatId, userSessions])
 
   const activeMessages = useMemo(
-    () => messages[activeThreadId] ?? [],
-    [activeThreadId, messages],
-  );
+    () => (selectedAgentId ? messagesByAgent[selectedAgentId] ?? buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)) : []),
+    [messagesByAgent, selectedAgent, selectedAgentId],
+  )
 
-  const sendMessage = () => {
-    const trimmed = input.trim();
-    if (!trimmed && attachments.length === 0) {
-      return;
+  // Auto-analysis on load removed: do not auto-generate responses on page load.
+
+  const openAssignedAgents = () => {
+    router.push("/users/agents")
+  }
+
+  const onAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    if (!files.length) return
+
+    setAttachments((prev) => {
+      const existingKeys = new Set(prev.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`))
+      const nextItems = files
+        .filter((file) => !existingKeys.has(`${file.name}:${file.size}:${file.lastModified}`))
+        .map((file) => ({
+          id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 9)}`,
+          file,
+          kind: inferAttachmentKind(file),
+        }))
+
+      return [...prev, ...nextItems]
+    })
+
+    event.target.value = ""
+  }
+
+  const removeAttachment = (attachmentId: string) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== attachmentId))
+  }
+
+  const openAttachmentSource = (source: "documents" | "photos" | "media" | "all") => {
+    if (source === "documents") documentsInputRef.current?.click()
+    if (source === "photos") photosInputRef.current?.click()
+    if (source === "media") mediaInputRef.current?.click()
+    // if (source === "all") filesInputRef.current?.click()
+    setAttachmentMenuOpen(false)
+  }
+
+  const toggleMic = () => {
+    setIsMicActive((prev) => !prev)
+  }
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) return
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (attachmentMenuRef.current?.contains(target)) return
+      setAttachmentMenuOpen(false)
     }
 
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, "0")}:${String(
-      now.getMinutes(),
-    ).padStart(2, "0")}`;
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("touchstart", handlePointerDown)
 
-    const newUserMessage: ChatMessage = {
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("touchstart", handlePointerDown)
+    }
+  }, [attachmentMenuOpen])
+
+  const renameSession = async (session: UserChatSession) => {
+    if (!selectedAgentId) {
+      setError("Select an agent first.")
+      setOpenSessionMenuId(null)
+      return
+    }
+
+    const nextTitle = window.prompt("Rename chat", String(session.title || "New chat"))
+    if (nextTitle === null) {
+      setOpenSessionMenuId(null)
+      return
+    }
+
+    const title = String(nextTitle).trim()
+    if (!title) {
+      setError("Title cannot be empty.")
+      setOpenSessionMenuId(null)
+      return
+    }
+
+    try {
+      await api.patch(
+        `/ai/agents/${encodeURIComponent(String(selectedAgentId))}/conversations/${encodeURIComponent(session.id)}/user`,
+        { title },
+      )
+
+      if (activeChatId === session.id) {
+        setConversationTitle(title)
+      }
+      await loadUserSessions()
+      setError(null)
+    } catch (err) {
+      setError(
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message?: string }).message || "Failed to rename conversation")
+          : "Failed to rename conversation",
+      )
+    } finally {
+      setOpenSessionMenuId(null)
+    }
+  }
+
+  const deleteSession = async (session: UserChatSession) => {
+    if (!selectedAgentId) {
+      setError("Select an agent first.")
+      setOpenSessionMenuId(null)
+      return
+    }
+
+    const confirmed = window.confirm(`Delete chat \"${session.title || "New chat"}\"? This cannot be undone.`)
+    if (!confirmed) {
+      setOpenSessionMenuId(null)
+      return
+    }
+
+    try {
+      await api.delete(
+        `/ai/agents/${encodeURIComponent(String(selectedAgentId))}/conversations/${encodeURIComponent(session.id)}/user`,
+      )
+
+      if (activeChatId === session.id) {
+        const nextChatId = createChatId()
+        setChatIdByAgent((prev) => ({
+          ...prev,
+          [selectedAgentId]: nextChatId,
+        }))
+        router.replace(buildChatUrl(selectedAgentId, nextChatId))
+        setMessagesByAgent((prev) => ({
+          ...prev,
+          [selectedAgentId]: buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+        }))
+        setConversationTitle(null)
+      }
+
+      await loadUserSessions()
+      setError(null)
+    } catch (err) {
+      setError(
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message?: string }).message || "Failed to delete conversation")
+          : "Failed to delete conversation",
+      )
+    } finally {
+      setOpenSessionMenuId(null)
+    }
+  }
+
+  const sendMessage = async () => {
+    const message = input.trim()
+    if (!selectedAgentId || (!message && attachments.length === 0)) return
+
+    if (selectedAgent && selectedAgentIsGmail && !selectedAgent.oauthReady) {
+      setError("Google OAuth refresh token missing or expired. Please reconnect Google (tenant or user) from the Assigned Agents page and refresh this page.")
+      return
+    }
+
+    const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      text:
-        trimmed ||
-        `Attached ${attachments.length} file${attachments.length > 1 ? "s" : ""}`,
-      time,
-      attachments: attachments.length ? attachments : undefined,
-    };
-
-    setMessages((prev) => ({
-      ...prev,
-      [activeThreadId]: [...(prev[activeThreadId] ?? []), newUserMessage],
-    }));
-    setInput("");
-    setAttachments([]);
-    setIsTyping(true);
-
-    if (typingTimeoutRef.current) {
-      window.clearTimeout(typingTimeoutRef.current);
+      text: message || "Please review the attached files.",
+      time: nowTime(),
     }
 
-    typingTimeoutRef.current = window.setTimeout(() => {
-      const reply: ChatMessage = {
+    setError(null)
+    setSending(true)
+    setInput("")
+
+    setMessagesByAgent((prev) => ({
+      ...prev,
+      [selectedAgentId]: [...(prev[selectedAgentId] ?? activeMessages), userMessage],
+    }))
+
+    try {
+      const composedMessage = (() => {
+        if (attachments.length === 0) return message
+        const attachmentLines = attachments.map((item) => `- ${item.file.name} (${item.kind}, ${formatFileSize(item.file.size)})`)
+        const body = message || "Please review the attached files and respond accordingly."
+        return `${body}\n\nAttachments:\n${attachmentLines.join("\n")}`
+      })()
+
+      const payload = (await dispatch(
+        sendTenantAgentChat({
+          agentId: selectedAgentId,
+          message: composedMessage,
+          chatId: activeChatId,
+          workflowType: selectedWorkflowType,
+        }) as any,
+      )) as Record<string, unknown>
+
+      const returnedChatId = String(payload.chatId || "").trim()
+      if (returnedChatId && returnedChatId !== activeChatId) {
+        setChatIdByAgent((prev) => ({
+          ...prev,
+          [selectedAgentId]: returnedChatId,
+        }))
+        router.replace(buildChatUrl(selectedAgentId, returnedChatId))
+      }
+
+      const replyText = sanitizeAssistantText(String(payload.answer || payload.response || payload.reply || "I analyzed your request and prepared a response."))
+      const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
-        text:
-          "I can help with that. Choose one quick action below or continue typing for a detailed response with files, steps, and UI snippets.",
-        time,
-      };
+        text: replyText,
+        time: nowTime(),
+        source: "server",
+        meta:
+          payload.runStatus || payload.runId
+            ? [payload.runStatus ? `run: ${String(payload.runStatus)}` : null, payload.runId ? `id: ${String(payload.runId)}` : null]
+                .filter(Boolean)
+                .join(" | ")
+            : undefined,
+      }
 
-      setMessages((prev) => ({
+      setMessagesByAgent((prev) => ({
         ...prev,
-        [activeThreadId]: [...(prev[activeThreadId] ?? []), reply],
-      }));
-      setIsTyping(false);
-    }, 1200);
-  };
+        [selectedAgentId]: [...(prev[selectedAgentId] ?? []), assistantMessage],
+      }))
+      setAttachments([])
+      setAttachmentMenuOpen(false)
+      setIsMicActive(false)
+      void loadUserSessions()
+    } catch (chatError: unknown) {
+      const messageText =
+        typeof chatError === "object" && chatError !== null && "message" in chatError
+          ? String((chatError as { message?: string }).message || "Failed to send message.")
+          : "Failed to send message."
+      const friendlyError = normalizeOAuthErrorMessage(messageText)
 
-  const handlePickAttachment = (
-    event: React.ChangeEvent<HTMLInputElement>,
-    kind: AttachmentItem["kind"],
-  ) => {
-    const selectedFiles = Array.from(event.target.files ?? []);
-    if (!selectedFiles.length) {
-      return;
+      setError(friendlyError)
+      setMessagesByAgent((prev) => ({
+        ...prev,
+        [selectedAgentId]: [
+          ...(prev[selectedAgentId] ?? activeMessages),
+          {
+            id: `error-${Date.now()}`,
+            role: "assistant",
+            text: friendlyError || "I could not reach the agent chat endpoint. Please try again.",
+            time: nowTime(),
+          },
+        ],
+      }))
+    } finally {
+      setSending(false)
     }
-
-    const pickedItems = selectedFiles.map((file) => ({
-      id: `att-${Date.now()}-${file.name}`,
-      name: file.name,
-      kind,
-      mimeType: file.type || undefined,
-      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
-      sizeLabel: formatFileSize(file.size),
-    }));
-
-    setAttachments((prev) => [...prev, ...pickedItems]);
-    setAttachmentMenuOpen(false);
-    event.target.value = "";
-  };
+  }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 sm:bottom-15 sm:right-6">
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="group relative flex h-14 w-14 cursor-pointer items-center justify-center rounded-3xl bg-linear-to-br from-primary via-primary-light to-primary/90 shadow-[0_24px_50px_rgba(109,74,255,0.34)] transition-all duration-300 hover:scale-110"
-        >
-          <Bot className="h-7 w-7 text-white" />
-          <span className="absolute -right-1 -top-1 rounded-full border-2 border-white bg-rose-500 px-1.5 text-[10px] font-semibold leading-5 text-white">
-            3
-          </span>
-
-          <div className="absolute inset-0 rounded-3xl bg-primary/30 blur-2xl transition-all duration-300 group-hover:scale-150" />
-        </button>
-      )}
-
-      {open && (
-        <div className="relative flex h-[min(760px,90vh)] w-[min(96vw,980px)] overflow-hidden rounded-[34px] border border-white/35 bg-transparent shadow-[0_28px_120px_rgba(15,23,42,0.28)] backdrop-blur-3xl">
-          <div className="hidden w-70 flex-col border-r-2 border-slate-200/20 bg-white/40 p-4 lg:flex">
-            <div className="flex items-center gap-3 sm:gap-4 mb-4 w-full">
-              <div className="relative shrink-0 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20">
-                <Sparkles className="h-5 w-5 text-white" />
-                <div className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-400" />
-              </div>
-
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-slate-900 sm:text-base truncate">
-                  Agent Copilot
-                </h2>
-                <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500 sm:text-sm">
-                  <Globe className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">Web + Files enabled</span>
-                </p>
-              </div>
+    <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-6 lg:p-8  rounded-2xl">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/80 bg-white/80 px-4 py-4 shadow-sm backdrop-blur md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">
+              <Sparkles className="h-5 w-5" />
             </div>
-
-            <div className="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-white/80 px-3 py-2 w-full">
-              <Search className="h-4 w-4 text-slate-500" />
-              <input
-                placeholder="Search threads"
-                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-500"
-              />
-            </div>
-
-            <button className="mb-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/20">
-              <Sparkles className="h-4 w-4" />
-              New Conversation
-            </button>
-
-            <div className="flex-1 space-y-2 overflow-y-auto pr-1">
-              {THREADS.map((thread) => {
-                const active = thread.id === activeThreadId;
-                return (
-                  <button
-                    key={thread.id}
-                    onClick={() => {
-                      setActiveThreadId(thread.id);
-                      setDisplayedUserName(thread.contactName);
-                    }}
-                    className={`w-full cursor-pointer rounded-2xl border p-3 text-left transition ${
-                      active
-                        ? "border-primary/20 bg-white shadow-md"
-                        : "border-transparent bg-white/55 hover:border-white hover:bg-white/80"
-                    }`}
-                  >
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <h3 className="line-clamp-1 text-sm font-semibold text-slate-800">
-                          {thread.title}
-                        </h3>
-                        <div className="text-xs text-slate-500">{thread.contactName}</div>
-                      </div>
-                      <span className="text-xs text-slate-500">{thread.updatedAt}</span>
-                    </div>
-                    <p className="line-clamp-2 text-xs leading-5 text-slate-500">{thread.preview}</p>
-                    {thread.unread ? (
-                      <span className="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                        {thread.unread} new
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* <div className="mt-4 rounded-2xl border border-white/50 bg-white/70 p-3">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <Bell className="h-4 w-4 text-primary" />
-                Smart Notices
-              </div>
-              <p className="text-xs leading-5 text-slate-500">
-                Auto summarize long conversations every 10 messages.
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">Agent Workspace</p>
+              <h1 className="text-xl font-semibold sm:text-2xl">
+                {selectedAgent?.name || "Select an agent"}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Use one shared chat page for different agent workflows.
               </p>
-            </div> */}
+            </div>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="relative border-b border-white/30 bg-white/35 px-4 py-4 backdrop-blur-3xl sm:px-6">
-              <div className="flex items-center justify-between">
-                {/* <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary-light shadow-lg shadow-primary/20">
-                    <Sparkles className="h-5 w-5 text-white" />
-                    <div className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-400" />
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-900 sm:text-base">
-                      Agent Copilot
-                    </h2>
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500 sm:text-sm">
-                      <Globe className="h-3.5 w-3.5" />
-                      Web + Docs + Files enabled
-                    </p>
-                  </div>
-                </div> */}
-
-                <div className="hidden sm:flex items-center gap-3 mr-3">
-                  <div className="inline-flex items-center gap-3 rounded-full bg-white/5 px-3 py-1">
-                    <div className="h-9 w-9 rounded-full bg-primary text-white flex items-center justify-center text-xs font-semibold">
-                      {getInitials(displayedUserName)}
-                    </div>
-                    <div className="min-w-0 text-left">
-                      <div className="text-sm font-semibold text-slate-900">{displayedUserName ?? "—"}</div>
-                      <div className="text-[11px] text-slate-500">Selected user</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <button
-                      onClick={() => setHeaderSearchOpen((p) => !p)}
-                      aria-label="Search"
-                      className="hidden h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-white/55 transition hover:bg-white sm:flex"
-                    >
-                      <Search className="h-4 w-4 text-slate-600" />
-                    </button>
-
-                    {headerSearchOpen ? (
-                      <div
-                        ref={headerSearchRef}
-                        className="absolute right-0 top-full z-50 mt-2 w-80 rounded-2xl border border-slate-200 bg-white/80 p-2 shadow-xl"
-                      >
-                        <input
-                          ref={headerSearchInputRef}
-                          value={headerSearchQuery}
-                          onChange={(e) => setHeaderSearchQuery(e.target.value)}
-                          placeholder="Search messages"
-                          className="w-full rounded-xl bg-transparent px-3 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-500"
-                          onKeyDown={(e) => {
-                            if (e.key === "Escape") setHeaderSearchOpen(false);
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <button className="hidden h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-white/55 transition hover:bg-white sm:flex">
-                    <Maximize2 className="h-4 w-4 text-slate-600" />
-                  </button>
-                  <button className="hidden h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-white/55 transition hover:bg-white sm:flex">
-                    <MoreHorizontal className="h-4 w-4 text-slate-600" />
-                  </button>
-                  <button
-                    onClick={() => setOpen(false)}
-                    className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl bg-white/55 transition hover:bg-white"
-                  >
-                    <X className="h-4 w-4 text-slate-700" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-b border-white/30 bg-transparent px-4 py-3 sm:px-6">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold text-slate-600">Suggestions</div>
-                <div className="text-xs text-slate-400">Quick commands</div>
-              </div>
-
-              <div className="mt-3 overflow-x-auto pb-2">
-                <div className="flex items-center gap-2 px-1 min-w-max">
-                  {[
-                    { icon: Command, label: "/summarize" },
-                    { icon: TerminalSquare, label: "/generate-ui" },
-                    { icon: LayoutPanelTop, label: "/draft-layout" },
-                    { icon: History, label: "View history" },
-                  ].map((chip) => (
-                    <button
-                      key={chip.label}
-                      type="button"
-                      aria-label={chip.label}
-                      onClick={() => setInput((prev) => (prev ? prev + " " + chip.label : chip.label))}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/65 px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
-                      <chip.icon className="h-4 w-4 text-slate-700" />
-                      <span className="whitespace-nowrap">{chip.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto bg-transparent px-4 py-5 sm:px-6">
-              <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-                {activeMessages.map((message) => {
-                  const isUser = message.role === "user";
-
-                  return (
-                    <div
-                      key={message.id}
-                      className={`flex items-end gap-2 ${
-                        isUser ? "justify-end" : "justify-start"
-                      }`}
-                    >
-                      {!isUser ? (
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary shadow-md shadow-primary/20">
-                          <Bot className="h-4 w-4 text-white" />
-                        </div>
-                      ) : null}
-
-                      <div
-                        className={`max-w-[84%] rounded-[22px] px-4 py-3 shadow-md ${
-                          isUser
-                            ? "rounded-br-md bg-primary text-white"
-                            : "rounded-tl-md border border-white/55 bg-white/75 text-slate-700 backdrop-blur-2xl"
-                        }`}
-                      >
-                        {message.attachments && message.attachments.length ? (
-                          <AttachmentGallery attachments={message.attachments} isUser={isUser} />
-                        ) : null}
-
-                        <p className="text-sm leading-6 sm:text-[15px]">
-                          {message.text}
-                        </p>
-                        <div
-                          className={`mt-1 text-[11px] ${
-                            isUser ? "text-primary-foreground/80" : "text-slate-500"
-                          }`}
-                        >
-                          {message.time}
-                        </div>
-                      </div>
-
-                      {isUser ? (
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white">
-                          <User className="h-4 w-4" />
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-
-                {isTyping ? (
-                  <div className="flex items-end gap-2">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary-light shadow-md shadow-primary/20">
-                      <Bot className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="rounded-[22px] rounded-tl-md border border-white/55 bg-white/80 px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-primary" />
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="rounded-2xl border border-white/55 bg-white/75 p-3 shadow-md backdrop-blur-2xl">
-                  <div className="mb-2 text-xs font-semibold tracking-wide text-slate-500">
-                    QUICK ACTIONS
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {[
-                      { icon: FileText, label: "Generate PRD" },
-                      { icon: FolderClosed, label: "Attach Docs" },
-                      { icon: Image, label: "Create UI Mock" },
-                      { icon: Globe, label: "Web Research" },
-                    ].map((action) => (
-                      <button
-                        key={action.label}
-                        className="inline-flex cursor-pointer items-center justify-center gap-1 rounded-xl bg-primary px-2 py-2 text-xs font-medium text-white transition hover:bg-primary-light"
-                      >
-                        <action.icon className="h-3.5 w-3.5" />
-                        {action.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-white/35 bg-white/40 px-4 pb-4 pt-3 backdrop-blur-3xl sm:px-6 sm:pb-5">
-              <button
-                type="button"
-                aria-expanded={showCommands}
-                onClick={() => setShowCommands((prev) => !prev)}
-                className="mb-2 inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-slate-600 transition hover:text-primary"
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                <span>Suggested prompts</span>
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showCommands ? "rotate-180" : ""}`} />
-              </button>
-
-              {showCommands ? (
-                <div className="mt-2 overflow-x-auto pb-2">
-                  <div className="flex items-center gap-2 px-1 min-w-max">
-                    {[
-                      "Design a floating support widget",
-                      "Summarize this conversation",
-                      "Generate React + Tailwind component",
-                    ].map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => setInput(prompt)}
-                        className="inline-flex items-center cursor-pointer gap-2 rounded-full border border-white/60 bg-white/70 px-3 py-1.5 text-xs text-slate-700 transition hover:border-primary/20 hover:bg-primary/5 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={selectedAgentIsGmail && !selectedAgent?.oauthReady ? "destructive" : "outline"}>
+              {selectedAgentIsGmail ? (selectedAgent?.oauthReady ? "Integration connected" : "Integration required") : "Workflow ready"}
+            </Badge>
+            <Badge variant="outline">{selectedWorkflowType}</Badge>
+            <Badge variant="outline">{selectedAgent?.authMode === "user_personal_connection" ? "personal connection" : "tenant shared"}</Badge>
+              {sessionPersisted ? (
+                <Badge variant="secondary">
+                  <CheckCircle2 className="mr-2 inline-block h-4 w-4 align-text-bottom" />
+                  Session persisted
+                </Badge>
               ) : null}
 
-              <div
-                ref={attachmentAreaRef}
-                className="relative rounded-[28px] border border-white/40 bg-transparent p-2 shadow-[0_20px_60px_rgba(109,74,255,0.17)] backdrop-blur-3xl"
-              >
-                <div className="absolute inset-0 rounded-[28px] bg-linear-to-r from-primary/10 via-white/20 to-primary-light/10" />
-                {attachmentMenuOpen ? (
-                  <div className="absolute bottom-full left-2 mb-2 w-52 rounded-2xl border border-white/60 bg-white/90 p-2 shadow-xl backdrop-blur-2xl">
-                    {[
-                      {
-                        label: "Documents",
-                        icon: FileText,
-                        onClick: () => documentsInputRef.current?.click(),
-                      },
-                      {
-                        label: "Photos",
-                        icon: Image,
-                        onClick: () => photosInputRef.current?.click(),
-                      },
-                      {
-                        label: "Media",
-                        icon: Globe,
-                        onClick: () => mediaInputRef.current?.click(),
-                      },
-                      {
-                        label: "All files",
-                        icon: FolderClosed,
-                        onClick: () => filesInputRef.current?.click(),
-                      },
-                    ].map((item) => (
-                      <button
-                        key={item.label}
-                        onClick={item.onClick}
-                        className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-primary/5 hover:text-primary"
-                      >
-                        <item.icon className="h-4 w-4 text-primary" />
-                        {item.label}
-                      </button>
-                    ))}
+              <Button type="button" variant="outline" className="cursor-pointer" onClick={openAssignedAgents}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Agents
+            </Button>
+          </div>
+        </div>
+
+        {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
+
+        <div className="grid gap-4 lg:items-stretch lg:grid-cols-[320px_minmax(0,1fr)]">
+          <Card className="flex h-full flex-col rounded-3xl border-white/80 bg-white/90 shadow-sm">
+            <CardHeader>
+              <CardTitle>Configured Agents</CardTitle>
+              <CardDescription>Choose the agent you want to talk to.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
+              {!loadingAgents && agents.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No configured agents found.</p>
+              ) : null}
+
+              {/* <div className="space-y-2">
+                {agents.map((agent) => {
+                  const active = agent.id === selectedAgentId
+                  return (
+                    <button
+                      key={agent.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedAgentId(agent.id)
+                        router.replace(buildChatUrl(agent.id, chatIdByAgent[agent.id]))
+                      }}
+                      className={`w-full rounded-2xl border p-3 text-left transition ${
+                        active
+                          ? "border-primary/30 bg-primary/5 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-primary/20 hover:bg-primary/5"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{agent.name}</p>
+                          <p className="truncate text-xs text-muted-foreground">{agent.description || "AI agent"}</p>
+                        </div>
+                        <Badge variant={agent.isActive === 1 ? "outline" : "destructive"}>
+                          {agent.isActive === 1 ? "active" : "inactive"}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                        <span>{agent.aiProvider}</span>
+                        <span>•</span>
+                        <span>{agent.aiModel}</span>
+                        <span>•</span>
+                        <span>{agent.authMode === "user_personal_connection" ? "personal auth" : "tenant auth"}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div> */}
+
+              {/* <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-slate-700">
+                <div className="flex items-center gap-2 font-medium">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  Workflow
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Configure required integrations from the assigned agents page, then return here to chat with the live endpoint.
+                </p>
+              </div> */}
+
+              <div className="rounded-2xl border bg-white p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                    <MessageSquare className="h-4 w-4 text-primary" />
+                    Recent Conversations
                   </div>
+                  {/* <Badge variant="outline">{userSessions.length}</Badge> */}
+                </div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  All user chat sessions (chat ID wise).
+                </p>
+
+                {loadingUserSessions ? <p className="text-xs text-muted-foreground">Loading sessions...</p> : null}
+
+                {!loadingUserSessions && userSessions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No conversation history found yet.</p>
                 ) : null}
 
-                <div className="relative flex items-end gap-2">
-                  <button
-                    onClick={() => setAttachmentMenuOpen((prev) => !prev)}
-                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5 border"
-                  >
-                    <Paperclip className="h-4 w-4 text-slate-600" />
-                  </button>
-                  <div className="flex min-h-11 flex-1 items-center rounded-2xl border border-gray-200 bg-transparent px-3">
-                    <textarea
-                      rows={1}
-                      value={input}
-                      onChange={(event) => setInput(event.target.value)}
-                      onFocus={() => setAttachmentMenuOpen(false)}
-                      onClick={() => setAttachmentMenuOpen(false)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          sendMessage();
-                        }
-                      }}
-                      placeholder="Message Your Assistant..."
-                      className="max-h-28 w-full resize-none bg-transparent py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 sm:text-[15px]"
-                    />
-                  </div>
-                  <button className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-white/55 transition hover:bg-primary/5 border">
-                    <Mic className="h-4 w-4 text-slate-600" />
-                  </button>
-                  <button
-                    onClick={sendMessage}
-                    className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-2xl bg-primary shadow-[0_12px_25px_rgba(109,74,255,0.35)] transition hover:scale-105"
-                  >
-                    <SendHorizonal className="h-4 w-4 text-white" />
-                  </button>
+                <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                  {userSessions.map((session) => {
+                    const isActiveSession = activeChatId === session.id
+                    return (
+                      <div
+                        key={session.id}
+                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                          isActiveSession
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-slate-200 bg-slate-50 hover:border-primary/20 hover:bg-primary/5"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 text-left cursor-pointer"
+                            onClick={() => {
+                              if (!selectedAgentId) return
+                              setSelectedAgentId(selectedAgentId)
+                              setChatIdByAgent((prev) => ({
+                                ...prev,
+                                [selectedAgentId]: session.id,
+                              }))
+                              router.replace(buildChatUrl(selectedAgentId, session.id))
+                              setOpenSessionMenuId(null)
+                            }}
+                          >
+                            <p className="truncate text-xs font-semibold text-slate-800">{session.title || "New chat"}</p>
+                          </button>
+
+                          <div className="relative">
+                            <button
+                              type="button"
+                              aria-label="Conversation actions"
+                              className="cursor-pointer rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-800"
+                              onClick={() => setOpenSessionMenuId((prev) => (prev === session.id ? null : session.id))}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+
+                            {openSessionMenuId === session.id ? (
+                              <div className="absolute right-0 top-8 z-20 w-32 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                                <button
+                                  type="button"
+                                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-slate-100"
+                                  onClick={() => void renameSession(session)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-rose-600 transition hover:bg-rose-50"
+                                  onClick={() => void deleteSession(session)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="flex h-full flex-col rounded-3xl border-white/80 bg-white/90 shadow-sm overflow-hidden">
+            <CardHeader className="border-b bg-linear-to-r from-primary/5 via-white to-sky-50/60">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                    <Bot className="h-5 w-5 text-primary" />
+                    <div className="flex items-center gap-3">
+                      <span>{selectedAgent?.name || "No agent selected"}</span>
+                      {conversationTitle ? (
+                        <span className="text-sm text-muted-foreground">{conversationTitle}</span>
+                      ) : null}
+                    </div>
+                  </CardTitle>
+                  <CardDescription>
+                    {selectedAgent
+                      ? `${selectedWorkflowType} workflow, ${selectedAgent.executionMode} execution, model ${selectedAgent.aiModel}.`
+                      : "Select an agent to start chat."}
+                  </CardDescription>
                 </div>
 
-                {attachments.length ? (
-                  <div className="relative mt-2 flex flex-wrap gap-1.5 px-1">
-                    {attachments.map((attachment) => (
-                      <span
-                        key={attachment.id}
-                        className="inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/75 px-2 py-1 text-[11px] text-slate-700"
-                      >
-                        {attachment.name}
-                        <button
-                          onClick={() =>
-                            setAttachments((prev) =>
-                              prev.filter((item) => item.id !== attachment.id),
-                            )
-                          }
-                          className="cursor-pointer rounded-full p-0.5 hover:bg-slate-200"
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">
+                    {selectedAgent?.authMode === "user_personal_connection" ? "personal connection" : "tenant shared"}
+                  </Badge>
+                  <Badge variant="outline">{selectedAgent?.aiModel || "gpt-4.1-mini"}</Badge>
+                  <Badge variant="outline">{selectedAgent?.executionMode || "manual"}</Badge>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4 p-0 sm:p-2">
+              {/* <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border bg-muted/20 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Mail className="h-4 w-4 text-primary" />
+                    Gmail status
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {selectedAgent?.oauthReady ? "Connected and ready for analysis." : "Connect Gmail to unlock email analysis."}
+                  </p>
+                </div>
+                <div className="rounded-2xl border bg-muted/20 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Clock3 className="h-4 w-4 text-primary" />
+                    Execution window
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {selectedAgent ? `${selectedAgent.lookbackHours} hour lookback, ${selectedAgent.maxEmails} max emails.` : "Waiting for an agent selection."}
+                  </p>
+                </div>
+                <div className="rounded-2xl border bg-muted/20 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Globe className="h-4 w-4 text-primary" />
+                    Provider
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {selectedAgent?.aiProvider || "openai"} with {selectedAgent?.aiModel || "default model"}.
+                  </p>
+                </div>
+              </div> */}
+
+              {/* <div className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-4 shadow-sm"> */}
+                {/* <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">Conversation</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="cursor-pointer"
+                    onClick={() => {
+                      if (!selectedAgentId) return
+                      const nextChatId = createChatId()
+                      setChatIdByAgent((prev) => ({
+                        ...prev,
+                        [selectedAgentId]: nextChatId,
+                      }))
+                      router.replace(buildChatUrl(selectedAgentId, nextChatId))
+                      setMessagesByAgent((prev) => ({
+                        ...prev,
+                        [selectedAgentId]: buildInitialMessages(selectedAgent?.name, Boolean(selectedAgent?.oauthReady)),
+                      }))
+                    }}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Reset Chat
+                  </Button>
+                </div> */}
+
+                <div className="min-h-[52vh] max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+                  {activeMessages.map((message) => {
+                    const isUser = message.role === "user"
+                    const isSystem = message.role === "system"
+
+                    return (
+                      <div key={message.id} className={`flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+                        {!isUser ? (
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600" : "bg-primary text-white"}`}>
+                            {isSystem ? <Wand2 className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                          </div>
+                        ) : null}
+
+                        <div
+                          className={`max-w-[86%] rounded-[24px] px-4 py-3 shadow-sm ${
+                            isUser
+                              ? "rounded-br-md bg-primary text-white"
+                              : isSystem
+                                ? "rounded-tl-md border border-dashed border-slate-300 bg-white text-slate-600"
+                                : "rounded-tl-md border border-white/80 bg-white text-slate-700"
+                          }`}
                         >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
+                          <p className="text-sm leading-6 whitespace-pre-wrap wrap-break-word">{!isUser ? sanitizeAssistantText(message.text) : message.text}</p>
+                          {message.meta ? <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.meta}</p> : null}
+                          {/* Source badge: demo vs AI */}
+                          {!isUser && message.source ? (
+                            <div className="mt-2">
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${message.source === "server" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}`}>
+                                {message.source === "server" ? "Backend AI" : "AI"}
+                              </span>
+                            </div>
+                          ) : null}
+                          <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.time}</p>
+                        </div>
+
+                        {isUser ? (
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                            <CheckCircle2 className="h-4 w-4" />
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+
+                  {sending ? (
+                    <div className="flex items-end gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white">
+                        <Bot className="h-4 w-4" />
+                      </div>
+                      <div className="rounded-[24px] rounded-tl-md border border-white/80 bg-white px-4 py-3 shadow-sm">
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-primary" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* <div className="mt-4 flex flex-wrap gap-2">
+                  {selectedQuickPrompts.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setInput(prompt)}
+                      className="rounded-full border cursor-pointer border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-primary/20 hover:bg-primary/5 hover:text-primary"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div> */}
+
+                <div className="mt-4 rounded-[26px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <input
+                    ref={documentsInputRef}
+                    type="file"
+                    multiple
+                    onChange={onAttachmentInputChange}
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.md"
+                    className="hidden"
+                  />
+                  <input
+                    ref={photosInputRef}
+                    type="file"
+                    multiple
+                    onChange={onAttachmentInputChange}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <input
+                    ref={mediaInputRef}
+                    type="file"
+                    multiple
+                    onChange={onAttachmentInputChange}
+                    accept="audio/*,video/*"
+                    className="hidden"
+                  />
+                  {/* <input
+                    ref={filesInputRef}
+                    type="file"
+                    multiple
+                    onChange={onAttachmentInputChange}
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.md"
+                    className="hidden"
+                  /> */}
+
+                  {attachments.length > 0 ? (
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {attachments.map((attachment) => (
+                        <div key={attachment.id} className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
+                          {attachment.kind === "image" ? (
+                            <ImageIcon className="h-3.5 w-3.5 text-sky-600" />
+                          ) : (
+                            <FileText className="h-3.5 w-3.5 text-slate-600" />
+                          )}
+                          <span className="max-w-60 truncate text-xs text-slate-700">{attachment.file.name}</span>
+                          <span className="text-[11px] text-slate-500">{formatFileSize(attachment.file.size)}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeAttachment(attachment.id)}
+                            className="rounded-full p-0.5 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
+                            aria-label={`Remove ${attachment.file.name}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="flex h-12 items-stretch gap-2">
+                    <div ref={attachmentMenuRef} className="relative">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-12 w-12 rounded-2xl"
+                        disabled={!selectedAgentId || sending}
+                        onClick={() => setAttachmentMenuOpen((prev) => !prev)}
+                      >
+                        <Paperclip className="h-4 w-4" />
+                      </Button>
+
+                      {attachmentMenuOpen ? (
+                        <div className="absolute bottom-full left-2 mb-2 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+                          <div>
+                            {[
+                              {
+                                label: "Documents",
+                                icon: FileText,
+                                onClick: () => openAttachmentSource("documents"),
+                              },
+                              {
+                                label: "Photos",
+                                icon: Image,
+                                onClick: () => openAttachmentSource("photos"),
+                              },
+                              // {
+                              //   label: "Media",
+                              //   icon: Globe,
+                              //   onClick: () => openAttachmentSource("media"),
+                              // },
+                              // {
+                              //   label: "All files",
+                              //   icon: FolderClosed,
+                              //   onClick: () => openAttachmentSource("all"),
+                              // },
+                            ].map((item) => (
+                              <button
+                                key={item.label}
+                                onClick={item.onClick}
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-primary/5 hover:text-primary"
+                              >
+                                <item.icon className="h-4 w-4 text-primary" />
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="flex h-12 flex-1 items-center rounded-2xl border border-slate-200 px-3">
+                      <textarea
+                        value={input}
+                        onChange={(event) => setInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault()
+                            void sendMessage()
+                          }
+                        }}
+                        placeholder={
+                          selectedAgent
+                            ? "Ask the agent..."
+                            : "Select an agent first..."
+                        }
+                        className="h-full w-full resize-none bg-transparent py-3 text-sm outline-none placeholder:text-slate-400"
+                        disabled={!selectedAgentId || sending}
+                      />
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant={isMicActive ? "default" : "outline"}
+                      className={`h-12 w-12 rounded-2xl ${isMicActive ? "bg-rose-500 text-white hover:bg-rose-600" : ""}`}
+                      disabled={!selectedAgentId || sending}
+                      onClick={toggleMic}
+                    >
+                      <Mic className="h-4 w-4" />
+                    </Button>
+
+                    <Button
+                      type="button"
+                      className="h-12 w-12 rounded-2xl bg-primary text-white shadow-lg cursor-pointer shadow-primary/20 hover:bg-primary-light"
+                      disabled={!selectedAgentId || sending || (!input.trim() && attachments.length === 0)}
+                      onClick={() => void sendMessage()}
+                    >
+                      <SendHorizonal className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {selectedAgentIsGmail && !selectedAgent?.oauthReady ? (
+                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    Required Google integration is not connected yet. Use the assigned agents page to complete login, then return here and refresh.
                   </div>
                 ) : null}
-
-                <input
-                  ref={documentsInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.txt,.ppt,.pptx,.xls,.xlsx"
-                  onChange={(event) => handlePickAttachment(event, "documents")}
-                />
-                <input
-                  ref={photosInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(event) => handlePickAttachment(event, "photos")}
-                />
-                <input
-                  ref={mediaInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  accept="audio/*,video/*"
-                  onChange={(event) => handlePickAttachment(event, "media")}
-                />
-                <input
-                  ref={filesInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(event) => handlePickAttachment(event, "files")}
-                />
-              </div>
-
-              {/* <div className="mt-2 flex items-center justify-end px-1 text-[11px] text-slate-500">
-                <span>Model: gpt-5.3-codex</span>
-                <span className="inline-flex items-center gap-1">
-                  <Command className="h-3.5 w-3.5" />
-                  Press Enter to send
-                </span>
-              </div> */}
-            </div>
-          </div>
-          {/* page background and decorative gradients removed for a cleaner UI */}
+              {/* </div> */}
+            </CardContent>
+          </Card>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    </main>
+  )
 }
