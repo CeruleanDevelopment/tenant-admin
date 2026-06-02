@@ -274,7 +274,7 @@ export default function UserAssignedAgentsPage() {
             </p>
           </div>
           {/* Gmail Health Banner */}
-          <div className="w-full md:w-auto">
+          {/* <div className="w-full md:w-auto">
             {healthLoading ? (
               <p className="text-sm text-muted-foreground">Checking Gmail connectivity...</p>
             ) : (
@@ -330,7 +330,7 @@ export default function UserAssignedAgentsPage() {
                 )}
               </div>
             )}
-          </div>
+          </div> */}
           {/* <Button asChild variant="outline" className="cursor-pointer">
             <Link href="/users/signin" prefetch={false}>Switch User</Link>
           </Button> */}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
@@ -30,13 +30,13 @@ import { Textarea } from "@/components/ui/textarea"
 import ReactFlow, {
   Background,
   Controls,
-  MiniMap,
   useEdgesState,
   useNodesState,
   type Edge,
-  type Node,
+  type Node as FlowNode,
 } from "reactflow"
 import "reactflow/dist/style.css"
+import { Plus } from "lucide-react"
 
 type TenantUser = {
   id: string
@@ -49,6 +49,21 @@ type TenantUser = {
 type AiProvider = "" | "openai" | "openrouter"
 type AuthMode = "" | "tenant_shared_connection" | "user_personal_connection"
 type ExecutionMode = "" | "manual" | "scheduled"
+type ConfigNodeType =
+  | "agent_details"
+  | "ai_config"
+  | "auth"
+  | "execution"
+  | "limits"
+  | "prompt"
+  | "permissions"
+  | "assignment"
+
+type FlowNodeData = {
+  label: string
+  hint?: string
+  kind?: ConfigNodeType
+}
 
 type AgentCategory = "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
 
@@ -62,7 +77,68 @@ const CATEGORY_LABEL: Record<AgentCategory, string> = {
   general: "General",
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const FLOW_NODE_LIBRARY: Array<{
+  kind: ConfigNodeType
+  title: string
+  description: string
+  required?: boolean
+}> = [
+  {
+    kind: "agent_details",
+    title: "Agent Details",
+    description: "Name, short description, and active status.",
+    required: true,
+  },
+  {
+    kind: "ai_config",
+    title: "AI Model",
+    description: "Choose provider and model.",
+    required: true,
+  },
+  {
+    kind: "auth",
+    title: "Google Auth",
+    description: "Select tenant shared or user personal auth mode.",
+    required: true,
+  },
+  {
+    kind: "execution",
+    title: "Execution",
+    description: "Manual or scheduled execution settings.",
+    required: true,
+  },
+  {
+    kind: "limits",
+    title: "Run Limits",
+    description: "Lookback window and max emails per run.",
+    required: true,
+  },
+  {
+    kind: "prompt",
+    title: "Instruction Prompt",
+    description: "Behavior instruction for the agent.",
+  },
+  {
+    kind: "permissions",
+    title: "Role Permissions",
+    description: "Manager/member run access and active state.",
+    required: true,
+  },
+  {
+    kind: "assignment",
+    title: "User Assignment",
+    description: "Assign this agent to tenant users.",
+  },
+]
+
+const REQUIRED_FLOW_NODES: ConfigNodeType[] = [
+  "agent_details",
+  "ai_config",
+  "auth",
+  "execution",
+  "limits",
+  "permissions",
+]
 
 const AI_MODEL_OPTIONS: Record<"openai" | "openrouter", string[]> = {
   openai: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
@@ -76,103 +152,9 @@ const formatUserName = (user: TenantUser): string => {
   return full || String(user.email || "User")
 }
 
-const buildFlowGraph = (input: {
-  name: string
-  aiProvider: AiProvider
-  aiModel: string
-  authMode: AuthMode
-  executionMode: ExecutionMode
-  executionTime: string
-  timezone: string
-  lookbackHours: string
-  maxEmails: string
-  assignedCount: number
-  hasPrompt: boolean
-  managerCanRun: boolean
-  memberCanRun: boolean
-}): { nodes: Node[]; edges: Edge[] } => {
-  const nodes: Node[] = []
-
-  const pushNode = (id: string, label: string) => {
-    nodes.push({
-      id,
-      type: nodes.length === 0 ? "input" : "default",
-      position: { x: 80 + nodes.length * 240, y: 110 },
-      data: { label },
-    })
-  }
-
-  const name = input.name.trim()
-  if (!name) {
-    return { nodes: [], edges: [] }
-  }
-
-  pushNode("agent", `Agent: ${name}`)
-
-  if (input.aiProvider && input.aiModel) {
-    pushNode("ai", `Model: ${input.aiProvider} / ${input.aiModel}`)
-  } else {
-    return { nodes, edges: [] }
-  }
-
-  if (input.authMode) {
-    const authLabel = input.authMode === "user_personal_connection" ? "Auth: user personal Google" : "Auth: tenant shared Google"
-    pushNode("auth", authLabel)
-  } else {
-    return {
-      nodes,
-      edges: nodes.slice(1).map((node, index) => ({
-        id: `e${index}`,
-        source: nodes[index].id,
-        target: node.id,
-        animated: true,
-      })),
-    }
-  }
-
-  if (input.executionMode) {
-    const scheduleLabel =
-      input.executionMode === "scheduled"
-        ? `Run: scheduled ${input.executionTime || "--:--"} ${input.timezone || "UTC"}`
-        : "Run: manual"
-    pushNode("schedule", scheduleLabel)
-  }
-
-  const lookback = Number(input.lookbackHours)
-  const max = Number(input.maxEmails)
-  if (Number.isFinite(lookback) && lookback > 0 && Number.isFinite(max) && max > 0) {
-    pushNode("window", `Window: ${lookback}h, max ${max} emails`)
-  }
-
-  if (input.hasPrompt) {
-    pushNode("prompt", "Instruction prompt configured")
-  }
-
-  if (input.assignedCount > 0) {
-    pushNode("assign", `Assigned users: ${input.assignedCount}`)
-  }
-
-  pushNode(
-    "perm",
-    `Permissions: manager ${input.managerCanRun ? "yes" : "no"}, member ${input.memberCanRun ? "yes" : "no"}`,
-  )
-
-  pushNode("output", "Output: agent saved + assignments persisted")
-  nodes[nodes.length - 1] = { ...nodes[nodes.length - 1], type: "output" }
-
-  const edges: Edge[] = nodes.slice(1).map((node, index) => ({
-    id: `e${index + 1}`,
-    source: nodes[index].id,
-    target: node.id,
-    animated: true,
-  }))
-
-  return { nodes, edges }
-}
-
-const flowSummaryText = (nodes: Node[], edges: Edge[]): string => {
+const flowSummaryText = (nodes: FlowNode<FlowNodeData>[], edges: Edge[]): string => {
   if (!nodes.length) {
-    return "No nodes yet. Start by entering Agent name to begin step-by-step flow creation."
+    return "Canvas is blank. Select an agent blueprint to start building the flow."
   }
 
   const byId = new Map(
@@ -182,18 +164,190 @@ const flowSummaryText = (nodes: Node[], edges: Edge[]): string => {
   return edges.map((edge) => `${byId.get(edge.source) || edge.source} -> ${byId.get(edge.target) || edge.target}`).join("\n")
 }
 
+const nodeLabelForKind = (
+  kind: ConfigNodeType,
+  values: {
+    name: string
+    description: string
+    aiProvider: AiProvider
+    aiModel: string
+    authMode: AuthMode
+    executionMode: ExecutionMode
+    executionTime: string
+    timezone: string
+    lookbackHours: string
+    maxEmails: string
+    systemPrompt: string
+    managerCanRun: boolean
+    memberCanRun: boolean
+    isActive: boolean
+    assignedCount: number
+  },
+): { label: string; hint: string } => {
+  if (kind === "agent_details") {
+    return {
+      label: values.name.trim() ? `Agent: ${values.name.trim()}` : "Agent details",
+      hint: values.description.trim() ? "Name and description configured" : "Set name, description, and status",
+    }
+  }
+  if (kind === "ai_config") {
+    return {
+      label: values.aiProvider && values.aiModel ? `Model: ${values.aiProvider} / ${values.aiModel}` : "AI model",
+      hint: values.aiProvider ? "Provider selected" : "Select provider and model",
+    }
+  }
+  if (kind === "auth") {
+    return {
+      label:
+        values.authMode === "user_personal_connection"
+          ? "Auth: user personal"
+          : values.authMode === "tenant_shared_connection"
+            ? "Auth: tenant shared"
+            : "Google auth",
+      hint: values.authMode ? "Auth mode configured" : "Select an auth mode",
+    }
+  }
+  if (kind === "execution") {
+    return {
+      label:
+        values.executionMode === "scheduled"
+          ? `Run: scheduled ${values.executionTime || "--:--"}`
+          : values.executionMode === "manual"
+            ? "Run: manual"
+            : "Execution",
+      hint: values.executionMode === "scheduled" ? `Timezone: ${values.timezone}` : "Choose manual or scheduled run",
+    }
+  }
+  if (kind === "limits") {
+    return {
+      label: `Window: ${values.lookbackHours || "--"}h, max ${values.maxEmails || "--"}`,
+      hint: "Run limits",
+    }
+  }
+  if (kind === "prompt") {
+    return {
+      label: values.systemPrompt.trim() ? "Instruction prompt" : "Instruction prompt",
+      hint: values.systemPrompt.trim() ? "Prompt configured" : "Optional behavior instructions",
+    }
+  }
+  if (kind === "permissions") {
+    return {
+      label: `Permissions: Mgr ${values.managerCanRun ? "yes" : "no"}, Member ${values.memberCanRun ? "yes" : "no"}`,
+      hint: `Agent active: ${values.isActive ? "yes" : "no"}`,
+    }
+  }
+  return {
+    label: `Assignments: ${values.assignedCount}`,
+    hint: values.assignedCount > 0 ? "Users assigned" : "Optional user assignment",
+  }
+}
+
+const buildCanvasGraph = (input: {
+  hasBlueprint: boolean
+  blueprintTitle: string
+  kinds: ConfigNodeType[]
+  values: {
+    name: string
+    description: string
+    aiProvider: AiProvider
+    aiModel: string
+    authMode: AuthMode
+    executionMode: ExecutionMode
+    executionTime: string
+    timezone: string
+    lookbackHours: string
+    maxEmails: string
+    systemPrompt: string
+    managerCanRun: boolean
+    memberCanRun: boolean
+    isActive: boolean
+    assignedCount: number
+  }
+}): { nodes: FlowNode<FlowNodeData>[]; edges: Edge[] } => {
+  if (!input.hasBlueprint) {
+    return { nodes: [], edges: [] }
+  }
+
+  const nodes: FlowNode<FlowNodeData>[] = [
+    {
+      id: "blueprint_start",
+      type: "input",
+      position: { x: 80, y: 120 },
+      data: {
+        label: `Blueprint: ${input.blueprintTitle || "Select blueprint"}`,
+        hint: "Starting node",
+      },
+      style: { borderRadius: 14, border: "1px solid #94a3b8", background: "#f8fafc", width: 220 },
+    },
+  ]
+
+  const edges: Edge[] = []
+  let previousNodeId = "blueprint_start"
+
+  input.kinds.forEach((kind, index) => {
+    const info = nodeLabelForKind(kind, input.values)
+    const x = 340 + index * 240
+    const id = `cfg_${kind}`
+
+    nodes.push({
+      id,
+      type: "default",
+      position: { x, y: 120 },
+      data: {
+        label: info.label,
+        hint: info.hint,
+        kind,
+      },
+      style: { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 },
+    })
+
+    edges.push({
+      id: `edge_${previousNodeId}_${id}`,
+      source: previousNodeId,
+      target: id,
+      animated: true,
+      style: { strokeWidth: 1.5 },
+    })
+
+    previousNodeId = id
+  })
+
+  const outputX = 340 + input.kinds.length * 240
+  nodes.push({
+    id: "output_save",
+    type: "output",
+    position: { x: outputX, y: 120 },
+    data: {
+      label: "Create Agent",
+      hint: "Final save node",
+    },
+    style: { borderRadius: 14, border: "1px solid #0f766e", background: "#ecfeff", width: 220 },
+  })
+
+  edges.push({
+    id: `edge_${previousNodeId}_output_save`,
+    source: previousNodeId,
+    target: "output_save",
+    animated: true,
+    style: { strokeWidth: 1.5 },
+  })
+
+  return { nodes, edges }
+}
+
 export default function TenantAgentCreatePage() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
 
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const tenantId = String(tenantProfile?.id || "")
-  const blueprintId = String(searchParams.get("blueprint") || "").trim()
+  const initialBlueprintId = String(searchParams.get("blueprint") || "").trim()
   const [blueprints, setBlueprints] = useState<TenantAgentBlueprint[]>([])
   const [loadingBlueprints, setLoadingBlueprints] = useState(false)
+  const [selectedBlueprintId, setSelectedBlueprintId] = useState<string>(initialBlueprintId)
   const selectedBlueprint = useMemo(
-    () => blueprints.find((item) => String(item.id || "") === blueprintId),
-    [blueprints, blueprintId],
+    () => blueprints.find((item) => String(item.id || "") === selectedBlueprintId),
+    [blueprints, selectedBlueprintId],
   )
   const [appliedBlueprintId, setAppliedBlueprintId] = useState<string>("")
 
@@ -203,6 +357,8 @@ export default function TenantAgentCreatePage() {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("")
+  const [agentSkill, setAgentSkill] = useState("")
+  const [agentInstruction, setAgentInstruction] = useState("")
   const [aiProvider, setAiProvider] = useState<AiProvider>("")
   const [aiModel, setAiModel] = useState("")
   const [authMode, setAuthMode] = useState<AuthMode>("")
@@ -217,7 +373,12 @@ export default function TenantAgentCreatePage() {
   const [assignedUserIds, setAssignedUserIds] = useState<string[]>([])
   const [userSearch, setUserSearch] = useState("")
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
+  const [flowNodeKinds, setFlowNodeKinds] = useState<ConfigNodeType[]>([])
+  const [showNodePicker, setShowNodePicker] = useState(false)
+  const [activeCanvasNodeId, setActiveCanvasNodeId] = useState<string>("blueprint_start")
+  const nodePickerRef = useRef<HTMLDivElement | null>(null)
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
   const [saving, setSaving] = useState(false)
@@ -259,6 +420,8 @@ export default function TenantAgentCreatePage() {
     setName(String(defaults.name || ""))
     setDescription(String(defaults.description || ""))
     setSystemPrompt(String(defaults.systemPrompt || ""))
+    setAgentSkill(String((defaults as { agentSkill?: string }).agentSkill || ""))
+    setAgentInstruction(String((defaults as { agentInstruction?: string }).agentInstruction || ""))
     setAiProvider(defaults.aiProvider === "openrouter" ? "openrouter" : defaults.aiProvider === "openai" ? "openai" : "")
     setAiModel(String(defaults.aiModel || ""))
     setAuthMode(
@@ -276,6 +439,8 @@ export default function TenantAgentCreatePage() {
     setManagerCanRun(Boolean(defaults.managerCanRun ?? true))
     setMemberCanRun(Boolean(defaults.memberCanRun ?? false))
     setIsActive(Boolean(defaults.isActive ?? true))
+    setFlowNodeKinds([])
+    setActiveCanvasNodeId("blueprint_start")
     setAppliedBlueprintId(String(selectedBlueprint.id))
   }, [selectedBlueprint, appliedBlueprintId])
 
@@ -311,23 +476,33 @@ export default function TenantAgentCreatePage() {
 
   const generatedGraph = useMemo(
     () =>
-      buildFlowGraph({
-        name,
-        aiProvider,
-        aiModel,
-        authMode,
-        executionMode,
-        executionTime,
-        timezone,
-        lookbackHours,
-        maxEmails,
-        assignedCount: assignedUserIds.length,
-        hasPrompt: Boolean(systemPrompt.trim()),
-        managerCanRun,
-        memberCanRun,
+      buildCanvasGraph({
+        hasBlueprint: Boolean(selectedBlueprint),
+        blueprintTitle: selectedBlueprint?.title || "Choose blueprint",
+        kinds: flowNodeKinds,
+        values: {
+          name,
+          description,
+          aiProvider,
+          aiModel,
+          authMode,
+          executionMode,
+          executionTime,
+          timezone,
+          lookbackHours,
+          maxEmails,
+          systemPrompt,
+          managerCanRun,
+          memberCanRun,
+          isActive,
+          assignedCount: assignedUserIds.length,
+        },
       }),
     [
+      selectedBlueprint?.title,
+      flowNodeKinds,
       name,
+      description,
       aiProvider,
       aiModel,
       authMode,
@@ -336,10 +511,11 @@ export default function TenantAgentCreatePage() {
       timezone,
       lookbackHours,
       maxEmails,
-      assignedUserIds.length,
       systemPrompt,
       managerCanRun,
       memberCanRun,
+      isActive,
+      assignedUserIds.length,
     ],
   )
 
@@ -347,6 +523,34 @@ export default function TenantAgentCreatePage() {
     setNodes(generatedGraph.nodes)
     setEdges(generatedGraph.edges)
   }, [generatedGraph, setNodes, setEdges])
+
+  useEffect(() => {
+    if (!showNodePicker) return
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+
+      if (nodePickerRef.current && !nodePickerRef.current.contains(target)) {
+        setShowNodePicker(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [showNodePicker])
+
+  const availableNodeTemplates = useMemo(
+    () => FLOW_NODE_LIBRARY.filter((node) => !flowNodeKinds.includes(node.kind)),
+    [flowNodeKinds],
+  )
+
+  const activeNodeKind = useMemo(() => {
+    const node = nodes.find((item) => item.id === activeCanvasNodeId)
+    return node?.data?.kind
+  }, [nodes, activeCanvasNodeId])
 
   const onProviderChange = (value: string) => {
     const provider = value === "openrouter" ? "openrouter" : value === "openai" ? "openai" : ""
@@ -372,9 +576,35 @@ export default function TenantAgentCreatePage() {
     setAssignedUserIds((prev) => Array.from(new Set([...prev, ...ids])))
   }
 
+  const addFlowNode = (kind: ConfigNodeType) => {
+    if (flowNodeKinds.includes(kind)) return
+    setFlowNodeKinds((prev) => [...prev, kind])
+    setActiveCanvasNodeId(`cfg_${kind}`)
+    setShowNodePicker(false)
+  }
+
+  const removeFlowNode = (kind: ConfigNodeType) => {
+    setFlowNodeKinds((prev) => prev.filter((item) => item !== kind))
+    setActiveCanvasNodeId("blueprint_start")
+  }
+
   const createAgent = async () => {
     setError(null)
     setSuccess(null)
+
+    if (!selectedBlueprint) {
+      setError("Select a blueprint before creating an agent.")
+      return
+    }
+
+    const missingRequired = REQUIRED_FLOW_NODES.filter((kind) => !flowNodeKinds.includes(kind))
+    if (missingRequired.length > 0) {
+      const labels = missingRequired
+        .map((kind) => FLOW_NODE_LIBRARY.find((item) => item.kind === kind)?.title || kind)
+        .join(", ")
+      setError(`Add required nodes from + Add Node first: ${labels}.`)
+      return
+    }
 
     if (!tenantId) {
       setError("Tenant selection is required.")
@@ -426,9 +656,11 @@ export default function TenantAgentCreatePage() {
 
     setSaving(true)
     try {
-      const flowSummary = flowSummaryText(generatedGraph.nodes, generatedGraph.edges)
+      const flowSummary = flowSummaryText(nodes, edges)
       const finalPrompt = [
         systemPrompt.trim() || "You are a read-only Gmail analysis assistant. Return strict JSON.",
+        agentSkill.trim() ? `Agent Skill:\n${agentSkill.trim()}` : "",
+        agentInstruction.trim() ? `User Instruction:\n${agentInstruction.trim()}` : "",
         "",
         `Tenant scope: ${tenantId}`,
         `Execution: ${executionMode}${executionMode === "scheduled" ? ` at ${executionTime} ${timezone}` : ""}`,
@@ -442,6 +674,8 @@ export default function TenantAgentCreatePage() {
           name: safeName,
           description: description.trim(),
           systemPrompt: finalPrompt,
+          agentSkill: agentSkill.trim(),
+          agentInstruction: agentInstruction.trim(),
           topK: selectedBlueprint?.defaults.topK || 6,
           isActive: isActive ? 1 : 0,
           allowedCollections: Array.isArray(selectedBlueprint?.defaults.allowedCollections)
@@ -471,7 +705,7 @@ export default function TenantAgentCreatePage() {
         }),
       ) as Promise<unknown>)
 
-      setSuccess(`${selectedBlueprint?.title || "Agent"} created with step-by-step flow and assignment permissions.`)
+      setSuccess(`${selectedBlueprint?.title || "Agent"} created with canvas flow and assignment permissions.`)
     } catch (err: unknown) {
       let message = "Failed to create agent"
 
@@ -506,233 +740,186 @@ export default function TenantAgentCreatePage() {
   }
 
   return (
-    <main className="p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">Create New Agent</h1>
-              <p className="mt-2 text-sm text-slate-600">
-                Configure tenant scope, schedule, permissions, and user assignments. The flow graph appears step by step as you fill inputs.
+    <main className="min-h-screen ">
+      <div className="mx-auto space-y-5">
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-3">
+              <h1 className="text-2xl font-bold text-slate-900">Create Agent Canvas</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Start with agent selection, then add configuration nodes one by one.
               </p>
-              {loadingBlueprints ? <p className="mt-2 text-xs text-slate-500">Loading blueprint from database...</p> : null}
+
+              <div className="grid w-full max-w-2xl gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end">
+                <div className="space-y-1">
+                  <Label className="text-xs text-slate-600">Agent Blueprint</Label>
+                  <Select
+                    value={selectedBlueprintId || "none"}
+                    onValueChange={(value) => {
+                      const nextId = value === "none" ? "" : value
+                      setSelectedBlueprintId(nextId)
+                      setAppliedBlueprintId("")
+                      setFlowNodeKinds([])
+                      setShowNodePicker(false)
+                      setActiveCanvasNodeId("blueprint_start")
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue placeholder="Select agent blueprint" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No blueprint selected</SelectItem>
+                      {blueprints.map((item) => (
+                        <SelectItem key={item.id} value={String(item.id)}>
+                          {item.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 cursor-pointer"
+                  disabled={!selectedBlueprintId}
+                  onClick={() => {
+                    setSelectedBlueprintId("")
+                    setAppliedBlueprintId("")
+                    setFlowNodeKinds([])
+                    setShowNodePicker(false)
+                    setActiveCanvasNodeId("blueprint_start")
+                  }}
+                >
+                  Clear
+                </Button>
+
+                {selectedBlueprint ? (
+                  <Badge variant="outline" className="h-9 justify-center px-3 text-xs">
+                    {CATEGORY_LABEL[normalizeCategory(selectedBlueprint.category)]}
+                  </Badge>
+                ) : null}
+              </div>
+
+              <div className="grid w-full max-w-3xl gap-2 md:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="agent-skill" className="text-xs text-slate-600">Agent Skill</Label>
+                  <Textarea
+                    id="agent-skill"
+                    value={agentSkill}
+                    onChange={(event) => setAgentSkill(event.target.value)}
+                    rows={2}
+                    placeholder="Example: Strong at Gmail triage, deadline extraction, and concise summaries"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="agent-instruction" className="text-xs text-slate-600">Agent Instruction</Label>
+                  <Textarea
+                    id="agent-instruction"
+                    value={agentInstruction}
+                    onChange={(event) => setAgentInstruction(event.target.value)}
+                    rows={2}
+                    placeholder="Example: Always provide action items first, then short reasoning"
+                  />
+                </div>
+              </div>
+
               {selectedBlueprint ? (
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
                   <Badge variant="outline">Blueprint: {selectedBlueprint.title}</Badge>
                   <Badge variant="outline">Category: {CATEGORY_LABEL[normalizeCategory(selectedBlueprint.category)]}</Badge>
                 </div>
-              ) : (
-                <p className="mt-2 text-xs text-slate-500">
-                  Tip: open this page from Agent Blueprint Catalog. Blueprint data is loaded from database API.
-                </p>
-              )}
-            </div>
-            <Link href="/tenant/agents" prefetch={false}>
-              <Button variant="outline" className="cursor-pointer">Back to Agents</Button>
-            </Link>
-          </div>
-        </section>
-        
-        <section className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-          <Card className="rounded-2xl">
-            <CardHeader>
-              <CardTitle>Agent Configuration</CardTitle>
-              <CardDescription>Execution time, status, and permissions.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="agent-name">Agent name</Label>
-                <Input id="agent-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: Finance Inbox Assistant" />
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>AI provider</Label>
-                  <Select value={aiProvider || "none"} onValueChange={onProviderChange}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Provider" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select provider</SelectItem>
-                      <SelectItem value="openai">OpenAI</SelectItem>
-                      <SelectItem value="openrouter">OpenRouter</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>AI model</Label>
-                  <Select value={aiModel || "none"} onValueChange={(value) => setAiModel(value === "none" ? "" : value)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Model" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select model</SelectItem>
-                      {(aiProvider ? AI_MODEL_OPTIONS[aiProvider] : []).map((model) => (
-                        <SelectItem key={model} value={model}>{model}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Google auth mode</Label>
-                  <Select value={authMode || "none"} onValueChange={(value) => setAuthMode(value === "none" ? "" : (value as AuthMode))}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Auth mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select auth mode</SelectItem>
-                      <SelectItem value="tenant_shared_connection">Tenant shared connection</SelectItem>
-                      <SelectItem value="user_personal_connection">User personal connection</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Execution mode</Label>
-                  <Select value={executionMode || "none"} onValueChange={(value) => setExecutionMode(value === "none" ? "" : (value as ExecutionMode))}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Execution mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select mode</SelectItem>
-                      <SelectItem value="manual">Manual run</SelectItem>
-                      <SelectItem value="scheduled">Scheduled run</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {executionMode === "scheduled" ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="execution-time">Execution time</Label>
-                    <Input id="execution-time" type="time" value={executionTime} onChange={(event) => setExecutionTime(event.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Timezone</Label>
-                    <Select value={timezone} onValueChange={setTimezone}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Timezone" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TIMEZONE_OPTIONS.map((tz) => (
-                          <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
               ) : null}
+              {loadingBlueprints ? <p className="mt-2 text-xs text-slate-500">Loading blueprint records...</p> : null}
+            </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="lookback">Lookback (hours)</Label>
-                  <Input id="lookback" type="number" min={1} max={168} value={lookbackHours} onChange={(event) => setLookbackHours(event.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="max-emails">Max emails</Label>
-                  <Input id="max-emails" type="number" min={1} max={100} value={maxEmails} onChange={(event) => setMaxEmails(event.target.value)} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea id="description" rows={2} value={description} onChange={(event) => setDescription(event.target.value)} />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-prompt">System prompt</Label>
-                <Textarea id="system-prompt" rows={3} value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} placeholder="Write instructions for the agent behavior" />
-              </div>
-
-              {/* VIP senders removed */}
-
-              <div className="space-y-2">
-                <Label>Role permissions</Label>
-                <div className="grid gap-2 rounded-lg border p-3">
-                  <label className="flex items-center justify-between rounded-md border p-2">
-                    <span className="text-sm">manager can run</span>
-                    <Switch checked={managerCanRun} className=" cursor-pointer"  onCheckedChange={(checked) => setManagerCanRun(Boolean(checked))} />
-                  </label>
-                  <label className="flex items-center justify-between rounded-md border p-2">
-                    <span className="text-sm">member can run</span>
-                    <Switch checked={memberCanRun} className=" cursor-pointer" onCheckedChange={(checked) => setMemberCanRun(Boolean(checked))} />
-                  </label>
-                  <label className="flex items-center justify-between rounded-md border p-2">
-                    <span className="text-sm">agent active (is_active)</span>
-                    <Switch checked={isActive} className=" cursor-pointer" onCheckedChange={(checked) => setIsActive(Boolean(checked))} />
-                  </label>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Assign users (multi-select)</Label>
-                  <Link href="/tenant/users/view" className="text-xs text-primary underline underline-offset-4">Manage tenant users</Link>
-                </div>
-
-                <div className="grid gap-2 rounded-lg border p-2">
-                  <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users by name or email" />
-                  <Button type="button" variant="outline" className="cursor-pointer" onClick={toggleSelectAllFiltered}>
-                    Toggle Select Visible Users ({filteredUsers.length})
-                  </Button>
-                </div>
-
-                <div className="max-h-52 space-y-2 overflow-y-auto rounded-lg border p-2">
-                  {loadingUsers ? <p className="p-2 text-sm text-muted-foreground">Loading users...</p> : null}
-                  {!loadingUsers && filteredUsers.length === 0 ? <p className="p-2 text-sm text-muted-foreground">No users found.</p> : null}
-                  {filteredUsers.map((user) => {
-                    const selected = assignedUserIds.includes(String(user.id))
-                    return (
-                      <label key={user.id} className="flex items-center justify-between rounded-md border p-2">
-                        <div>
-                          <p className="text-sm font-medium">{formatUserName(user)}</p>
-                          <p className="text-xs text-muted-foreground">{user.email}</p>
-                        </div>
-                        <Switch checked={selected} className=" cursor-pointer" onCheckedChange={() => toggleAssigned(String(user.id))} />
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-              {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-              {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
-
-              <Button className="w-full cursor-pointer" onClick={createAgent} disabled={saving}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link href="/tenant/agents" prefetch={false}>
+                <Button variant="outline" className="cursor-pointer">Back to Agents</Button>
+              </Link>
+              <Button className="cursor-pointer" disabled={!selectedBlueprint || saving} onClick={createAgent}>
                 {saving ? "Saving..." : `Create ${selectedBlueprint?.title || "Agent"}`}
               </Button>
+            </div>
+          </div>
+        </section>
 
-              <div className="flex flex-wrap gap-2 text-xs">
-                <Badge variant="outline">tenant scoped</Badge>
-                <Badge variant="outline">permission aware</Badge>
-                <Badge variant="outline">is_active: {isActive ? "1" : "0"}</Badge>
+        <section className="grid grid-cols-1 gap-5 ">
+          <Card className="rounded-3xl">
+            <CardHeader className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Flow Builder Canvas</CardTitle>
+                  <CardDescription>Flowise-style sequence with node-by-node setup.</CardDescription>
+                </div>
+                <div ref={nodePickerRef} className="relative flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="cursor-pointer"
+                    disabled={!selectedBlueprint}
+                    onClick={() => setShowNodePicker((prev) => !prev)}
+                  >
+                    <Plus/> Add Node
+                  </Button>
+
+                  {showNodePicker ? (
+                    <div className="absolute right-0 top-11 z-30 w-[min(48rem,92vw)] rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-lg">
+                      {availableNodeTemplates.length === 0 ? (
+                        <p className="text-xs text-slate-500">All available configuration nodes are already on canvas.</p>
+                      ) : (
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {availableNodeTemplates.map((node) => (
+                            <button
+                              key={node.kind}
+                              type="button"
+                              className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-blue-300 hover:bg-blue-50/40"
+                              onClick={() => addFlowNode(node.kind)}
+                              disabled={!selectedBlueprint}
+                            >
+                              <p className="text-sm font-semibold text-slate-900">{node.title}</p>
+                              <p className="mt-1 text-xs text-slate-600">{node.description}</p>
+                              {node.required ? <p className="mt-1 text-[11px] font-medium text-blue-700">Required</p> : null}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl">
-            <CardHeader>
-              <CardTitle>Agent Flow Editor</CardTitle>
-              <CardDescription>Right-side flow updates automatically as each setup step is completed.</CardDescription>
             </CardHeader>
+
             <CardContent className="space-y-4">
-              <div className="h-130 rounded-xl border">
+              <div className="relative h-[64vh] min-h-115 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,#e2e8f0_1px,transparent_0)] bg-size-[24px_24px]">
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
                   onNodesChange={onNodesChange}
                   onEdgesChange={onEdgesChange}
+                  onNodeClick={(_, node) => setActiveCanvasNodeId(node.id)}
                   fitView
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  elementsSelectable
                 >
-                  <MiniMap />
+                  {/* <MiniMap zoomable pannable /> */}
                   <Controls />
-                  <Background gap={16} />
+                  <Background gap={18} size={1} />
                 </ReactFlow>
+
+                {/* {!selectedBlueprint ? (
+                  <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white/90 px-4 py-3 text-center">
+                      <p className="text-sm font-medium text-slate-700">Canvas is blank</p>
+                      <p className="mt-1 text-xs text-slate-500">Select an agent blueprint to begin.</p>
+                    </div>
+                  </div>
+                ) : null} */}
               </div>
 
-              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground whitespace-pre-wrap">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-wrap">
                 {flowSummaryText(nodes, edges)}
               </div>
             </CardContent>

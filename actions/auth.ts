@@ -139,6 +139,8 @@ type TenantAgentCreateInput = {
   name: string
   description?: string
   systemPrompt?: string
+  agentSkill?: string
+  agentInstruction?: string
   topK?: number
   isActive?: 0 | 1
   allowedCollections?: string[]
@@ -171,6 +173,8 @@ export type TenantAgentBlueprintDefaults = {
   name?: string
   description?: string
   systemPrompt?: string
+  agentSkill?: string
+  agentInstruction?: string
   aiProvider?: "openai" | "openrouter"
   aiModel?: string
   authMode?: "tenant_shared_connection" | "user_personal_connection"
@@ -1052,6 +1056,8 @@ export const createTenantAgent =
         name: input.name,
         description: input.description || "",
         systemPrompt: input.systemPrompt || "",
+        agentSkill: input.agentSkill || "",
+        agentInstruction: input.agentInstruction || "",
         topK: input.topK ?? 6,
         isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
         allowedCollections: Array.isArray(input.allowedCollections) ? input.allowedCollections : [],
