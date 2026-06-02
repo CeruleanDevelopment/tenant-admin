@@ -41,6 +41,8 @@ import type { AppDispatch } from "../../../../../redux/store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 type TenantAgentCard = {
   id: string
@@ -150,12 +152,13 @@ const formatTimeFromIso = (value?: string): string => {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
-const formatSessionDate = (value?: string): string => {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return `${date.toLocaleDateString()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
-}
+const mapHistoryRowsToMessages = (rows: Record<string, unknown>[]): ChatMessage[] =>
+  rows.map((row, index) => ({
+    id: String(row.id || `history-${Date.now()}-${index}`),
+    role: String(row.role || "assistant") === "user" ? "user" : "assistant",
+    text: String(row.content || ""),
+    time: formatTimeFromIso(String(row.created_at || "")),
+  }))
 
 const formatFileSize = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
@@ -221,9 +224,15 @@ export default function UserAgentChatPage() {
   const [sessionPersisted, setSessionPersisted] = useState(false)
   const [userSessions, setUserSessions] = useState<UserChatSession[]>([])
   const [loadingUserSessions, setLoadingUserSessions] = useState(false)
+  const [openSessionMenuId, setOpenSessionMenuId] = useState<string | null>(null)
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editingSessionTitle, setEditingSessionTitle] = useState("")
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [sessionToDelete, setSessionToDelete] = useState<UserChatSession | null>(null)
+  const [deletingSession, setDeletingSession] = useState(false)
   // auto-analysis disabled; no auto-run on page load
   const [conversationTitle, setConversationTitle] = useState<string | null>(null)
-  const [openSessionMenuId, setOpenSessionMenuId] = useState<string | null>(null)
   const loadedHistoryRef = useRef<Set<string>>(new Set())
   const activeChatIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
@@ -231,6 +240,7 @@ export default function UserAgentChatPage() {
   const photosInputRef = useRef<HTMLInputElement | null>(null)
   const mediaInputRef = useRef<HTMLInputElement | null>(null)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
   const lastAgentsFetchAtRef = useRef(0)
   const lastSessionsFetchAtRef = useRef(0)
@@ -240,23 +250,30 @@ export default function UserAgentChatPage() {
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
   const SESSIONS_REFRESH_COOLDOWN_MS = 30000
 
-  const loadUserSessions = useCallback(async (force = false) => {
+  const loadUserSessions = useCallback(async (force = false, options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent)
     const now = Date.now()
     if (!force && now - lastSessionsFetchAtRef.current < SESSIONS_REFRESH_COOLDOWN_MS) return
     if (sessionsRequestInFlightRef.current) return
 
     sessionsRequestInFlightRef.current = true
     lastSessionsFetchAtRef.current = now
-    setLoadingUserSessions(true)
+    if (!silent) {
+      setLoadingUserSessions(true)
+    }
     try {
       const rows = (await dispatch(fetchUserChatSessions() as any)) as UserChatSession[]
       const mapped = Array.isArray(rows) ? rows : []
       setUserSessions(mapped)
     } catch {
-      setUserSessions([])
+      if (!silent) {
+        setUserSessions([])
+      }
     } finally {
       sessionsRequestInFlightRef.current = false
-      setLoadingUserSessions(false)
+      if (!silent) {
+        setLoadingUserSessions(false)
+      }
     }
   }, [dispatch])
 
@@ -439,12 +456,7 @@ export default function UserAgentChatPage() {
         }
 
         if (historyRows.length) {
-          const mapped = historyRows.map((row: Record<string, unknown>) => ({
-            id: String(row.id || `history-${Date.now()}`),
-            role: String(row.role || "assistant") === "user" ? "user" : "assistant",
-            text: String(row.content || ""),
-            time: formatTimeFromIso(String(row.created_at || "")),
-          })) as ChatMessage[]
+          const mapped = mapHistoryRowsToMessages(historyRows)
 
           setMessagesByAgent((prev) => ({
             ...prev,
@@ -548,27 +560,31 @@ export default function UserAgentChatPage() {
     }
   }, [attachmentMenuOpen])
 
-  const renameSession = async (session: UserChatSession) => {
+  useEffect(() => {
+    if (!editingSessionId) return
+
+    const id = window.requestAnimationFrame(() => {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    })
+
+    return () => window.cancelAnimationFrame(id)
+  }, [editingSessionId])
+
+  const renameSession = async (session: UserChatSession, nextTitle: string): Promise<boolean> => {
     if (!selectedAgentId) {
       setError("Select an agent first.")
       setOpenSessionMenuId(null)
-      return
-    }
-
-    const nextTitle = window.prompt("Rename chat", String(session.title || "New chat"))
-    if (nextTitle === null) {
-      setOpenSessionMenuId(null)
-      return
+      return false
     }
 
     const title = String(nextTitle).trim()
     if (!title) {
-      setError("Title cannot be empty.")
-      setOpenSessionMenuId(null)
-      return
+      return false
     }
 
     try {
+      setRenamingSessionId(session.id)
       await dispatch(
         renameTenantAgentConversationUser({
           agentId: String(selectedAgentId),
@@ -580,28 +596,65 @@ export default function UserAgentChatPage() {
       if (activeChatId === session.id) {
         setConversationTitle(title)
       }
-      await loadUserSessions(true)
+      setUserSessions((prev) =>
+        prev.map((item) =>
+          item.id === session.id
+            ? {
+                ...item,
+                title,
+              }
+            : item,
+        ),
+      )
+      void loadUserSessions(true, { silent: true })
       setError(null)
+      return true
     } catch (err) {
       setError(
         typeof err === "object" && err !== null && "message" in err
           ? String((err as { message?: string }).message || "Failed to rename conversation")
           : "Failed to rename conversation",
       )
+      return false
     } finally {
+      setRenamingSessionId(null)
       setOpenSessionMenuId(null)
+    }
+  }
+
+  const startInlineRename = (session: UserChatSession) => {
+    setOpenSessionMenuId(null)
+    setEditingSessionId(session.id)
+    setEditingSessionTitle(String(session.title || "New chat"))
+    setError(null)
+  }
+
+  const cancelInlineRename = () => {
+    if (renamingSessionId) return
+    setEditingSessionId(null)
+    setEditingSessionTitle("")
+  }
+
+  const submitInlineRename = async (session: UserChatSession) => {
+    const currentTitle = String(session.title || "New chat").trim()
+    const nextTitle = String(editingSessionTitle || "").trim()
+
+    // If title was not changed (or cleared), close edit mode and keep current value.
+    if (!nextTitle || nextTitle === currentTitle) {
+      cancelInlineRename()
+      return
+    }
+
+    const ok = await renameSession(session, nextTitle)
+    if (ok) {
+      setEditingSessionId(null)
+      setEditingSessionTitle("")
     }
   }
 
   const deleteSession = async (session: UserChatSession) => {
     if (!selectedAgentId) {
       setError("Select an agent first.")
-      setOpenSessionMenuId(null)
-      return
-    }
-
-    const confirmed = window.confirm(`Delete chat \"${session.title || "New chat"}\"? This cannot be undone.`)
-    if (!confirmed) {
       setOpenSessionMenuId(null)
       return
     }
@@ -628,7 +681,8 @@ export default function UserAgentChatPage() {
         setConversationTitle(null)
       }
 
-      await loadUserSessions(true)
+      setUserSessions((prev) => prev.filter((item) => item.id !== session.id))
+      void loadUserSessions(true, { silent: true })
       setError(null)
     } catch (err) {
       setError(
@@ -640,6 +694,33 @@ export default function UserAgentChatPage() {
       setOpenSessionMenuId(null)
     }
   }
+
+  const requestDeleteSession = (session: UserChatSession) => {
+    setOpenSessionMenuId(null)
+    setEditingSessionId(null)
+    setEditingSessionTitle("")
+    setSessionToDelete(session)
+    setDeleteConfirmOpen(true)
+  }
+
+  const confirmDeleteSession = async () => {
+    if (!sessionToDelete) return
+    setDeletingSession(true)
+    await deleteSession(sessionToDelete)
+    setDeletingSession(false)
+    setDeleteConfirmOpen(false)
+    setSessionToDelete(null)
+  }
+
+  const openSession = useCallback((sessionId: string) => {
+    if (!selectedAgentId) return
+    setChatIdByAgent((prev) => ({
+      ...prev,
+      [selectedAgentId]: sessionId,
+    }))
+    router.replace(buildChatUrl(selectedAgentId, sessionId))
+    setOpenSessionMenuId(null)
+  }, [router, selectedAgentId])
 
   const sendMessage = async () => {
     const message = input.trim()
@@ -760,7 +841,7 @@ export default function UserAgentChatPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={selectedAgentIsGmail && !selectedAgent?.oauthReady ? "destructive" : "outline"}>
+            {/* <Badge variant={selectedAgentIsGmail && !selectedAgent?.oauthReady ? "destructive" : "outline"}>
               {selectedAgentIsGmail ? (selectedAgent?.oauthReady ? "Integration connected" : "Integration required") : "Workflow ready"}
             </Badge>
             <Badge variant="outline">{selectedWorkflowType}</Badge>
@@ -770,7 +851,7 @@ export default function UserAgentChatPage() {
                   <CheckCircle2 className="mr-2 inline-block h-4 w-4 align-text-bottom" />
                   Session persisted
                 </Badge>
-              ) : null}
+              ) : null} */}
 
               <Button type="button" variant="outline" className="cursor-pointer" onClick={openAssignedAgents}>
               <ArrowLeft className="mr-2 h-4 w-4" />
@@ -781,17 +862,22 @@ export default function UserAgentChatPage() {
 
         {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
 
-        <div className="grid gap-4 lg:items-stretch lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="relative z-20 flex h-full flex-col rounded-3xl border-white/80 bg-white/90 shadow-sm">
-            <CardHeader>
-              <CardTitle>Configured Agents</CardTitle>
-              <CardDescription>Choose the agent you want to talk to.</CardDescription>
+        <div className="grid gap-4 lg:items-stretch lg:grid-cols-[360px_minmax(0,1fr)]">
+          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-3xl border-white/80 bg-white/90 shadow-sm lg:sticky lg:top-4">
+            <CardHeader className="border-b bg-linear-to-r from-primary/5 via-white to-sky-50/60 pb-4">
+              <CardTitle className="flex items-center justify-between gap-3 text-lg">
+                <span>Recent Conversations</span>
+                <Badge variant="outline" className="shrink-0">{userSessions.length}</Badge>
+              </CardTitle>
+              {/* <CardDescription className="mt-2">
+                Pick a conversation or open the current one from the list.
+              </CardDescription> */}
             </CardHeader>
-            <CardContent className="space-y-3">
-              {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-3">
+              {/* {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
               {!loadingAgents && agents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No configured agents found.</p>
-              ) : null}
+              ) : null} */}
 
               {/* <div className="space-y-2">
                 {agents.map((agent) => {
@@ -841,86 +927,109 @@ export default function UserAgentChatPage() {
                 </p>
               </div> */}
 
-              <div className="rounded-2xl border bg-white p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                    <MessageSquare className="h-4 w-4 text-primary" />
-                    Recent Conversations
-                  </div>
-                  {/* <Badge variant="outline">{userSessions.length}</Badge> */}
-                </div>
-                <p className="mb-2 text-xs text-muted-foreground">
-                  All user chat sessions (chat ID wise).
-                </p>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white">
 
-                {loadingUserSessions ? <p className="text-xs text-muted-foreground">Loading sessions...</p> : null}
+                {loadingUserSessions ? <p className="px-3 py-2 text-xs text-muted-foreground">Loading sessions...</p> : null}
 
                 {!loadingUserSessions && userSessions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No conversation history found yet.</p>
+                  <div className="flex min-h-45 items-center justify-center px-4 py-6 text-center">
+                    <p className="text-sm text-muted-foreground">No conversation history found yet.</p>
+                  </div>
                 ) : null}
 
-                <div className="max-h-80 space-y-2 overflow-y-auto pr-3">
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 pr-2">
                   {userSessions.map((session) => {
                     const isActiveSession = activeChatId === session.id
+                    const canOpenSession = Boolean(selectedAgentId)
+                    const isEditingSession = editingSessionId === session.id
                     return (
                       <div
                         key={session.id}
-                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                        className={`relative flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition ${
                           isActiveSession
-                            ? "border-primary/40 bg-primary/5"
+                            ? "border-primary/40 bg-primary/5 shadow-sm"
                             : "border-slate-200 bg-slate-50 hover:border-primary/20 hover:bg-primary/5"
-                        }`}
+                        } ${canOpenSession ? "" : "opacity-70"}`}
                       >
-                        <div className="flex items-center gap-2">
+                        {isEditingSession ? (
+                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                            <input
+                              ref={renameInputRef}
+                              value={editingSessionTitle}
+                              onChange={(event) => setEditingSessionTitle(event.target.value)}
+                              onBlur={() => {
+                                void submitInlineRename(session)
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault()
+                                  void submitInlineRename(session)
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault()
+                                  cancelInlineRename()
+                                }
+                              }}
+                              className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-800 outline-none focus:border-primary"
+                              disabled={renamingSessionId === session.id}
+                            />
+                          </div>
+                        ) : (
                           <button
                             type="button"
-                            className="min-w-0 flex-1 text-left cursor-pointer"
+                            className={`min-w-0 flex-1 text-left ${canOpenSession ? "cursor-pointer" : "cursor-not-allowed"}`}
                             onClick={() => {
-                              if (!selectedAgentId) return
-                              setSelectedAgentId(selectedAgentId)
-                              setChatIdByAgent((prev) => ({
-                                ...prev,
-                                [selectedAgentId]: session.id,
-                              }))
-                              router.replace(buildChatUrl(selectedAgentId, session.id))
-                              setOpenSessionMenuId(null)
+                              if (!canOpenSession) return
+                              openSession(session.id)
                             }}
                           >
-                            <p className="truncate text-xs font-semibold text-slate-800">{session.title || "New chat"}</p>
+                            <p className="truncate text-sm font-semibold text-slate-800">{session.title || "New chat"}</p>
                           </button>
+                        )}
 
-                          <div className="relative">
+                        <Popover
+                          open={!isEditingSession && openSessionMenuId === session.id}
+                          onOpenChange={(open) => {
+                            if (!canOpenSession) return
+                            if (isEditingSession) return
+                            setOpenSessionMenuId(open ? session.id : null)
+                          }}
+                        >
+                          <PopoverTrigger asChild>
                             <button
                               type="button"
                               aria-label="Conversation actions"
-                              className="cursor-pointer rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-800"
-                              onClick={() => setOpenSessionMenuId((prev) => (prev === session.id ? null : session.id))}
+                              disabled={!canOpenSession || isEditingSession}
+                              className="cursor-pointer rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               <MoreVertical className="h-4 w-4" />
                             </button>
-
-                            {openSessionMenuId === session.id ? (
-                              <div className="absolute -right-10 top-full z-50 mt-1 w-36 origin-top-right rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                                <button
-                                  type="button"
-                                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-slate-100"
-                                  onClick={() => void renameSession(session)}
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                  Rename
-                                </button>
-                                <button
-                                  type="button"
-                                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-rose-600 transition hover:bg-rose-50"
-                                  onClick={() => void deleteSession(session)}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  Delete
-                                </button>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            side="right"
+                            align="start"
+                            sideOffset={8}
+                            avoidCollisions={false}
+                            className="z-120 w-32 rounded-xl border border-slate-200 bg-white p-1 shadow-xl"
+                          >
+                            <button
+                              type="button"
+                              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-slate-100"
+                              onClick={() => startInlineRename(session)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-rose-600 transition hover:bg-rose-50"
+                              onClick={() => requestDeleteSession(session)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
+                            </button>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     )
                   })}
@@ -936,26 +1045,26 @@ export default function UserAgentChatPage() {
                   <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
                     <Bot className="h-5 w-5 text-primary" />
                     <div className="flex items-center gap-3">
-                      <span>{selectedAgent?.name || "No agent selected"}</span>
+                      {/* <span>{selectedAgent?.name || "No agent selected"}</span> */}
                       {conversationTitle ? (
-                        <span className="text-sm text-muted-foreground">{conversationTitle}</span>
+                        <span className="">{conversationTitle}</span>
                       ) : null}
                     </div>
                   </CardTitle>
-                  <CardDescription>
+                  {/* <CardDescription>
                     {selectedAgent
                       ? `${selectedWorkflowType} workflow, ${selectedAgent.executionMode} execution, model ${selectedAgent.aiModel}.`
                       : "Select an agent to start chat."}
-                  </CardDescription>
+                  </CardDescription> */}
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                {/* <div className="flex flex-wrap gap-2">
                   <Badge variant="outline">
                     {selectedAgent?.authMode === "user_personal_connection" ? "personal connection" : "tenant shared"}
                   </Badge>
                   <Badge variant="outline">{selectedAgent?.aiModel || "gpt-4.1-mini"}</Badge>
                   <Badge variant="outline">{selectedAgent?.executionMode || "manual"}</Badge>
-                </div>
+                </div> */}
               </div>
             </CardHeader>
 
@@ -1145,7 +1254,7 @@ export default function UserAgentChatPage() {
                           <button
                             type="button"
                             onClick={() => removeAttachment(attachment.id)}
-                            className="rounded-full p-0.5 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
+                            className="cursor-pointer rounded-full p-0.5 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
                             aria-label={`Remove ${attachment.file.name}`}
                           >
                             <X className="h-3 w-3" />
@@ -1160,7 +1269,7 @@ export default function UserAgentChatPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-12 w-12 rounded-2xl"
+                        className="h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed"
                         disabled={!selectedAgentId || sending}
                         onClick={() => setAttachmentMenuOpen((prev) => !prev)}
                       >
@@ -1229,7 +1338,7 @@ export default function UserAgentChatPage() {
                     <Button
                       type="button"
                       variant={isMicActive ? "default" : "outline"}
-                      className={`h-12 w-12 rounded-2xl ${isMicActive ? "bg-rose-500 text-white hover:bg-rose-600" : ""}`}
+                      className={`h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed ${isMicActive ? "bg-rose-500 text-white hover:bg-rose-600" : ""}`}
                       disabled={!selectedAgentId || sending}
                       onClick={toggleMic}
                     >
@@ -1238,7 +1347,7 @@ export default function UserAgentChatPage() {
 
                     <Button
                       type="button"
-                      className="h-12 w-12 rounded-2xl bg-primary text-white shadow-lg cursor-pointer shadow-primary/20 hover:bg-primary-light"
+                      className="h-12 w-12 cursor-pointer rounded-2xl bg-primary text-white shadow-lg shadow-primary/20 hover:bg-primary-light disabled:cursor-not-allowed"
                       disabled={!selectedAgentId || sending || (!input.trim() && attachments.length === 0)}
                       onClick={() => void sendMessage()}
                     >
@@ -1251,6 +1360,51 @@ export default function UserAgentChatPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Dialog
+          open={deleteConfirmOpen}
+          onOpenChange={(open) => {
+            if (deletingSession) return
+            setDeleteConfirmOpen(open)
+            if (!open) {
+              setSessionToDelete(null)
+            }
+          }}
+        >
+          <DialogContent showCloseButton={false} className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 sm:max-w-sm">
+            <DialogHeader className="px-5 pb-3 pt-5">
+              <DialogTitle className="text-base font-semibold text-slate-900">Delete conversation?</DialogTitle>
+              <DialogDescription className="pt-2 text-sm text-slate-600">
+                This action is permanent and cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <p className="mb-3 truncate text-xs text-slate-500">{sessionToDelete?.title || "New chat"}</p>
+              <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="cursor-pointer disabled:cursor-not-allowed"
+                onClick={() => {
+                  if (deletingSession) return
+                  setDeleteConfirmOpen(false)
+                  setSessionToDelete(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="cursor-pointer bg-rose-600 text-white hover:bg-rose-700 disabled:cursor-not-allowed"
+                onClick={() => void confirmDeleteSession()}
+                disabled={deletingSession || !sessionToDelete}
+              >
+                {deletingSession ? "Deleting..." : "Delete"}
+              </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </main>
   )

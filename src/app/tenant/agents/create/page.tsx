@@ -2,8 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
-import { createTenantAgent, fetchTenantUsers, upsertTenantAgentAssignment } from "../../../../../actions/auth"
+import {
+  createTenantAgent,
+  fetchTenantAgentBlueprints,
+  fetchTenantUsers,
+  type TenantAgentBlueprint,
+  upsertTenantAgentAssignment,
+} from "../../../../../actions/auth"
 import type { AppDispatch } from "../../../../../redux/store"
 import type { RootState } from "../../../../../redux/reducers"
 import { Badge } from "@/components/ui/badge"
@@ -42,6 +49,18 @@ type TenantUser = {
 type AiProvider = "" | "openai" | "openrouter"
 type AuthMode = "" | "tenant_shared_connection" | "user_personal_connection"
 type ExecutionMode = "" | "manual" | "scheduled"
+
+type AgentCategory = "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
+
+const CATEGORY_LABEL: Record<AgentCategory, string> = {
+  gmail: "Gmail",
+  crm: "CRM",
+  support: "Support",
+  calendar: "Calendar",
+  knowledge: "Knowledge",
+  automation: "Automation",
+  general: "General",
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -165,11 +184,18 @@ const flowSummaryText = (nodes: Node[], edges: Edge[]): string => {
 
 export default function TenantAgentCreatePage() {
   const dispatch = useDispatch<AppDispatch>()
+  const searchParams = useSearchParams()
 
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
-  console.log(tenantProfile,"tenantProfile");
-  
   const tenantId = String(tenantProfile?.id || "")
+  const blueprintId = String(searchParams.get("blueprint") || "").trim()
+  const [blueprints, setBlueprints] = useState<TenantAgentBlueprint[]>([])
+  const [loadingBlueprints, setLoadingBlueprints] = useState(false)
+  const selectedBlueprint = useMemo(
+    () => blueprints.find((item) => String(item.id || "") === blueprintId),
+    [blueprints, blueprintId],
+  )
+  const [appliedBlueprintId, setAppliedBlueprintId] = useState<string>("")
 
   const [users, setUsers] = useState<TenantUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
@@ -197,6 +223,61 @@ export default function TenantAgentCreatePage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+
+  const normalizeCategory = (value: string): AgentCategory => {
+    const key = String(value || "").toLowerCase()
+    if (key === "gmail") return "gmail"
+    if (key === "crm") return "crm"
+    if (key === "support") return "support"
+    if (key === "calendar") return "calendar"
+    if (key === "knowledge") return "knowledge"
+    if (key === "automation") return "automation"
+    return "general"
+  }
+
+  const loadBlueprints = useCallback(async () => {
+    setLoadingBlueprints(true)
+    try {
+      const rows = await (dispatch(fetchTenantAgentBlueprints()) as Promise<TenantAgentBlueprint[]>)
+      setBlueprints(Array.isArray(rows) ? rows : [])
+    } catch {
+      setBlueprints([])
+    } finally {
+      setLoadingBlueprints(false)
+    }
+  }, [dispatch])
+
+  useEffect(() => {
+    void loadBlueprints()
+  }, [loadBlueprints])
+
+  useEffect(() => {
+    if (!selectedBlueprint) return
+    if (appliedBlueprintId === String(selectedBlueprint.id)) return
+
+    const defaults = selectedBlueprint.defaults || {}
+    setName(String(defaults.name || ""))
+    setDescription(String(defaults.description || ""))
+    setSystemPrompt(String(defaults.systemPrompt || ""))
+    setAiProvider(defaults.aiProvider === "openrouter" ? "openrouter" : defaults.aiProvider === "openai" ? "openai" : "")
+    setAiModel(String(defaults.aiModel || ""))
+    setAuthMode(
+      defaults.authMode === "user_personal_connection"
+        ? "user_personal_connection"
+        : defaults.authMode === "tenant_shared_connection"
+          ? "tenant_shared_connection"
+          : "",
+    )
+    setExecutionMode(defaults.executionMode === "scheduled" ? "scheduled" : defaults.executionMode === "manual" ? "manual" : "")
+    setExecutionTime(String(defaults.executionTime || "09:00"))
+    setTimezone(String(defaults.timezone || "UTC"))
+    setLookbackHours(String(defaults.lookbackHours ?? 24))
+    setMaxEmails(String(defaults.maxEmails ?? 75))
+    setManagerCanRun(Boolean(defaults.managerCanRun ?? true))
+    setMemberCanRun(Boolean(defaults.memberCanRun ?? false))
+    setIsActive(Boolean(defaults.isActive ?? true))
+    setAppliedBlueprintId(String(selectedBlueprint.id))
+  }, [selectedBlueprint, appliedBlueprintId])
 
   const loadUsers = useCallback(async () => {
     setLoadingUsers(true)
@@ -361,9 +442,11 @@ export default function TenantAgentCreatePage() {
           name: safeName,
           description: description.trim(),
           systemPrompt: finalPrompt,
-          topK: 6,
+          topK: selectedBlueprint?.defaults.topK || 6,
           isActive: isActive ? 1 : 0,
-          allowedCollections: [],
+          allowedCollections: Array.isArray(selectedBlueprint?.defaults.allowedCollections)
+            ? selectedBlueprint?.defaults.allowedCollections
+            : [],
         }),
       ) as Promise<{ agent?: { id?: string } }>)
 
@@ -388,7 +471,7 @@ export default function TenantAgentCreatePage() {
         }),
       ) as Promise<unknown>)
 
-      setSuccess("Gmail agent created with step-by-step flow and assignment permissions.")
+      setSuccess(`${selectedBlueprint?.title || "Agent"} created with step-by-step flow and assignment permissions.`)
     } catch (err: unknown) {
       let message = "Failed to create agent"
 
@@ -432,6 +515,17 @@ export default function TenantAgentCreatePage() {
               <p className="mt-2 text-sm text-slate-600">
                 Configure tenant scope, schedule, permissions, and user assignments. The flow graph appears step by step as you fill inputs.
               </p>
+              {loadingBlueprints ? <p className="mt-2 text-xs text-slate-500">Loading blueprint from database...</p> : null}
+              {selectedBlueprint ? (
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <Badge variant="outline">Blueprint: {selectedBlueprint.title}</Badge>
+                  <Badge variant="outline">Category: {CATEGORY_LABEL[normalizeCategory(selectedBlueprint.category)]}</Badge>
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-slate-500">
+                  Tip: open this page from Agent Blueprint Catalog. Blueprint data is loaded from database API.
+                </p>
+              )}
             </div>
             <Link href="/tenant/agents" prefetch={false}>
               <Button variant="outline" className="cursor-pointer">Back to Agents</Button>
@@ -607,7 +701,7 @@ export default function TenantAgentCreatePage() {
               {success ? <p className="text-sm text-emerald-700">{success}</p> : null}
 
               <Button className="w-full cursor-pointer" onClick={createAgent} disabled={saving}>
-                {saving ? "Saving..." : "Create Gmail Agent"}
+                {saving ? "Saving..." : `Create ${selectedBlueprint?.title || "Agent"}`}
               </Button>
 
               <div className="flex flex-wrap gap-2 text-xs">

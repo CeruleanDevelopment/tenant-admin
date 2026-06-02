@@ -92,6 +92,7 @@ const data: {
       ),
       items: [
         { title: "Agents", url: "/tenant/agents" },
+        { title: "Created Agents", url: "/tenant/agents/created" },
       ],
     },
     /*
