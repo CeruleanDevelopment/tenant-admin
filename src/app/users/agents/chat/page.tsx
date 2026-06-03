@@ -189,6 +189,8 @@ const buildChatUrl = (agentId: string, chatId?: string): string => {
   return query ? `/users/agents/chat?${query}` : "/users/agents/chat"
 }
 
+const buildMessageBucketKey = (agentId: string, chatId: string): string => `${agentId}:${chatId}`
+
 const getInitialMessages = (): ChatMessage[] => []
 // const buildInitialMessages = (agentName?: string, connected?: boolean): ChatMessage[] => [
 //   {
@@ -213,7 +215,7 @@ export default function UserAgentChatPage() {
 
   const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId)
   const [chatIdByAgent, setChatIdByAgent] = useState<Record<string, string>>({})
-  const [messagesByAgent, setMessagesByAgent] = useState<Record<string, ChatMessage[]>>({})
+  const [messagesByBucket, setMessagesByBucket] = useState<Record<string, ChatMessage[]>>({})
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false)
@@ -373,21 +375,26 @@ export default function UserAgentChatPage() {
     router.replace(buildChatUrl(agents[0].id, chatIdByAgent[agents[0].id]))
   }, [agents, router, selectedAgentId])
 
+  const firstUserSessionId = String(userSessions[0]?.id || "").trim()
+
   useEffect(() => {
     if (!selectedAgentId) return
 
     setChatIdByAgent((prev) => {
-      if (prev[selectedAgentId]) {
+      if (Object.prototype.hasOwnProperty.call(prev, selectedAgentId)) {
         return prev
       }
 
-      const nextChatId = initialAgentId === selectedAgentId && initialChatId ? initialChatId : createChatId()
+      const nextChatId =
+        initialAgentId === selectedAgentId && initialChatId
+          ? initialChatId
+          : firstUserSessionId
       return {
         ...prev,
         [selectedAgentId]: nextChatId,
       }
     })
-  }, [initialAgentId, initialChatId, selectedAgentId])
+  }, [firstUserSessionId, initialAgentId, initialChatId, selectedAgentId])
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -397,6 +404,7 @@ export default function UserAgentChatPage() {
   const selectedWorkflowType = String(selectedAgent?.workflowType || selectedAgent?.type || "direct")
   const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
   const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
+  const activeMessageBucketKey = selectedAgentId && activeChatId ? buildMessageBucketKey(selectedAgentId, activeChatId) : ""
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId
@@ -421,6 +429,7 @@ export default function UserAgentChatPage() {
 
     void (async () => {
       try {
+        const bucketKey = buildMessageBucketKey(selectedAgentId, activeChatId)
         // Ensure a server-side conversation exists for this chatId (best-effort)
         try {
           // import thunk dynamically to avoid top-level import cycles
@@ -458,24 +467,25 @@ export default function UserAgentChatPage() {
         if (historyRows.length) {
           const mapped = mapHistoryRowsToMessages(historyRows)
 
-          setMessagesByAgent((prev) => ({
+          setMessagesByBucket((prev) => ({
             ...prev,
-            [selectedAgentId]: mapped,
+            [bucketKey]: mapped,
           }))
           return
         }
 
-        setMessagesByAgent((prev) => {
-          if (prev[selectedAgentId]) return prev
+        setMessagesByBucket((prev) => {
+          if (prev[bucketKey]) return prev
           return {
             ...prev,
-            [selectedAgentId]: getInitialMessages(),
+            [bucketKey]: getInitialMessages(),
           }
         })
       } catch {
-        setMessagesByAgent((prev) => ({
+        const bucketKey = buildMessageBucketKey(selectedAgentId, activeChatId)
+        setMessagesByBucket((prev) => ({
           ...prev,
-          [selectedAgentId]: prev[selectedAgentId] || getInitialMessages(),
+          [bucketKey]: prev[bucketKey] || getInitialMessages(),
         }))
       } finally {
         setLoadingHistory(false)
@@ -495,8 +505,8 @@ export default function UserAgentChatPage() {
   }, [activeChatId, userSessions])
 
   const activeMessages = useMemo(
-    () => (selectedAgentId ? messagesByAgent[selectedAgentId] ?? getInitialMessages() : []),
-    [messagesByAgent, selectedAgent, selectedAgentId],
+    () => (activeMessageBucketKey ? messagesByBucket[activeMessageBucketKey] ?? getInitialMessages() : []),
+    [activeMessageBucketKey, messagesByBucket],
   )
 
   // Auto-analysis on load removed: do not auto-generate responses on page load.
@@ -667,21 +677,19 @@ export default function UserAgentChatPage() {
         }) as any,
       )
 
+      const remainingSessions = userSessions.filter((item) => item.id !== session.id)
+
       if (activeChatId === session.id) {
-        const nextChatId = createChatId()
+        const nextChatId = String(remainingSessions[0]?.id || "").trim()
         setChatIdByAgent((prev) => ({
           ...prev,
           [selectedAgentId]: nextChatId,
         }))
-        router.replace(buildChatUrl(selectedAgentId, nextChatId))
-        setMessagesByAgent((prev) => ({
-          ...prev,
-          [selectedAgentId]: getInitialMessages(),
-        }))
+        router.replace(buildChatUrl(selectedAgentId, nextChatId || undefined))
         setConversationTitle(null)
       }
 
-      setUserSessions((prev) => prev.filter((item) => item.id !== session.id))
+      setUserSessions(remainingSessions)
       void loadUserSessions(true, { silent: true })
       setError(null)
     } catch (err) {
@@ -742,9 +750,25 @@ export default function UserAgentChatPage() {
     setSending(true)
     setInput("")
 
-    setMessagesByAgent((prev) => ({
+    const resolvedChatId = String(activeChatId || createChatId()).trim()
+    if (!resolvedChatId) {
+      setSending(false)
+      return
+    }
+
+    if (!activeChatId) {
+      setChatIdByAgent((prev) => ({
+        ...prev,
+        [selectedAgentId]: resolvedChatId,
+      }))
+      router.replace(buildChatUrl(selectedAgentId, resolvedChatId))
+    }
+
+    const targetBucketKey = buildMessageBucketKey(selectedAgentId, resolvedChatId)
+
+    setMessagesByBucket((prev) => ({
       ...prev,
-      [selectedAgentId]: [...(prev[selectedAgentId] ?? activeMessages), userMessage],
+      [targetBucketKey]: [...(prev[targetBucketKey] ?? activeMessages), userMessage],
     }))
 
     try {
@@ -759,13 +783,13 @@ export default function UserAgentChatPage() {
         sendTenantAgentChat({
           agentId: selectedAgentId,
           message: composedMessage,
-          chatId: activeChatId,
+          chatId: resolvedChatId,
           workflowType: selectedWorkflowType,
         }) as any,
       )) as Record<string, unknown>
 
       const returnedChatId = String(payload.chatId || "").trim()
-      if (returnedChatId && returnedChatId !== activeChatId) {
+      if (returnedChatId && returnedChatId !== resolvedChatId) {
         setChatIdByAgent((prev) => ({
           ...prev,
           [selectedAgentId]: returnedChatId,
@@ -788,9 +812,11 @@ export default function UserAgentChatPage() {
             : undefined,
       }
 
-      setMessagesByAgent((prev) => ({
+      const responseChatId = returnedChatId || resolvedChatId
+      const responseBucketKey = buildMessageBucketKey(selectedAgentId, responseChatId)
+      setMessagesByBucket((prev) => ({
         ...prev,
-        [selectedAgentId]: [...(prev[selectedAgentId] ?? []), assistantMessage],
+        [responseBucketKey]: [...(prev[responseBucketKey] ?? []), assistantMessage],
       }))
       setAttachments([])
       setAttachmentMenuOpen(false)
@@ -804,10 +830,10 @@ export default function UserAgentChatPage() {
       const friendlyError = normalizeOAuthErrorMessage(messageText)
 
       setError(friendlyError)
-      setMessagesByAgent((prev) => ({
+      setMessagesByBucket((prev) => ({
         ...prev,
-        [selectedAgentId]: [
-          ...(prev[selectedAgentId] ?? activeMessages),
+        [targetBucketKey]: [
+          ...(prev[targetBucketKey] ?? activeMessages),
           {
             id: `error-${Date.now()}`,
             role: "assistant",
@@ -822,11 +848,11 @@ export default function UserAgentChatPage() {
   }
 
   return (
-    <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-6 lg:p-8  rounded-2xl">
+    <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-4 lg:p-4 rounded-2xl">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/80 bg-white/80 px-4 py-4 shadow-sm backdrop-blur md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
@@ -862,18 +888,18 @@ export default function UserAgentChatPage() {
 
         {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
 
-        <div className="grid gap-4 lg:items-stretch lg:grid-cols-[360px_minmax(0,1fr)]">
-          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-3xl border-white/80 bg-white/90 shadow-sm lg:sticky lg:top-4">
-            <CardHeader className="border-b bg-linear-to-r from-primary/5 via-white to-sky-50/60 pb-4">
-              <CardTitle className="flex items-center justify-between gap-3 text-lg">
-                <span>Recent Conversations</span>
-                <Badge variant="outline" className="shrink-0">{userSessions.length}</Badge>
+        <div className="grid gap-4 lg:items-stretch lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm lg:sticky lg:top-4">
+            <CardHeader className="border-b border-slate-200 bg-white px-4 py-3">
+              <CardTitle className="flex items-center justify-between gap-3 text-sm font-semibold tracking-wide text-slate-700 uppercase">
+                <span>Recent Chats</span>
+                <Badge variant="secondary" className="h-6 shrink-0 px-2 text-[11px]">{userSessions.length}</Badge>
               </CardTitle>
               {/* <CardDescription className="mt-2">
                 Pick a conversation or open the current one from the list.
               </CardDescription> */}
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-3">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-2 p-2">
               {/* {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
               {!loadingAgents && agents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No configured agents found.</p>
@@ -927,7 +953,7 @@ export default function UserAgentChatPage() {
                 </p>
               </div> */}
 
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
 
                 {loadingUserSessions ? <p className="px-3 py-2 text-xs text-muted-foreground">Loading sessions...</p> : null}
 
@@ -937,18 +963,19 @@ export default function UserAgentChatPage() {
                   </div>
                 ) : null}
 
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 pr-2">
+                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-1">
                   {userSessions.map((session) => {
                     const isActiveSession = activeChatId === session.id
                     const canOpenSession = Boolean(selectedAgentId)
                     const isEditingSession = editingSessionId === session.id
+                    const sessionTime = formatTimeFromIso(session.created_at)
                     return (
                       <div
                         key={session.id}
-                        className={`relative flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition ${
+                        className={`group relative flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 transition ${
                           isActiveSession
-                            ? "border-primary/40 bg-primary/5 shadow-sm"
-                            : "border-slate-200 bg-slate-50 hover:border-primary/20 hover:bg-primary/5"
+                            ? "bg-slate-100 text-slate-900"
+                            : "bg-transparent text-slate-700 hover:bg-slate-100"
                         } ${canOpenSession ? "" : "opacity-70"}`}
                       >
                         {isEditingSession ? (
@@ -983,7 +1010,8 @@ export default function UserAgentChatPage() {
                               openSession(session.id)
                             }}
                           >
-                            <p className="truncate text-sm font-semibold text-slate-800">{session.title || "New chat"}</p>
+                            <p className="truncate text-sm font-medium leading-5">{session.title || "New chat"}</p>
+                            {/* <p className="mt-0.5 text-[11px] text-slate-500">{sessionTime}</p> */}
                           </button>
                         )}
 
@@ -1000,7 +1028,7 @@ export default function UserAgentChatPage() {
                               type="button"
                               aria-label="Conversation actions"
                               disabled={!canOpenSession || isEditingSession}
-                              className="cursor-pointer rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="cursor-pointer rounded-md p-1.5 text-slate-500 opacity-0 transition group-hover:opacity-100 hover:bg-white hover:text-slate-800 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <MoreVertical className="h-4 w-4" />
                             </button>
@@ -1111,14 +1139,15 @@ export default function UserAgentChatPage() {
                     onClick={() => {
                       if (!selectedAgentId) return
                       const nextChatId = createChatId()
+                      const nextBucketKey = buildMessageBucketKey(selectedAgentId, nextChatId)
                       setChatIdByAgent((prev) => ({
                         ...prev,
                         [selectedAgentId]: nextChatId,
                       }))
                       router.replace(buildChatUrl(selectedAgentId, nextChatId))
-                      setMessagesByAgent((prev) => ({
+                      setMessagesByBucket((prev) => ({
                         ...prev,
-                        [selectedAgentId]: getInitialMessages(),
+                        [nextBucketKey]: getInitialMessages(),
                       }))
                     }}
                   >
@@ -1133,7 +1162,7 @@ export default function UserAgentChatPage() {
                     const isSystem = message.role === "system"
 
                     return (
-                      <div key={message.id} className={`flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+                      <div key={message.id} className={`flex items-end gap-3 ${isUser ? "justify-end" : "justify-start pb-4"}`}>
                         {!isUser ? (
                           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600" : "bg-primary text-white"}`}>
                             {isSystem ? <Wand2 className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
@@ -1152,13 +1181,13 @@ export default function UserAgentChatPage() {
                           <p className="text-sm leading-6 whitespace-pre-wrap wrap-break-word">{!isUser ? sanitizeAssistantText(message.text) : message.text}</p>
                           {message.meta ? <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.meta}</p> : null}
                           {/* Source badge: demo vs AI */}
-                          {!isUser && message.source ? (
+                          {/* {!isUser && message.source ? (
                             <div className="mt-2">
                               <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${message.source === "server" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}`}>
                                 {message.source === "server" ? "Backend AI" : "AI"}
                               </span>
                             </div>
-                          ) : null}
+                          ) : null} */}
                           <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.time}</p>
                         </div>
 
@@ -1378,8 +1407,8 @@ export default function UserAgentChatPage() {
                 This action is permanent and cannot be undone.
               </DialogDescription>
             </DialogHeader>
-            <div className="border-t border-slate-200 bg-slate-50 px-5 py-3">
-              <p className="mb-3 truncate text-xs text-slate-500">{sessionToDelete?.title || "New chat"}</p>
+            <div className="px-5 py-3">
+              {/* <p className="mb-3 truncate text-xs text-slate-500">{sessionToDelete?.title || "New chat"}</p> border-t border-slate-200 bg-slate-50 */}
               <div className="flex items-center justify-end gap-2">
               <Button
                 type="button"

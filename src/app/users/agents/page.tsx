@@ -263,6 +263,33 @@ export default function UserAssignedAgentsPage() {
       setConnectingAgentId(null)
     }
   }
+
+  const reconnectGoogle = async (agent: AssignedAgent) => {
+    if (agent.requiresGoogleLogin) {
+      await connectGoogle(agent.id)
+      return
+    }
+
+    setError(null)
+    setConnectingAgentId(agent.id)
+    try {
+      const response = await dispatch(startTenantGmailIntegration({ next: "/users/agents" }) as any)
+      const startUrl = String(response?.startUrl || "").trim()
+      if (!startUrl) {
+        setError("Unable to start tenant Gmail reconnect. Ask your tenant admin to reconnect Google from tenant settings.")
+        return
+      }
+      window.location.assign(startUrl)
+    } catch (err: unknown) {
+      const message =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message?: string }).message || "Failed to start tenant Gmail reconnect.")
+          : "Failed to start tenant Gmail reconnect."
+      setError(`${message} Ask your tenant admin if you do not have permission.`)
+    } finally {
+      setConnectingAgentId(null)
+    }
+  }
   return (
     <main className="p-6">
       <div className="mx-auto max-w-6xl space-y-4">
@@ -412,6 +439,22 @@ export default function UserAssignedAgentsPage() {
                     onClick={() => void connectGoogle(agent.id)}
                   >
                     {connectingAgentId === agent.id ? "Opening Google Login..." : "Login with Google"}
+                  </Button>
+                ) : null}
+
+                {agent.canRun ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full cursor-pointer"
+                    disabled={connectingAgentId === agent.id}
+                    onClick={() => void reconnectGoogle(agent)}
+                  >
+                    {connectingAgentId === agent.id
+                      ? "Opening Google Login..."
+                      : agent.requiresGoogleLogin
+                        ? "Reconnect Google"
+                        : "Reconnect Tenant Google"}
                   </Button>
                 ) : null}
 
