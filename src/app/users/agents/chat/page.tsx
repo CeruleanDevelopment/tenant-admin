@@ -111,6 +111,51 @@ const GMAIL_QUICK_PROMPTS = [
 
 const isGmailAnalysisType = (value?: string): boolean => String(value || "").toLowerCase() === "gmail_analysis"
 
+const DEFAULT_CHAT_TIMEZONE = "Asia/Kolkata"
+
+const resolveChatTimeZone = (value?: string): string => {
+  const normalized = String(value || "").trim()
+  const lowered = normalized.toLowerCase()
+  const isUtcLike =
+    !normalized ||
+    lowered === "utc" ||
+    lowered === "gmt" ||
+    lowered === "etc/utc" ||
+    lowered === "z" ||
+    lowered === "utc+0" ||
+    lowered === "utc+00:00" ||
+    lowered === "utc-0" ||
+    lowered === "utc-00:00"
+
+  if (isUtcLike) {
+    return DEFAULT_CHAT_TIMEZONE
+  }
+  return normalized
+}
+
+const formatTimeByTimeZone = (date: Date, timezone?: string): string => {
+  const targetTimeZone = resolveChatTimeZone(timezone)
+  try {
+    return new Intl.DateTimeFormat("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: targetTimeZone,
+    }).format(date)
+  } catch {
+    try {
+      return new Intl.DateTimeFormat("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: DEFAULT_CHAT_TIMEZONE,
+      }).format(date)
+    } catch {
+      return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+    }
+  }
+}
+
 
 const normalizeOAuthErrorMessage = (value: string): string => {
   const text = String(value || "").trim()
@@ -140,24 +185,43 @@ const sanitizeAssistantText = (value: string): string => {
     .trim()
 }
 
-const nowTime = (): string => {
-  const now = new Date()
-  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+const nowTime = (timezone?: string): string => {
+  return formatTimeByTimeZone(new Date(), timezone)
 }
 
-const formatTimeFromIso = (value?: string): string => {
-  if (!value) return nowTime()
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return nowTime()
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+const parseDateAssumeUtcIfMissing = (value: string): Date | null => {
+  const raw = String(value || "").trim()
+  if (!raw) return null
+
+  const normalized = raw.replace(" ", "T")
+  const hasExplicitZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)
+  const preferred = hasExplicitZone ? normalized : `${normalized}Z`
+  const parsedPreferred = new Date(preferred)
+  if (!Number.isNaN(parsedPreferred.getTime())) {
+    return parsedPreferred
+  }
+
+  const parsedRaw = new Date(raw)
+  if (!Number.isNaN(parsedRaw.getTime())) {
+    return parsedRaw
+  }
+
+  return null
 }
 
-const mapHistoryRowsToMessages = (rows: Record<string, unknown>[]): ChatMessage[] =>
+const formatTimeFromIso = (value?: string, timezone?: string): string => {
+  if (!value) return nowTime(timezone)
+  const date = parseDateAssumeUtcIfMissing(value)
+  if (!date) return nowTime(timezone)
+  return formatTimeByTimeZone(date, timezone)
+}
+
+const mapHistoryRowsToMessages = (rows: Record<string, unknown>[], timezone?: string): ChatMessage[] =>
   rows.map((row, index) => ({
     id: String(row.id || `history-${Date.now()}-${index}`),
     role: String(row.role || "assistant") === "user" ? "user" : "assistant",
     text: String(row.content || ""),
-    time: formatTimeFromIso(String(row.created_at || "")),
+    time: formatTimeFromIso(String(row.created_at || ""), timezone),
   }))
 
 const formatFileSize = (bytes: number): string => {
@@ -244,6 +308,7 @@ export default function UserAgentChatPage() {
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
   const messageListRef = useRef<HTMLDivElement | null>(null)
+  const activeDisplayTimeZoneRef = useRef(DEFAULT_CHAT_TIMEZONE)
   const lastAgentsFetchAtRef = useRef(0)
   const lastSessionsFetchAtRef = useRef(0)
   const agentsRequestInFlightRef = useRef(false)
@@ -402,6 +467,7 @@ export default function UserAgentChatPage() {
   )
   const selectedAgentIsGmail = isGmailAnalysisType(selectedAgent?.type || selectedAgent?.workflowType)
   const selectedWorkflowType = String(selectedAgent?.workflowType || selectedAgent?.type || "direct")
+  const activeDisplayTimeZone = resolveChatTimeZone(selectedAgent?.timezone)
   const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
   const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
   const activeMessageBucketKey = selectedAgentId && activeChatId ? buildMessageBucketKey(selectedAgentId, activeChatId) : ""
@@ -413,6 +479,10 @@ export default function UserAgentChatPage() {
   useEffect(() => {
     loadingHistoryFlagRef.current = loadingHistory
   }, [loadingHistory])
+
+  useEffect(() => {
+    activeDisplayTimeZoneRef.current = activeDisplayTimeZone
+  }, [activeDisplayTimeZone])
 
   useEffect(() => {
     if (!selectedAgentId || !activeChatId) {
@@ -465,7 +535,7 @@ export default function UserAgentChatPage() {
         }
 
         if (historyRows.length) {
-          const mapped = mapHistoryRowsToMessages(historyRows)
+          const mapped = mapHistoryRowsToMessages(historyRows, activeDisplayTimeZoneRef.current)
 
           setMessagesByBucket((prev) => ({
             ...prev,
@@ -752,7 +822,7 @@ export default function UserAgentChatPage() {
       id: `user-${Date.now()}`,
       role: "user",
       text: message || "Please review the attached files.",
-      time: nowTime(),
+      time: nowTime(activeDisplayTimeZone),
     }
 
     setError(null)
@@ -811,7 +881,7 @@ export default function UserAgentChatPage() {
         id: `assistant-${Date.now()}`,
         role: "assistant",
         text: replyText,
-        time: nowTime(),
+        time: nowTime(activeDisplayTimeZone),
         source: "server",
         meta:
           payload.runStatus || payload.runId
@@ -847,7 +917,7 @@ export default function UserAgentChatPage() {
             id: `error-${Date.now()}`,
             role: "assistant",
             text: friendlyError || "I could not reach the agent chat endpoint. Please try again.",
-            time: nowTime(),
+            time: nowTime(activeDisplayTimeZone),
           },
         ],
       }))
@@ -965,7 +1035,7 @@ export default function UserAgentChatPage() {
                     const isActiveSession = activeChatId === session.id
                     const canOpenSession = Boolean(selectedAgentId)
                     const isEditingSession = editingSessionId === session.id
-                    const sessionTime = formatTimeFromIso(session.created_at)
+                    const sessionTime = formatTimeFromIso(session.created_at, activeDisplayTimeZone)
                     return (
                       <div
                         key={session.id}
@@ -1153,13 +1223,13 @@ export default function UserAgentChatPage() {
                   </Button>
                 </div> */}
 
-                <div ref={messageListRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                <div ref={messageListRef} className="min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto pr-1">
                   {activeMessages.map((message) => {
                     const isUser = message.role === "user"
                     const isSystem = message.role === "system"
 
                     return (
-                      <div key={message.id} className={`flex items-end gap-3 ${isUser ? "justify-end" : "justify-start pb-4"}`}>
+                      <div key={message.id} className={`w-full flex items-end gap-3 ${isUser ? "justify-end" : "justify-start pb-4"}`}>
                         {!isUser ? (
                           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600" : "bg-primary text-white"}`}>
                             {isSystem ? <Wand2 className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
@@ -1167,7 +1237,7 @@ export default function UserAgentChatPage() {
                         ) : null}
 
                         <div
-                          className={`max-w-[86%] rounded-[24px] px-4 py-3 shadow-sm ${
+                          className={`max-w-[86%] md:max-w-[70%] lg:max-w-[60%] inline-block rounded-[24px] px-4 py-3 shadow-sm ${
                             isUser
                               ? "rounded-br-md bg-primary text-white"
                               : isSystem
@@ -1185,7 +1255,12 @@ export default function UserAgentChatPage() {
                               </span>
                             </div>
                           ) : null} */}
-                          <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.time}</p>
+                          <p
+                            className={`mt-1 text-[11px] ${isUser ? "text-white/80 pl-3" : "text-slate-400 pr-3"}`}
+                            aria-label={`message-time-${message.id}`}
+                          >
+                            {message.time}
+                          </p>
                         </div>
 
                         {isUser ? (
@@ -1198,11 +1273,11 @@ export default function UserAgentChatPage() {
                   })}
 
                   {sending ? (
-                    <div className="flex items-end gap-3">
+                    <div className="w-full flex items-end gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white">
                         <Bot className="h-4 w-4" />
                       </div>
-                      <div className="rounded-[24px] rounded-tl-md border border-white/80 bg-white px-4 py-3 shadow-sm">
+                      <div className="rounded-[24px] rounded-tl-md border border-white/80 bg-white px-4 py-3 shadow-sm inline-block max-w-[86%] md:max-w-[70%] lg:max-w-[60%]">
                         <div className="flex items-center gap-1.5">
                           <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
                           <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
