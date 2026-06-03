@@ -244,6 +244,7 @@ export default function UserAgentChatPage() {
   const filesInputRef = useRef<HTMLInputElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
+  const messageListRef = useRef<HTMLDivElement | null>(null)
   const lastAgentsFetchAtRef = useRef(0)
   const lastSessionsFetchAtRef = useRef(0)
   const agentsRequestInFlightRef = useRef(false)
@@ -508,6 +509,17 @@ export default function UserAgentChatPage() {
     () => (activeMessageBucketKey ? messagesByBucket[activeMessageBucketKey] ?? getInitialMessages() : []),
     [activeMessageBucketKey, messagesByBucket],
   )
+
+  useEffect(() => {
+    if (!messageListRef.current) return
+
+    const id = window.requestAnimationFrame(() => {
+      if (!messageListRef.current) return
+      messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+    })
+
+    return () => window.cancelAnimationFrame(id)
+  }, [activeChatId, activeMessages.length, sending, loadingHistory])
 
   // Auto-analysis on load removed: do not auto-generate responses on page load.
 
@@ -1156,7 +1168,7 @@ export default function UserAgentChatPage() {
                   </Button>
                 </div> */}
 
-                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                <div ref={messageListRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                   {activeMessages.map((message) => {
                     const isUser = message.role === "user"
                     const isSystem = message.role === "system"
