@@ -233,7 +233,6 @@ export default function UserAgentChatPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [sessionToDelete, setSessionToDelete] = useState<UserChatSession | null>(null)
   const [deletingSession, setDeletingSession] = useState(false)
-  // auto-analysis disabled; no auto-run on page load
   const [conversationTitle, setConversationTitle] = useState<string | null>(null)
   const loadedHistoryRef = useRef<Set<string>>(new Set())
   const activeChatIdRef = useRef("")
@@ -520,8 +519,6 @@ export default function UserAgentChatPage() {
 
     return () => window.cancelAnimationFrame(id)
   }, [activeChatId, activeMessages.length, sending, loadingHistory])
-
-  // Auto-analysis on load removed: do not auto-generate responses on page load.
 
   const openAssignedAgents = () => {
     router.push("/users/agents")
@@ -901,7 +898,7 @@ export default function UserAgentChatPage() {
         {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
 
         <div className="grid gap-4 lg:items-stretch lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
-          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm lg:sticky lg:top-4">
+          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-white/80 bg-white/90 shadow-sm lg:sticky lg:top-4">
             <CardHeader className="border-b border-slate-200 bg-white px-4 py-3">
               <CardTitle className="flex items-center justify-between gap-3 text-sm font-semibold tracking-wide text-slate-700 uppercase">
                 <span>Recent Chats</span>
@@ -1108,7 +1105,7 @@ export default function UserAgentChatPage() {
               </div>
             </CardHeader>
 
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/30 p-0 sm:p-2">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/20 p-0 sm:p-2">
               {/* <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border bg-muted/20 p-3">
                   <div className="flex items-center gap-2 text-sm font-medium">
