@@ -876,18 +876,6 @@ export default function UserAgentChatPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* <Badge variant={selectedAgentIsGmail && !selectedAgent?.oauthReady ? "destructive" : "outline"}>
-              {selectedAgentIsGmail ? (selectedAgent?.oauthReady ? "Integration connected" : "Integration required") : "Workflow ready"}
-            </Badge>
-            <Badge variant="outline">{selectedWorkflowType}</Badge>
-            <Badge variant="outline">{selectedAgent?.authMode === "user_personal_connection" ? "personal connection" : "tenant shared"}</Badge>
-              {sessionPersisted ? (
-                <Badge variant="secondary">
-                  <CheckCircle2 className="mr-2 inline-block h-4 w-4 align-text-bottom" />
-                  Session persisted
-                </Badge>
-              ) : null} */}
-
               <Button type="button" variant="outline" className="cursor-pointer" onClick={openAssignedAgents}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Agents
