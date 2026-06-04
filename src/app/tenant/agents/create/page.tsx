@@ -752,7 +752,7 @@ export default function TenantAgentCreatePage() {
                     }}
                   >
                     <SelectTrigger className="h-10 w-full">
-                      <SelectValue placeholder="Select agent blueprint" />
+                      <SelectValue placeholder="Select agent" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">No blueprint selected</SelectItem>
