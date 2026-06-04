@@ -4,7 +4,7 @@ import Link from "next/link"
 
 export default function TenantUsersPage() {
   return (
-    <main className="p-6">
+    <main className="p-0">
       <div className="mx-auto max-w-4xl">
         <h1 className="mb-4 text-2xl font-bold">Tenant Users</h1>
         <p className="mb-4 text-sm text-muted-foreground">Tenant-only user management namespace.</p>

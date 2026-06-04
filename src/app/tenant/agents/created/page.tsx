@@ -167,7 +167,7 @@ export default function TenantCreatedAgentsPage() {
   }, [agents])
 
   return (
-    <main className="p-6">
+    <main className="p-0">
       <div className="mx-auto max-w-7xl space-y-6">
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">

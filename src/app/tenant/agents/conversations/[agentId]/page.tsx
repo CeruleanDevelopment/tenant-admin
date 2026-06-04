@@ -65,7 +65,7 @@ export default function AgentConversationsPage() {
   }, [agentId, page, limit])
 
   return (
-    <main className="p-6">
+    <main className="p-0">
       <div className="mx-auto max-w-4xl">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold">Agent Conversations</h1>

@@ -220,7 +220,7 @@ export default function ViewUsersPage() {
 	}
 
 	return (
-		<main className="p-6">
+		<main className="p-0">
 			<div className="mx-auto max-w-6xl space-y-4">
 				<div>
 					<h1 className="text-2xl font-bold">View Users</h1>
