@@ -1166,7 +1166,7 @@ export default function UserAgentChatPage() {
               </div>
             </CardHeader>
 
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/20 p-0 sm:p-2">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/20 p-2 sm:p-2">
               {/* <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border bg-muted/20 p-3">
                   <div className="flex items-center gap-2 text-sm font-medium">
