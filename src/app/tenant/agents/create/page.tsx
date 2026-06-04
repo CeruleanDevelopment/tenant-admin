@@ -739,7 +739,7 @@ export default function TenantAgentCreatePage() {
 
               <div className="grid w-full gap-2 sm:grid-cols-[minmax(260px,1fr)_auto_auto] sm:items-end">
                 <div className="space-y-1">
-                  <Label className="text-xs text-slate-600">Agent</Label>
+                  <Label className="text-xs text-slate-600">Select Agent</Label>
                   <Select
                     value={selectedBlueprintId || "none"}
                     onValueChange={(value) => {
