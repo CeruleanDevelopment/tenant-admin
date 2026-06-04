@@ -37,6 +37,7 @@ import {
   renameTenantAgentConversationUser,
   sendTenantAgentChat,
 } from "../../../../../actions/auth"
+import { extractApiMessage } from "../../../../../service/api"
 import type { AppDispatch } from "../../../../../redux/store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -404,10 +405,10 @@ export default function UserAgentChatPage() {
       assignedAgentsLastFetchAt = Date.now()
       setAgents(nextAgents)
     } catch (loadError: unknown) {
-      const messageText =
-        typeof loadError === "object" && loadError !== null && "message" in loadError
-          ? String((loadError as { message?: string }).message || "Failed to load assigned agents.")
-          : "Failed to load assigned agents."
+      const apiMsg = extractApiMessage(loadError as any)
+      const messageText = apiMsg || (typeof loadError === "object" && loadError !== null && "message" in loadError
+        ? String((loadError as { message?: string }).message || "Failed to load assigned agents.")
+        : "Failed to load assigned agents.")
       setError(messageText)
       setAgents([])
     } finally {
@@ -902,10 +903,12 @@ export default function UserAgentChatPage() {
       setIsMicActive(false)
       void loadUserSessions(true)
     } catch (chatError: unknown) {
-      const messageText =
+      const extracted = extractApiMessage(chatError as any)
+      const rawMessage =
         typeof chatError === "object" && chatError !== null && "message" in chatError
           ? String((chatError as { message?: string }).message || "Failed to send message.")
           : "Failed to send message."
+      const messageText = extracted || rawMessage
       const friendlyError = normalizeOAuthErrorMessage(messageText)
 
       setError(friendlyError)

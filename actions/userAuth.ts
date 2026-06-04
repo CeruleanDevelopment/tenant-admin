@@ -1,4 +1,4 @@
-import axios from "axios"
+import api from "../service/api"
 import type { AnyAction } from "redux"
 import type { ThunkAction } from "redux-thunk"
 
@@ -59,10 +59,7 @@ type UserProfileResponse = {
   }
 }
 
-const userApi = axios.create({
-  baseURL: tenantAdminConfig.apiUrl,
-  withCredentials: true,
-})
+const userApi = api
 
 const clearUserSessionCookies = (): void => {
   clearUserAuthTokenCookie()

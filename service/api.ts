@@ -56,22 +56,22 @@ const normalizeOAuthErrorMessage = (value: string): string => {
   return text
 }
 
-const extractApiMessage = (error: any): string => {
+export const extractApiMessage = (error: any): string => {
+  // Network-level errors (no response) — produce safe, user-friendly messages
   if (axios.isAxiosError(error) && !error.response) {
     const code = String(error.code || "").trim()
+    // Mixed-content (HTTP API from HTTPS page)
     const baseTarget = String(API_URL || "").trim() || "http://localhost:4054"
-    const endpoint = String(error?.config?.url || "").trim()
-    const target = endpoint ? `${baseTarget}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}` : baseTarget
 
     if (typeof window !== "undefined" && window.location.protocol === "https:" && baseTarget.startsWith("http://")) {
-      return `Network error: browser blocked mixed-content request to ${target}. Use an HTTPS API URL or run the app on HTTP locally.`
+      return "Network error: the browser blocked an insecure request to the API. Use an HTTPS API URL or run the app on HTTP locally."
     }
 
     if (code === "ECONNABORTED") {
-      return `Request timed out while contacting ${target}. Ensure the API service is running and reachable.`
+      return "Request timed out while contacting the API. Please check that the API service is running and reachable."
     }
 
-    return `Network error: could not reach API at ${target}. Ensure agent-api is running and NEXT_PUBLIC_API_URL is correct.`
+    return "Network error: unable to reach the API. Please check your network connection or ensure the API service is running."
   }
 
   const payload = error?.response?.data

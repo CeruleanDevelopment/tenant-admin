@@ -219,23 +219,23 @@ export default function TenantAgentsPage() {
   )
 
   return (
-    <main className="p-6">
+    <main className="">
       <div className="mx-auto max-w-7xl space-y-6">
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Tenant Agents</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Agents</h1>
               <p className="mt-2 text-sm text-slate-600">
                 Create and manage multi-domain agents with tenant-safe permissions.
               </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              {/* <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <Badge className="border border-slate-300 bg-slate-50 text-slate-700">
                   Tenant created: {tenantProfile?.createdAt ? new Date(tenantProfile.createdAt).toLocaleDateString() : "-"}
                 </Badge>
                 <Badge className="border border-slate-300 bg-slate-50 text-slate-700">
                   Tenant: {tenantProfile?.companyName || "Unknown"}
                 </Badge>
-              </div>
+              </div> */}
             </div>
             <Link href="/tenant/agents/create" prefetch={false}>
               <Button className="cursor-pointer">Create New Agent</Button>
@@ -244,41 +244,33 @@ export default function TenantAgentsPage() {
               <Button variant="outline" className="cursor-pointer">View Created Agents</Button>
             </Link>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2 text-xs">
-            <Badge className="border border-slate-300 bg-slate-50 text-slate-700">react flow builder</Badge>
-            <Badge className="border border-slate-300 bg-slate-50 text-slate-700">tenant scoped</Badge>
-            <Badge className="border border-slate-300 bg-slate-50 text-slate-700">permission aware</Badge>
-          </div>
         </section>
 
         <Card className="rounded-2xl border-dashed">
           <CardHeader>
-            <CardTitle>Agent Blueprint Catalog</CardTitle>
+            <CardTitle>Agent Catalog</CardTitle>
             <CardDescription>
-              Blueprint table stored in database and loaded with API. Click create to open prefilled configuration for that exact agent type.
+              Click create to open configuration for that exact agent type.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {loadingBlueprints ? <p className="text-sm text-muted-foreground">Loading blueprints...</p> : null}
+            {loadingBlueprints ? <p className="text-sm text-muted-foreground">Loading...</p> : null}
             {!loadingBlueprints && blueprintRows.length === 0 ? <p className="text-sm text-muted-foreground">No blueprint records found.</p> : null}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {blueprintRows.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
+                <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-900">{item.title}</p>
                     <Badge variant="outline" className={CATEGORY_STYLE[item.category]}>{CATEGORY_LABEL[item.category]}</Badge>
                   </div>
                   <p className="mt-2 text-xs text-slate-600">{item.summary}</p>
                   <p className="mt-2 text-xs text-slate-500">Use case: {item.exampleUse}</p>
-                  <div className="mt-2 text-xs text-slate-600">
+                  {/* <div className="mt-2 text-xs text-slate-600">
                     Existing agents in this category: <span className="font-semibold text-slate-900">{item.createdCount}</span>
-                  </div>
+                  </div> */}
                   <div className="mt-3">
                     <Link href={`/tenant/agents/create?blueprint=${encodeURIComponent(String(item.id))}`} prefetch={false}>
-                      <Button size="sm" variant="outline" className="cursor-pointer">Create {item.title}</Button>
+                      <Button size="sm" variant="default" className="cursor-pointer bg-primary">Create {item.title}</Button>
                     </Link>
                   </div>
                 </div>

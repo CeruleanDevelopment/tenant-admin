@@ -3,6 +3,7 @@ import type { ThunkAction } from "redux-thunk"
 import { toast } from "sonner"
 
 import axios from "../service/api"
+import { extractApiMessage } from "../service/api"
 import {
   clearAuthSession,
   setAuthInitialized,
@@ -498,8 +499,9 @@ export const fetchAssignedAgents = (): ThunkAction<Promise<unknown[]>, RootState
             ).trim()
           : ""
 
+      const extracted = extractApiMessage(error)
       if (!responseMessage) {
-        throw new Error(message || `Network error while loading assigned agents from ${tenantAdminConfig.apiUrl}. Ensure backend is running and reachable.`)
+        throw new Error(extracted || message || "Failed to load assigned agents.")
       }
 
       throw new Error(responseMessage || message || "Failed to load assigned agents.")
@@ -616,13 +618,13 @@ export const sendTenantAgentChat = (
           : ""
 
       const pickedMessage = payloadMessage || apiMessage || rawMessage || fallbackMessage
-      const lowerPicked = pickedMessage.toLowerCase()
-      const networkMessage =
-        !payloadMessage && (lowerPicked === "network error" || lowerPicked.includes("err_network") || lowerPicked.includes("econn"))
-          ? `Network error: could not reach API at ${tenantAdminConfig.apiUrl}/ai/agents/${encodeURIComponent(agentId)}/chat. Ensure agent-api is running and reachable.`
-          : pickedMessage
+      // Use centralized, safe API error extraction for network-related errors
+      const extracted = extractApiMessage(error)
+      const finalMessage = !payloadMessage && (pickedMessage.toLowerCase() === "network error" || pickedMessage.toLowerCase().includes("err_network") || pickedMessage.toLowerCase().includes("econn"))
+        ? extracted
+        : pickedMessage
 
-      throw new Error(normalizeOAuthError(networkMessage))
+      throw new Error(normalizeOAuthError(finalMessage))
     }
   }
 }

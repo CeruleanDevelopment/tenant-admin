@@ -312,26 +312,6 @@ const buildCanvasGraph = (input: {
     previousNodeId = id
   })
 
-  const outputX = 340 + input.kinds.length * 240
-  nodes.push({
-    id: "output_save",
-    type: "output",
-    position: { x: outputX, y: 120 },
-    data: {
-      label: "Create Agent",
-      hint: "Final save node",
-    },
-    style: { borderRadius: 14, border: "1px solid #0f766e", background: "#ecfeff", width: 220 },
-  })
-
-  edges.push({
-    id: `edge_${previousNodeId}_output_save`,
-    source: previousNodeId,
-    target: "output_save",
-    animated: true,
-    style: { strokeWidth: 1.5 },
-  })
-
   return { nodes, edges }
 }
 
@@ -739,20 +719,27 @@ export default function TenantAgentCreatePage() {
     }
   }
 
-  return (
-    <main className="min-h-screen ">
-      <div className="mx-auto space-y-5">
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-3">
-              <h1 className="text-2xl font-bold text-slate-900">Create Agent Canvas</h1>
-              <p className="mt-1 text-sm text-slate-600">
-                Start with agent selection, then add configuration nodes one by one.
-              </p>
+  const activeNodeMeta = useMemo(
+    () => FLOW_NODE_LIBRARY.find((item) => item.kind === activeNodeKind),
+    [activeNodeKind],
+  )
 
-              <div className="grid w-full max-w-2xl gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end">
+  return (
+    <main className="min-h-screen bg-[linear-gradient(180deg,#ecfeff_0%,#ffffff_28%)] px-4 py-4 sm:px-4 lg:px-4">
+      <div className="mx-auto flex w-full max-w-450 flex-col gap-4">
+        <section className="rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-3">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Create Agent Studio</h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  Build your agent in a canvas-first workflow. Add required nodes, configure settings, then publish.
+                </p>
+              </div>
+
+              <div className="grid w-full gap-2 sm:grid-cols-[minmax(260px,1fr)_auto_auto] sm:items-end">
                 <div className="space-y-1">
-                  <Label className="text-xs text-slate-600">Agent Blueprint</Label>
+                  <Label className="text-xs text-slate-600">Agent</Label>
                   <Select
                     value={selectedBlueprintId || "none"}
                     onValueChange={(value) => {
@@ -764,7 +751,7 @@ export default function TenantAgentCreatePage() {
                       setActiveCanvasNodeId("blueprint_start")
                     }}
                   >
-                    <SelectTrigger className="h-9 w-full">
+                    <SelectTrigger className="h-10 w-full">
                       <SelectValue placeholder="Select agent blueprint" />
                     </SelectTrigger>
                     <SelectContent>
@@ -781,8 +768,7 @@ export default function TenantAgentCreatePage() {
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  className="h-9 cursor-pointer"
+                  className="h-8 cursor-pointer"
                   disabled={!selectedBlueprintId}
                   onClick={() => {
                     setSelectedBlueprintId("")
@@ -795,63 +781,41 @@ export default function TenantAgentCreatePage() {
                   Clear
                 </Button>
 
-                {selectedBlueprint ? (
-                  <Badge variant="outline" className="h-9 justify-center px-3 text-xs">
+                {/* {selectedBlueprint ? (
+                  <Badge variant="outline" className="h-10 justify-center px-3 text-xs font-medium">
                     {CATEGORY_LABEL[normalizeCategory(selectedBlueprint.category)]}
                   </Badge>
+                ) : null} */}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Badge className="bg-cyan-50 text-cyan-700 hover:bg-cyan-50">Nodes: {flowNodeKinds.length}</Badge>
+                <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">Assigned: {assignedUserIds.length}</Badge>
+                {activeNodeMeta ? (
+                  <Badge className="bg-violet-50 text-violet-700 hover:bg-violet-50">Active: {activeNodeMeta.title}</Badge>
                 ) : null}
+                {loadingBlueprints ? <Badge variant="outline">Loading...</Badge> : null}
               </div>
-
-              <div className="grid w-full max-w-3xl gap-2 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="agent-skill" className="text-xs text-slate-600">Agent Skill</Label>
-                  <Textarea
-                    id="agent-skill"
-                    value={agentSkill}
-                    onChange={(event) => setAgentSkill(event.target.value)}
-                    rows={2}
-                    placeholder="Example: Strong at Gmail triage, deadline extraction, and concise summaries"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="agent-instruction" className="text-xs text-slate-600">Agent Instruction</Label>
-                  <Textarea
-                    id="agent-instruction"
-                    value={agentInstruction}
-                    onChange={(event) => setAgentInstruction(event.target.value)}
-                    rows={2}
-                    placeholder="Example: Always provide action items first, then short reasoning"
-                  />
-                </div>
-              </div>
-
-              {selectedBlueprint ? (
-                <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                  <Badge variant="outline">Blueprint: {selectedBlueprint.title}</Badge>
-                  <Badge variant="outline">Category: {CATEGORY_LABEL[normalizeCategory(selectedBlueprint.category)]}</Badge>
-                </div>
-              ) : null}
-              {loadingBlueprints ? <p className="mt-2 text-xs text-slate-500">Loading blueprint records...</p> : null}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <Link href="/tenant/agents" prefetch={false}>
                 <Button variant="outline" className="cursor-pointer">Back to Agents</Button>
               </Link>
-              <Button className="cursor-pointer" disabled={!selectedBlueprint || saving} onClick={createAgent}>
+              <Button className="cursor-pointer bg-cyan-700 hover:bg-cyan-800" disabled={!selectedBlueprint || saving} onClick={createAgent}>
                 {saving ? "Saving..." : `Create ${selectedBlueprint?.title || "Agent"}`}
               </Button>
             </div>
           </div>
         </section>
 
-        <section className="grid grid-cols-1 gap-5 ">
-          <Card className="rounded-3xl">
-            <CardHeader className="space-y-3">
+        <section className="grid grid-cols-1 gap-4">
+          <Card className="overflow-hidden rounded-3xl border-slate-200">
+            <CardHeader className="border-b border-slate-100 bg-slate-50/70 py-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <CardTitle>Flow Builder Canvas</CardTitle>
-                  <CardDescription>Flowise-style sequence with node-by-node setup.</CardDescription>
+                  <CardDescription>Click a node to edit its settings from the right-side inspector.</CardDescription>
                 </div>
                 <div ref={nodePickerRef} className="relative flex items-center gap-2">
                   <Button
@@ -861,7 +825,8 @@ export default function TenantAgentCreatePage() {
                     disabled={!selectedBlueprint}
                     onClick={() => setShowNodePicker((prev) => !prev)}
                   >
-                    <Plus/> Add Node
+                    <Plus className="mr-1 h-4 w-4" />
+                    Add Node
                   </Button>
 
                   {showNodePicker ? (
@@ -874,13 +839,13 @@ export default function TenantAgentCreatePage() {
                             <button
                               key={node.kind}
                               type="button"
-                              className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-blue-300 hover:bg-blue-50/40"
+                              className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-cyan-300 hover:bg-cyan-50/40"
                               onClick={() => addFlowNode(node.kind)}
                               disabled={!selectedBlueprint}
                             >
                               <p className="text-sm font-semibold text-slate-900">{node.title}</p>
                               <p className="mt-1 text-xs text-slate-600">{node.description}</p>
-                              {node.required ? <p className="mt-1 text-[11px] font-medium text-blue-700">Required</p> : null}
+                              {node.required ? <p className="mt-1 text-[11px] font-medium text-cyan-700">Required</p> : null}
                             </button>
                           ))}
                         </div>
@@ -891,8 +856,8 @@ export default function TenantAgentCreatePage() {
               </div>
             </CardHeader>
 
-            <CardContent className="space-y-4">
-              <div className="relative h-[64vh] min-h-115 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,#e2e8f0_1px,transparent_0)] bg-size-[24px_24px]">
+            <CardContent className="space-y-3 p-3 sm:p-4">
+              <div className="relative h-[80vh] min-h-160 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,#dbeafe_1px,transparent_0)] bg-size-[22px_22px]">
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
@@ -904,24 +869,25 @@ export default function TenantAgentCreatePage() {
                   nodesConnectable={false}
                   elementsSelectable
                 >
-                  {/* <MiniMap zoomable pannable /> */}
                   <Controls />
-                  <Background gap={18} size={1} />
+                  <Background gap={20} size={1.1} color="#cbd5e1" />
                 </ReactFlow>
 
-                {/* {!selectedBlueprint ? (
+                {!selectedBlueprint ? (
                   <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-white/90 px-4 py-3 text-center">
-                      <p className="text-sm font-medium text-slate-700">Canvas is blank</p>
-                      <p className="mt-1 text-xs text-slate-500">Select an agent blueprint to begin.</p>
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/95 px-5 py-4 text-center shadow-sm">
+                      <p className="text-sm font-semibold text-slate-800">Canvas is waiting for a blueprint</p>
+                      <p className="mt-1 text-xs text-slate-500">Select a blueprint from top bar, then add nodes.</p>
                     </div>
                   </div>
-                ) : null} */}
+                ) : null}
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-wrap">
                 {flowSummaryText(nodes, edges)}
               </div>
+              {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
+              {success ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{success}</div> : null}
             </CardContent>
           </Card>
         </section>

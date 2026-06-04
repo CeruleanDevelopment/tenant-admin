@@ -458,7 +458,7 @@ export default function UserAssignedAgentsPage() {
                   </Button>
                 ) : null}
 
-                {agent.canRun && agent.oauthReady ? (
+                {/* {agent.canRun && agent.oauthReady ? (
                   <Button
                     type="button"
                     variant="secondary"
@@ -467,7 +467,7 @@ export default function UserAssignedAgentsPage() {
                   >
                     Open Gmail Chat
                   </Button>
-                ) : null}
+                ) : null} */}
               </CardContent>
             </Card>
           ))}

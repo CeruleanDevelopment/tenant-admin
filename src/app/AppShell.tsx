@@ -20,6 +20,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const PUBLIC_PATHS = new Set(["/signin", "/signup", "/users/signin", "/tenant/signin", "/tenant/signup", "/auth/callback"]) // no header/sidebar
   const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
+  const FULL_SCREEN_PATHS = new Set(["/tenant/agents/create"])
 
   React.useEffect(() => {
     const redirectPath = getUnauthorizedRedirectPath(pathname, sessionType)
@@ -31,6 +32,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Do not wrap pages that already use no-layout-pages or layout-pages (they have their own layouts)
   if (
     PUBLIC_PATHS.has(pathname) ||
+    FULL_SCREEN_PATHS.has(pathname) ||
     AUTH_CALLBACK_PREFIXES.some((p) => pathname.startsWith(p)) ||
     pathname.startsWith("/no-layout-pages") ||
     pathname.startsWith("/layout-pages")
