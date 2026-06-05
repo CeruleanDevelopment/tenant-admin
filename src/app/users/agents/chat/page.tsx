@@ -266,6 +266,55 @@ const isMediaAttachment = (attachment: ChatAttachment): boolean => {
   return Boolean(attachment.mimeType?.startsWith("audio/") || attachment.mimeType?.startsWith("video/") || attachment.kind === "media")
 }
 
+const getAttachmentExtension = (attachment: ChatAttachment): string => {
+  const fileName = String(attachment.file.name || "")
+  const dotIndex = fileName.lastIndexOf(".")
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) return "FILE"
+  return fileName.slice(dotIndex + 1).toUpperCase()
+}
+
+const getFileToneByExtension = (extension: string): { iconClass: string; badgeClass: string } => {
+  switch (extension) {
+    case "PDF":
+      return {
+        iconClass: "bg-rose-100 text-rose-700",
+        badgeClass: "bg-rose-50 text-rose-700 border border-rose-200",
+      }
+    case "DOC":
+    case "DOCX":
+      return {
+        iconClass: "bg-blue-100 text-blue-700",
+        badgeClass: "bg-blue-50 text-blue-700 border border-blue-200",
+      }
+    case "XLS":
+    case "XLSX":
+    case "CSV":
+      return {
+        iconClass: "bg-emerald-100 text-emerald-700",
+        badgeClass: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+      }
+    case "PPT":
+    case "PPTX":
+      return {
+        iconClass: "bg-amber-100 text-amber-700",
+        badgeClass: "bg-amber-50 text-amber-700 border border-amber-200",
+      }
+    case "TXT":
+    case "MD":
+    case "JSON":
+    case "XML":
+      return {
+        iconClass: "bg-violet-100 text-violet-700",
+        badgeClass: "bg-violet-50 text-violet-700 border border-violet-200",
+      }
+    default:
+      return {
+        iconClass: "bg-slate-100 text-slate-700",
+        badgeClass: "bg-slate-100 text-slate-700 border border-slate-200",
+      }
+  }
+}
+
 const createChatId = (): string => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID()
@@ -312,16 +361,28 @@ function AttachmentImageTile({ attachment, isUser }: { attachment: ChatAttachmen
 }
 
 function AttachmentCard({ attachment, isUser }: { attachment: ChatAttachmentView; isUser: boolean }) {
-  const MediaIcon = isMediaAttachment(attachment) ? Globe : FileText
+  const isMedia = isMediaAttachment(attachment)
+  const MediaIcon = isMedia ? Globe : FileText
+  const extension = getAttachmentExtension(attachment)
+  const tone = getFileToneByExtension(extension)
 
   return (
     <div className={`flex items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-white/60 bg-white/90 text-slate-700"}`}>
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : "bg-primary/10"}`}>
+      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : tone.iconClass}`}>
         <MediaIcon className={`h-5 w-5 ${isUser ? "text-white" : "text-primary"}`} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{attachment.file.name}</p>
-        <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>{attachment.sizeLabel ?? (isMediaAttachment(attachment) ? "Media" : "File")}</p>
+        <div className="mt-1 flex items-center gap-2">
+          {!isMedia ? (
+            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${isUser ? "border border-white/30 bg-white/20 text-white" : tone.badgeClass}`}>
+              {extension}
+            </span>
+          ) : null}
+          <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>
+            {attachment.sizeLabel ?? (isMedia ? "Media" : "File")}
+          </p>
+        </div>
       </div>
     </div>
   )
@@ -415,9 +476,6 @@ export default function UserAgentChatPage() {
   const loadedHistoryRef = useRef<Set<string>>(new Set())
   const activeChatIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
-  const documentsInputRef = useRef<HTMLInputElement | null>(null)
-  const photosInputRef = useRef<HTMLInputElement | null>(null)
-  const mediaInputRef = useRef<HTMLInputElement | null>(null)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
@@ -751,11 +809,8 @@ export default function UserAgentChatPage() {
     }
   }, [])
 
-  const openAttachmentSource = (source: "documents" | "photos" | "media" | "all") => {
-    if (source === "documents") documentsInputRef.current?.click()
-    if (source === "photos") photosInputRef.current?.click()
-    if (source === "media") mediaInputRef.current?.click()
-    // if (source === "all") filesInputRef.current?.click()
+  const openAttachmentSource = () => {
+    filesInputRef.current?.click()
     setAttachmentMenuOpen(false)
   }
 
@@ -1451,37 +1506,13 @@ export default function UserAgentChatPage() {
 
                 <div className="rounded-[26px] border border-slate-200 p-3 bg-white shadow-sm">
                   <input
-                    ref={documentsInputRef}
-                    type="file"
-                    multiple
-                    onChange={onAttachmentInputChange}
-                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.md"
-                    className="hidden"
-                  />
-                  <input
-                    ref={photosInputRef}
-                    type="file"
-                    multiple
-                    onChange={onAttachmentInputChange}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                  <input
-                    ref={mediaInputRef}
-                    type="file"
-                    multiple
-                    onChange={onAttachmentInputChange}
-                    accept="audio/*,video/*"
-                    className="hidden"
-                  />
-                  {/* <input
                     ref={filesInputRef}
                     type="file"
                     multiple
                     onChange={onAttachmentInputChange}
-                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.md"
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.md"
                     className="hidden"
-                  /> */}
+                  />
 
                   {attachments.length > 0 ? (
                     <div className="mb-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-2 shadow-sm">
@@ -1510,12 +1541,17 @@ export default function UserAgentChatPage() {
                               <img src={attachment.previewUrl} alt={attachment.file.name} className="h-36 w-full object-cover" />
                             ) : (
                               <div className="flex items-center gap-3 px-3 py-3">
-                                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${getFileToneByExtension(getAttachmentExtension(attachment)).iconClass}`}>
                                   {isMediaAttachment(attachment) ? <Globe className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <p className="truncate text-sm font-medium text-slate-800">{attachment.file.name}</p>
-                                  <p className="text-xs text-slate-500">{attachment.sizeLabel ?? formatFileSize(attachment.file.size)}</p>
+                                  <div className="mt-1 flex items-center gap-2">
+                                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${getFileToneByExtension(getAttachmentExtension(attachment)).badgeClass}`}>
+                                      {getAttachmentExtension(attachment)}
+                                    </span>
+                                    <p className="text-xs text-slate-500">{attachment.sizeLabel ?? formatFileSize(attachment.file.size)}</p>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -1551,25 +1587,10 @@ export default function UserAgentChatPage() {
                           <div>
                             {[
                               {
-                                label: "Documents",
+                                label: "Add photos and files",
                                 icon: FileText,
-                                onClick: () => openAttachmentSource("documents"),
+                                onClick: () => openAttachmentSource(),
                               },
-                              {
-                                label: "Photos",
-                                icon: Image,
-                                onClick: () => openAttachmentSource("photos"),
-                              },
-                              // {
-                              //   label: "Media",
-                              //   icon: Globe,
-                              //   onClick: () => openAttachmentSource("media"),
-                              // },
-                              // {
-                              //   label: "All files",
-                              //   icon: FolderClosed,
-                              //   onClick: () => openAttachmentSource("all"),
-                              // },
                             ].map((item) => (
                               <button
                                 key={item.label}
