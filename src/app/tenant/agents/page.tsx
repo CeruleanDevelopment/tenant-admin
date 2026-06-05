@@ -237,12 +237,14 @@ export default function TenantAgentsPage() {
                 </Badge>
               </div> */}
             </div>
-            <Link href="/tenant/agents/create" prefetch={false}>
-              <Button className="cursor-pointer">Create New Agent</Button>
-            </Link>
-            <Link href="/tenant/agents/created" prefetch={false}>
-              <Button variant="outline" className="cursor-pointer">View Created Agents</Button>
-            </Link>
+            <div className="flex gap-3">
+              <Link href="/tenant/agents/create" prefetch={false}>
+                <Button className="cursor-pointer">Create New Agent</Button>
+              </Link>
+              <Link href="/tenant/agents/created" prefetch={false}>
+                <Button variant="outline" className="cursor-pointer">View Created Agents</Button>
+              </Link>
+            </div>
           </div>
         </section>
 

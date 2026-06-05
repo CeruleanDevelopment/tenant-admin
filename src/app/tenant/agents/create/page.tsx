@@ -755,7 +755,7 @@ export default function TenantAgentCreatePage() {
                       <SelectValue placeholder="Select agent" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">No blueprint selected</SelectItem>
+                      <SelectItem value="none">No agent selected</SelectItem>
                       {blueprints.map((item) => (
                         <SelectItem key={item.id} value={String(item.id)}>
                           {item.title}

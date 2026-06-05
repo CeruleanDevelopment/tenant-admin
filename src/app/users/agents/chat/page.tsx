@@ -44,6 +44,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { RiChat3Line } from "react-icons/ri";
 
 type TenantAgentCard = {
   id: string
@@ -77,6 +78,7 @@ type ChatMessage = {
   meta?: string
   source?: "ai" | "server"
   persistedId?: string
+  attachments?: ChatAttachment[]
 }
 
 type UserChatSession = {
@@ -90,6 +92,13 @@ type ChatAttachment = {
   id: string
   file: File
   kind: "image" | "media" | "document"
+  mimeType?: string
+  previewUrl?: string
+  sizeLabel?: string
+}
+
+type ChatAttachmentView = ChatAttachment & {
+  isPreviewImage: boolean
 }
 
 let assignedAgentsCache: TenantAgentCard[] | null = null
@@ -225,6 +234,12 @@ const mapHistoryRowsToMessages = (rows: Record<string, unknown>[], timezone?: st
     time: formatTimeFromIso(String(row.created_at || ""), timezone),
   }))
 
+const cloneAttachmentsForMessage = (items: ChatAttachment[]): ChatAttachmentView[] =>
+  items.map((item) => ({
+    ...item,
+    isPreviewImage: Boolean(item.previewUrl && isImageAttachment(item)),
+  }))
+
 const formatFileSize = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B"
   if (bytes < 1024) return `${bytes} B`
@@ -237,6 +252,18 @@ const inferAttachmentKind = (file: File): ChatAttachment["kind"] => {
   if (type.startsWith("image/")) return "image"
   if (type.startsWith("audio/") || type.startsWith("video/")) return "media"
   return "document"
+}
+
+const isImageAttachment = (attachment: ChatAttachment): boolean => {
+  const name = attachment.file.name.toLowerCase()
+  return Boolean(
+    attachment.previewUrl &&
+      (attachment.mimeType?.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|avif|svg)$/.test(name)),
+  )
+}
+
+const isMediaAttachment = (attachment: ChatAttachment): boolean => {
+  return Boolean(attachment.mimeType?.startsWith("audio/") || attachment.mimeType?.startsWith("video/") || attachment.kind === "media")
 }
 
 const createChatId = (): string => {
@@ -257,6 +284,92 @@ const buildChatUrl = (agentId: string, chatId?: string): string => {
 const buildMessageBucketKey = (agentId: string, chatId: string): string => `${agentId}:${chatId}`
 
 const getInitialMessages = (): ChatMessage[] => []
+
+const createAttachmentView = (attachment: ChatAttachment): ChatAttachmentView => ({
+  ...attachment,
+  isPreviewImage: Boolean(attachment.previewUrl && isImageAttachment(attachment)),
+})
+
+function AttachmentImageTile({ attachment, isUser }: { attachment: ChatAttachmentView; isUser: boolean }) {
+  if (!attachment.previewUrl) return null
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/55 bg-white/90 shadow-sm">
+      <img
+        src={attachment.previewUrl}
+        alt={attachment.file.name}
+        className="h-44 w-full object-cover sm:h-52"
+      />
+      <div className={`flex items-center justify-between gap-3 px-3 py-2 ${isUser ? "bg-linear-to-r from-primary to-primary-light text-white" : "bg-white text-slate-700"}`}>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{attachment.file.name}</p>
+          <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>{attachment.sizeLabel ?? "Image"}</p>
+        </div>
+        <Image className="h-4 w-4 shrink-0" />
+      </div>
+    </div>
+  )
+}
+
+function AttachmentCard({ attachment, isUser }: { attachment: ChatAttachmentView; isUser: boolean }) {
+  const MediaIcon = isMediaAttachment(attachment) ? Globe : FileText
+
+  return (
+    <div className={`flex items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-white/60 bg-white/90 text-slate-700"}`}>
+      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : "bg-primary/10"}`}>
+        <MediaIcon className={`h-5 w-5 ${isUser ? "text-white" : "text-primary"}`} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{attachment.file.name}</p>
+        <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>{attachment.sizeLabel ?? (isMediaAttachment(attachment) ? "Media" : "File")}</p>
+      </div>
+    </div>
+  )
+}
+
+function AttachmentGallery({ attachments, isUser }: { attachments: ChatAttachmentView[]; isUser: boolean }) {
+  const images = attachments.filter((attachment) => attachment.isPreviewImage)
+  const media = attachments.filter((attachment) => !attachment.isPreviewImage && isMediaAttachment(attachment))
+  const files = attachments.filter((attachment) => !attachment.isPreviewImage && !isMediaAttachment(attachment))
+
+  const imageGridClass = images.length === 1 ? "grid-cols-1" : "grid-cols-2"
+  const mediaGridClass = media.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"
+  const fileGridClass = files.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"
+
+  return (
+    <div className="mb-2 grid gap-2">
+      {images.length ? (
+        <div className={`grid gap-2 ${imageGridClass}`}>
+          {images.map((attachment, index) => (
+            <div key={attachment.id} className={images.length > 1 && images.length % 2 === 1 && index === 0 ? "sm:col-span-2" : ""}>
+              <AttachmentImageTile attachment={attachment} isUser={isUser} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {media.length ? (
+        <div className={`grid gap-2 ${mediaGridClass}`}>
+          {media.map((attachment, index) => (
+            <div key={attachment.id} className={media.length > 1 && media.length % 2 === 1 && index === media.length - 1 ? "sm:col-span-2" : ""}>
+              <AttachmentCard attachment={attachment} isUser={isUser} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {files.length ? (
+        <div className={`grid gap-2 ${fileGridClass}`}>
+          {files.map((attachment, index) => (
+            <div key={attachment.id} className={files.length > 1 && files.length % 2 === 1 && index === files.length - 1 ? "sm:col-span-2" : ""}>
+              <AttachmentCard attachment={attachment} isUser={isUser} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 // const buildInitialMessages = (agentName?: string, connected?: boolean): ChatMessage[] => [
 //   {
 //     id: "welcome",
@@ -607,6 +720,9 @@ export default function UserAgentChatPage() {
           id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 9)}`,
           file,
           kind: inferAttachmentKind(file),
+          mimeType: file.type || undefined,
+          previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+          sizeLabel: formatFileSize(file.size),
         }))
 
       return [...prev, ...nextItems]
@@ -616,8 +732,24 @@ export default function UserAgentChatPage() {
   }
 
   const removeAttachment = (attachmentId: string) => {
-    setAttachments((prev) => prev.filter((item) => item.id !== attachmentId))
+    setAttachments((prev) => {
+      const target = prev.find((item) => item.id === attachmentId)
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl)
+      }
+      return prev.filter((item) => item.id !== attachmentId)
+    })
   }
+
+  useEffect(() => {
+    return () => {
+      attachments.forEach((attachment) => {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      })
+    }
+  }, [])
 
   const openAttachmentSource = (source: "documents" | "photos" | "media" | "all") => {
     if (source === "documents") documentsInputRef.current?.click()
@@ -824,6 +956,7 @@ export default function UserAgentChatPage() {
       role: "user",
       text: message || "Please review the attached files.",
       time: nowTime(activeDisplayTimeZone),
+      attachments: attachments.length ? cloneAttachmentsForMessage(attachments) : undefined,
     }
 
     setError(null)
@@ -898,6 +1031,11 @@ export default function UserAgentChatPage() {
         ...prev,
         [responseBucketKey]: [...(prev[responseBucketKey] ?? []), assistantMessage],
       }))
+      attachments.forEach((attachment) => {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      })
       setAttachments([])
       setAttachmentMenuOpen(false)
       setIsMicActive(false)
@@ -958,12 +1096,13 @@ export default function UserAgentChatPage() {
 
         {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
 
-        <div className="grid gap-4 lg:items-stretch lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
-          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-white/80 bg-white/90 shadow-sm lg:sticky lg:top-4">
-            <CardHeader className="border-b border-slate-200 bg-white px-4 py-3">
-              <CardTitle className="flex items-center justify-between gap-3 text-sm font-semibold tracking-wide text-slate-700 uppercase">
+        <div className="grid gap-0 lg:items-stretch lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:sticky lg:top-4 lg:rounded-r-none lg:border-r-0">
+            <CardHeader className="border-b border-slate-200 bg-white px-4 py-4">
+              <CardTitle className="flex items-center justify-start gap-2 text-base font-semibold tracking-wide text-slate-700">
+                <RiChat3Line className="h-5 w-5" />
                 <span>Recent Chats</span>
-                <Badge variant="secondary" className="h-6 shrink-0 px-2 text-[11px]">{userSessions.length}</Badge>
+                {/* <Badge variant="secondary" className="h-6 shrink-0 px-2 text-[11px]">{userSessions.length}</Badge> */}
               </CardTitle>
               {/* <CardDescription className="mt-2">
                 Pick a conversation or open the current one from the list.
@@ -1136,12 +1275,15 @@ export default function UserAgentChatPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-3xl border-white/80 bg-white/90 shadow-sm">
-            <CardHeader className="border-b bg-linear-to-r from-primary/5 via-white to-sky-50/60">
+          <Card className="flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:rounded-l-none lg:border-l-0">
+            <CardHeader className="border-b border-slate-200 bg-white p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
-                    <Bot className="h-5 w-5 text-primary" />
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    {/* <Bot className="h-5 w-5 text-primary" /> */}
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-sm">
+                      <Bot className="h-4 w-4" />
+                    </div>
                     <div className="flex items-center gap-3">
                       {/* <span>{selectedAgent?.name || "No agent selected"}</span> */}
                       {conversationTitle ? (
@@ -1239,8 +1381,7 @@ export default function UserAgentChatPage() {
                           </div>
                         ) : null}
 
-                        <div
-                          className={`max-w-[86%] md:max-w-[70%] lg:max-w-[60%] inline-block rounded-[24px] px-4 py-3 shadow-sm ${
+                        <div className={`max-w-[86%] md:max-w-[70%] lg:max-w-[60%] inline-block rounded-[24px] px-4 py-3 shadow-sm ${
                             isUser
                               ? "rounded-br-md bg-primary text-white"
                               : isSystem
@@ -1248,6 +1389,7 @@ export default function UserAgentChatPage() {
                                 : "rounded-tl-md border border-white/80 bg-white text-slate-700"
                           }`}
                         >
+                          {message.attachments?.length ? <AttachmentGallery attachments={message.attachments.map(createAttachmentView)} isUser={isUser} /> : null}
                           <p className="text-sm leading-6 whitespace-pre-wrap wrap-break-word">{!isUser ? sanitizeAssistantText(message.text) : message.text}</p>
                           {message.meta ? <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.meta}</p> : null}
                           {/* Source badge: demo vs AI */}
@@ -1258,10 +1400,7 @@ export default function UserAgentChatPage() {
                               </span>
                             </div>
                           ) : null} */}
-                          <p
-                            className={`mt-1 text-[11px] ${isUser ? "text-white/80 pl-3" : "text-slate-400 pr-3"}`}
-                            aria-label={`message-time-${message.id}`}
-                          >
+                          <p className={`mt-1 text-[11px] ${isUser ? "text-white/80 pl-3" : "text-slate-400 pr-3"}`} aria-label={`message-time-${message.id}`} >
                             {message.time}
                           </p>
                         </div>
@@ -1345,26 +1484,53 @@ export default function UserAgentChatPage() {
                   /> */}
 
                   {attachments.length > 0 ? (
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      {attachments.map((attachment) => (
-                        <div key={attachment.id} className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5">
-                          {attachment.kind === "image" ? (
-                            <ImageIcon className="h-3.5 w-3.5 text-sky-600" />
-                          ) : (
-                            <FileText className="h-3.5 w-3.5 text-slate-600" />
-                          )}
-                          <span className="max-w-60 truncate text-xs text-slate-700">{attachment.file.name}</span>
-                          <span className="text-[11px] text-slate-500">{formatFileSize(attachment.file.size)}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(attachment.id)}
-                            className="cursor-pointer rounded-full p-0.5 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
-                            aria-label={`Remove ${attachment.file.name}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
+                    <div className="mb-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-2 shadow-sm">
+                      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Attached files</p>
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-slate-500 transition hover:text-slate-700"
+                          onClick={() => {
+                            attachments.forEach((attachment) => {
+                              if (attachment.previewUrl) {
+                                URL.revokeObjectURL(attachment.previewUrl)
+                              }
+                            })
+                            setAttachments([])
+                          }}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {attachments.map((attachment) => (
+                          <div key={attachment.id} className="group relative overflow-hidden rounded-2xl border border-white/70 bg-white shadow-sm">
+                            {isImageAttachment(attachment) && attachment.previewUrl ? (
+                              <img src={attachment.previewUrl} alt={attachment.file.name} className="h-36 w-full object-cover" />
+                            ) : (
+                              <div className="flex items-center gap-3 px-3 py-3">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                  {isMediaAttachment(attachment) ? <Globe className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-slate-800">{attachment.file.name}</p>
+                                  <p className="text-xs text-slate-500">{attachment.sizeLabel ?? formatFileSize(attachment.file.size)}</p>
+                                </div>
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(attachment.id)}
+                              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/70 text-white opacity-90 transition hover:bg-slate-900"
+                              aria-label={`Remove ${attachment.file.name}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
 
