@@ -20,7 +20,7 @@ import {
   Paperclip,
   Pencil,
   RefreshCw,
-  SendHorizonal,
+  Send,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -122,6 +122,7 @@ const GMAIL_QUICK_PROMPTS = [
 const isGmailAnalysisType = (value?: string): boolean => String(value || "").toLowerCase() === "gmail_analysis"
 
 const DEFAULT_CHAT_TIMEZONE = "Asia/Kolkata"
+const MAX_CHAT_INPUT_LENGTH = 4000
 
 const resolveChatTimeZone = (value?: string): string => {
   const normalized = String(value || "").trim()
@@ -458,6 +459,7 @@ export default function UserAgentChatPage() {
   const [input, setInput] = useState("")
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false)
+  const [inputFocused, setInputFocused] = useState(false)
   const [isMicActive, setIsMicActive] = useState(false)
   const [sending, setSending] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
@@ -477,6 +479,7 @@ export default function UserAgentChatPage() {
   const activeChatIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
   const messageListRef = useRef<HTMLDivElement | null>(null)
@@ -643,6 +646,9 @@ export default function UserAgentChatPage() {
   const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
   const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
   const activeMessageBucketKey = selectedAgentId && activeChatId ? buildMessageBucketKey(selectedAgentId, activeChatId) : ""
+  const charCount = input.length
+  const isOverLimit = charCount > MAX_CHAT_INPUT_LENGTH
+  const canSendMessage = Boolean(selectedAgentId) && !sending && !isOverLimit && (Boolean(input.trim()) || attachments.length > 0)
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId
@@ -762,6 +768,14 @@ export default function UserAgentChatPage() {
     return () => window.cancelAnimationFrame(id)
   }, [activeChatId, activeMessages.length, sending, loadingHistory])
 
+  useEffect(() => {
+    const node = textareaRef.current
+    if (!node) return
+
+    node.style.height = "0px"
+    node.style.height = `${Math.min(node.scrollHeight, 160)}px`
+  }, [input])
+
   const openAssignedAgents = () => {
     router.push("/users/agents")
   }
@@ -812,6 +826,15 @@ export default function UserAgentChatPage() {
   const openAttachmentSource = () => {
     filesInputRef.current?.click()
     setAttachmentMenuOpen(false)
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault()
+      if (canSendMessage) {
+        void sendMessage()
+      }
+    }
   }
 
   const toggleMic = () => {
@@ -1455,7 +1478,7 @@ export default function UserAgentChatPage() {
                               </span>
                             </div>
                           ) : null} */}
-                          <p className={`mt-1 w-full text-right text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`} aria-label={`message-time-${message.id}`} >
+                          <p className={`mt-1 text-[11px] ${isUser ? "text-white/80 pl-3" : "text-slate-400 pr-3"}`} aria-label={`message-time-${message.id}`} >
                             {message.time}
                           </p>
                         </div>
@@ -1470,7 +1493,7 @@ export default function UserAgentChatPage() {
                   })}
 
                   {sending ? (
-                    <div className="w-full flex items-end gap-3 pb-4">
+                    <div className="w-full flex items-end gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white">
                         <Bot className="h-4 w-4" />
                       </div>
@@ -1504,7 +1527,7 @@ export default function UserAgentChatPage() {
                   </div>
                 ) : null}
 
-                <div className="rounded-[26px] border border-slate-200 p-3 bg-white shadow-sm">
+                <div className="aurora-composer rounded-[26px] border border-slate-200 p-3 bg-white shadow-sm">
                   <input
                     ref={filesInputRef}
                     type="file"
@@ -1570,81 +1593,126 @@ export default function UserAgentChatPage() {
                     </div>
                   ) : null}
 
-                  <div className="flex h-12 items-stretch gap-2">
-                    <div ref={attachmentMenuRef} className="relative">
-                      <Button
+                  <div
+                    className="relative input-glow rounded-2xl transition-all duration-300"
+                    style={{
+                      background: inputFocused
+                        ? "rgba(19, 29, 53, 0.9)"
+                        : "rgba(13, 20, 38, 0.8)",
+                      border: inputFocused
+                        ? "1px solid rgba(79, 142, 255, 0.35)"
+                        : "1px solid rgba(148, 163, 184, 0.18)",
+                      backdropFilter: "blur(20px)",
+                    }}
+                  >
+                    {inputFocused ? <div className="scan-line" /> : null}
+
+                    <div className="flex items-end gap-2 p-3">
+                      <button
                         type="button"
-                        variant="outline"
-                        className="h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed"
+                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{
+                          color: "rgba(203, 213, 225, 0.72)",
+                          background: "transparent",
+                        }}
+                        onClick={openAttachmentSource}
                         disabled={!selectedAgentId || sending}
-                        onClick={() => setAttachmentMenuOpen((prev) => !prev)}
+                        title="Attach files"
                       >
-                        <Paperclip className="h-4 w-4" />
-                      </Button>
+                        <Paperclip size={16} />
+                      </button>
 
-                      {attachmentMenuOpen ? (
-                        <div className="absolute bottom-full left-2 mb-2 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
-                          <div>
-                            {[
-                              {
-                                label: "Add photos and files",
-                                icon: FileText,
-                                onClick: () => openAttachmentSource(),
-                              },
-                            ].map((item) => (
-                              <button
-                                key={item.label}
-                                onClick={item.onClick}
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-primary/5 hover:text-primary"
-                              >
-                                <item.icon className="h-4 w-4 text-primary" />
-                                {item.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex h-12 flex-1 items-center rounded-2xl border border-slate-200 px-3">
                       <textarea
+                        ref={textareaRef}
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" && !event.shiftKey) {
-                            event.preventDefault()
+                        onKeyDown={handleKeyDown}
+                        onFocus={() => setInputFocused(true)}
+                        onBlur={() => setInputFocused(false)}
+                        placeholder={selectedAgent ? "Message Aurora..." : "Select an agent first..."}
+                        rows={1}
+                        className="aurora-textarea flex-1 resize-none bg-transparent text-sm leading-relaxed outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                        style={{
+                          color: "rgba(248, 250, 252, 0.96)",
+                          caretColor: "#4F8EFF",
+                          fontFamily: "inherit",
+                          minHeight: "36px",
+                          maxHeight: "160px",
+                        }}
+                        disabled={!selectedAgentId || sending}
+                      />
+
+                      <button
+                        type="button"
+                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{
+                          color: isMicActive ? "#7DD3FC" : "rgba(203, 213, 225, 0.72)",
+                          background: isMicActive ? "rgba(79, 142, 255, 0.12)" : "transparent",
+                        }}
+                        title="Voice input coming soon"
+                        onClick={toggleMic}
+                        disabled={!selectedAgentId || sending}
+                      >
+                        <Mic size={16} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (canSendMessage) {
                             void sendMessage()
                           }
                         }}
-                        placeholder={
-                          selectedAgent
-                            ? "Ask the agent..."
-                            : "Select an agent first..."
+                        disabled={!canSendMessage}
+                        className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-70"
+                        style={
+                          sending
+                            ? {
+                                background: "rgba(244, 114, 182, 0.15)",
+                                border: "1px solid rgba(244, 114, 182, 0.3)",
+                                color: "#F472B6",
+                              }
+                            : canSendMessage
+                              ? {
+                                  background: "linear-gradient(135deg, #4F8EFF, #24C6B7)",
+                                  boxShadow: "0 0 20px rgba(79, 142, 255, 0.4)",
+                                  color: "white",
+                                  transform: "scale(1)",
+                                }
+                              : {
+                                  background: "rgba(79, 142, 255, 0.05)",
+                                  border: "1px solid rgba(148, 163, 184, 0.16)",
+                                  color: "rgba(148, 163, 184, 0.72)",
+                                }
                         }
-                        className="h-full w-full resize-none bg-transparent py-3 text-sm outline-none placeholder:text-slate-400"
-                        disabled={!selectedAgentId || sending}
-                      />
+                        title={sending ? "Sending..." : "Send message"}
+                      >
+                        {sending ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" /> : <Send size={14} />}
+                      </button>
                     </div>
 
-                    <Button
-                      type="button"
-                      variant={isMicActive ? "default" : "outline"}
-                      className={`h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed ${isMicActive ? "bg-rose-500 text-white hover:bg-rose-600" : ""}`}
-                      disabled={!selectedAgentId || sending}
-                      onClick={toggleMic}
-                    >
-                      <Mic className="h-4 w-4" />
-                    </Button>
-
-                    <Button
-                      type="button"
-                      className="h-12 w-12 cursor-pointer rounded-2xl bg-primary text-white shadow-lg shadow-primary/20 hover:bg-primary-light disabled:cursor-not-allowed"
-                      disabled={!selectedAgentId || sending || (!input.trim() && attachments.length === 0)}
-                      onClick={() => void sendMessage()}
-                    >
-                      <SendHorizonal className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center justify-between px-3 pb-2">
+                      <span
+                        className="text-xs"
+                        style={{ color: "rgba(203, 213, 225, 0.72)", fontFamily: "var(--font-mono)" }}
+                      >
+                        Enter to send · Shift+Enter for newline
+                      </span>
+                      <span
+                        className="text-xs"
+                        style={{
+                          color: isOverLimit ? "#F87171" : "rgba(203, 213, 225, 0.72)",
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {charCount > 0 ? `${charCount}/${MAX_CHAT_INPUT_LENGTH}` : attachments.length > 0 ? `${attachments.length} file${attachments.length > 1 ? "s" : ""}` : ""}
+                      </span>
+                    </div>
                   </div>
+
+                  <p className="mt-2 text-center text-xs text-slate-500">
+                    Aurora can make mistakes. Always verify important information.
+                  </p>
                 </div>
 
               {/* </div> */}
@@ -1696,6 +1764,48 @@ export default function UserAgentChatPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+        <style jsx>{`
+          .aurora-composer :global(.aurora-textarea::placeholder) {
+            color: rgba(203, 213, 225, 0.58);
+          }
+
+          .input-glow {
+            box-shadow: 0 18px 45px rgba(2, 6, 23, 0.28);
+            overflow: hidden;
+          }
+
+          .input-glow::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            border-radius: inherit;
+            background: radial-gradient(circle at top, rgba(79, 142, 255, 0.16), transparent 45%);
+            opacity: 0.9;
+          }
+
+          .scan-line {
+            position: absolute;
+            top: 0;
+            left: -30%;
+            width: 45%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(125, 211, 252, 0.9), transparent);
+            box-shadow: 0 0 12px rgba(79, 142, 255, 0.55);
+            animation: aurora-scan 2.4s linear infinite;
+            pointer-events: none;
+          }
+
+          @keyframes aurora-scan {
+            0% {
+              left: -30%;
+            }
+            100% {
+              left: 100%;
+            }
+          }
+        `}</style>
       </div>
     </main>
   )
