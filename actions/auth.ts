@@ -559,7 +559,10 @@ export const sendTenantAgentChat = (
     }
 
     try {
-      const response = await axios.post(`/ai/agents/${encodeURIComponent(agentId)}/chat`, payload, { headers })
+      const response = await axios.post(`/ai/agents/${encodeURIComponent(agentId)}/chat`, payload, {
+        headers,
+        timeout: 120000,
+      })
       const raw = (response?.data || {}) as Record<string, unknown>
       const reply = raw.reply && typeof raw.reply === "object" ? (raw.reply as Record<string, unknown>) : null
       const answer = String(raw.response || reply?.answer || reply?.reply || raw.answer || "").trim()

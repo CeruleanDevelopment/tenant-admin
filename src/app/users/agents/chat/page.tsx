@@ -1,13 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useDispatch } from "react-redux"
 import {
   ArrowLeft,
   Bot,
+  Check,
   CheckCircle2,
   Clock3,
+  Copy,
   FileText,
   FolderClosed,
   Globe,
@@ -184,15 +187,353 @@ const normalizeOAuthErrorMessage = (value: string): string => {
   return text
 }
 
+// Sanitize assistant text to remove conversation dumps, prefatory lines, repeated paragraphs, and internal tokens
 const sanitizeAssistantText = (value: string): string => {
-  const text = String(value || "")
+  let text = String(value || "")
+  // normalize newlines
+  text = text.replace(/\r\n/g, "\n")
+
+  // remove explicit conversation dumps like "USER:" or "ASSISTANT:" or section headers
+  text = text
+    .split("\n")
+    .filter((ln) => !/^\s*(user:|assistant:|recent conversation context:)/i.test(ln))
+    .join("\n")
+
+  // remove leading phrases like "I understand your message:" or "Current user request:"
+  text = text.replace(/^\s*(i understand your message[:\-\s]*|current user request[:\-\s]*).*/i, "")
+
+  // drop trailing Sources/score lists which are often verbose and not user-facing
+  text = text.replace(/\n\s*Sources:[\s\S]*/i, "")
+
+  // remove internal tokens that might leak file or symbol refs
+  text = text.replace(/`?#?(sym|file):[A-Za-z0-9_.\/:\\-]+`?/g, "")
+
+  // split into paragraphs and remove immediate duplicates to avoid repeated blocks
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+
+  const deduped: string[] = []
+  for (const p of paragraphs) {
+    if (deduped.length === 0 || deduped[deduped.length - 1] !== p) deduped.push(p)
+  }
+
+  text = deduped.join("\n\n")
+
+  // collapse excessive blank lines and trim
+  text = text.replace(/\n{3,}/g, "\n\n").trim()
   return text
-    .replace(/`?#sym:[A-Za-z0-9_.:-]+`?/g, "")
-    .replace(/`?#file:[A-Za-z0-9_./\\:-]+`?/g, "")
-    .replace(/`?sym:[A-Za-z0-9_.:-]+`?/g, "")
-    .replace(/`?file:[A-Za-z0-9_./\\:-]+`?/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
+}
+
+const renderInlineMarkdown = (value: string): ReactNode[] => {
+  const source = String(value || "")
+  const nodes: ReactNode[] = []
+  const pattern = /\*\*(.+?)\*\*/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null = pattern.exec(source)
+
+  while (match) {
+    const start = match.index
+    const end = pattern.lastIndex
+    if (start > lastIndex) {
+      nodes.push(source.slice(lastIndex, start))
+    }
+    nodes.push(
+      <strong key={`md-strong-${start}-${end}`} className="font-semibold text-slate-900">
+        {match[1]}
+      </strong>,
+    )
+    lastIndex = end
+    match = pattern.exec(source)
+  }
+
+  if (lastIndex < source.length) {
+    nodes.push(source.slice(lastIndex))
+  }
+
+  return nodes
+}
+
+const renderAssistantRichText = (value: string): ReactNode => {
+  const text = sanitizeAssistantText(value)
+  const lines = text.split("\n")
+  const nodes: ReactNode[] = []
+  let i = 0
+  let activeSection = ""
+  const sectionHeadings = new Set(["key themes", "highlights", "urgent items", "next actions"])
+
+  const isKeyValueLine = (input: string): boolean => /^[A-Za-z][A-Za-z ]{1,40}:\s+.+$/.test(input)
+
+  const isLikelyEmailItemTitle = (input: string, nextLine?: string): boolean => {
+    if (!input || input.includes(":")) return false
+    if (input.length > 80) return false
+    if (/^[#\-*\d]/.test(input.trim())) return false
+    return Boolean(nextLine && isKeyValueLine(nextLine.trim()))
+  }
+
+  const pushParagraph = (content: string, key: string) => {
+    if (!content.trim()) return
+    const paragraphLines = content.split("\n")
+    nodes.push(
+      <p key={key} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
+        {paragraphLines.map((line, idx) => (
+          <span key={`${key}-line-${idx}`}>
+            {renderInlineMarkdown(line)}
+            {idx < paragraphLines.length - 1 ? <br /> : null}
+          </span>
+        ))}
+      </p>,
+    )
+  }
+
+  while (i < lines.length) {
+    const raw = lines[i]
+    const line = raw.trim()
+
+    if (!line) {
+      i += 1
+      continue
+    }
+
+    if (/^email summary\b/i.test(line)) {
+      nodes.push(
+        <h2 key={`summary-title-${i}`} className="text-base font-semibold text-slate-900 mt-1">
+          {renderInlineMarkdown(line)}
+        </h2>,
+      )
+      i += 1
+      continue
+    }
+
+    if (sectionHeadings.has(line.toLowerCase())) {
+      activeSection = line.toLowerCase()
+      nodes.push(
+        <h3 key={`section-${i}`} className="text-sm font-semibold text-slate-900 mt-2">
+          {renderInlineMarkdown(line)}
+        </h3>,
+      )
+      i += 1
+      continue
+    }
+
+    if (activeSection === "highlights") {
+      const tryReadEmailCard = (): { consumed: number; node: ReactNode } | null => {
+        const titleLine = line
+        const titleNext = (() => {
+          let j = i + 1
+          while (j < lines.length && !lines[j].trim()) j += 1
+          return j < lines.length ? lines[j].trim() : ""
+        })()
+
+        if (!isLikelyEmailItemTitle(titleLine, titleNext)) {
+          return null
+        }
+
+        const fieldMap: Record<string, string> = {}
+        const order: string[] = []
+        let cursor = i + 1
+        while (cursor < lines.length) {
+          const rawNext = lines[cursor]
+          const next = rawNext.trim()
+          if (!next) {
+            cursor += 1
+            continue
+          }
+
+          if (sectionHeadings.has(next.toLowerCase())) {
+            break
+          }
+
+          if (isLikelyEmailItemTitle(next, (() => {
+            let k = cursor + 1
+            while (k < lines.length && !lines[k].trim()) k += 1
+            return k < lines.length ? lines[k].trim() : ""
+          })())) {
+            break
+          }
+
+          if (!isKeyValueLine(next)) {
+            break
+          }
+
+          const splitAt = next.indexOf(":")
+          const label = next.slice(0, splitAt).trim()
+          const content = next.slice(splitAt + 1).trim()
+          const lowerLabel = label.toLowerCase()
+          if (!fieldMap[lowerLabel]) {
+            order.push(lowerLabel)
+          }
+          fieldMap[lowerLabel] = content
+          cursor += 1
+        }
+
+        if (order.length === 0) {
+          return null
+        }
+
+        const preferredOrder = ["from", "to", "date", "snippet", "label"]
+        const mergedOrder = [...preferredOrder.filter((key) => key in fieldMap), ...order.filter((key) => !preferredOrder.includes(key))]
+
+        const labelText = fieldMap.label ? String(fieldMap.label).toUpperCase() : ""
+
+        const cardNode = (
+          <article key={`email-card-${i}`} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+            <h4 className="text-sm font-semibold text-slate-900">{renderInlineMarkdown(titleLine)}</h4>
+            <div className="space-y-1.5">
+              {mergedOrder
+                .filter((key) => key !== "label")
+                .map((key) => {
+                  const prettyLabel = key.charAt(0).toUpperCase() + key.slice(1)
+                  return (
+                    <p key={`email-card-field-${i}-${key}`} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
+                      <strong className="font-semibold text-slate-900">{prettyLabel}: </strong>
+                      {renderInlineMarkdown(fieldMap[key])}
+                    </p>
+                  )
+                })}
+            </div>
+            {labelText ? (
+              <div className="pt-1">
+                <span className="inline-flex items-center rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-slate-700">
+                  {labelText}
+                </span>
+              </div>
+            ) : null}
+          </article>
+        )
+
+        return {
+          consumed: cursor - i,
+          node: cardNode,
+        }
+      }
+
+      const parsed = tryReadEmailCard()
+      if (parsed) {
+        nodes.push(parsed.node)
+        i += parsed.consumed
+        continue
+      }
+    }
+
+    if (isKeyValueLine(line)) {
+      const splitAt = line.indexOf(":")
+      const label = line.slice(0, splitAt).trim()
+      const content = line.slice(splitAt + 1).trim()
+      nodes.push(
+        <p key={`kv-${i}`} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
+          <strong className="font-semibold text-slate-900">{label}: </strong>
+          {renderInlineMarkdown(content)}
+        </p>,
+      )
+      i += 1
+      continue
+    }
+
+    const nextNonEmptyLine = (() => {
+      let j = i + 1
+      while (j < lines.length && !lines[j].trim()) j += 1
+      return j < lines.length ? lines[j] : ""
+    })()
+
+    if (isLikelyEmailItemTitle(line, nextNonEmptyLine)) {
+      nodes.push(
+        <h4 key={`item-title-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
+          {renderInlineMarkdown(line)}
+        </h4>,
+      )
+      i += 1
+      continue
+    }
+
+    if (/^###\s+/.test(line)) {
+      nodes.push(
+        <h3 key={`h3-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
+          {renderInlineMarkdown(line.replace(/^###\s+/, ""))}
+        </h3>,
+      )
+      i += 1
+      continue
+    }
+
+    if (/^####\s+/.test(line)) {
+      nodes.push(
+        <h4 key={`h4-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
+          {renderInlineMarkdown(line.replace(/^####\s+/, ""))}
+        </h4>,
+      )
+      i += 1
+      continue
+    }
+
+    if (/^##\s+/.test(line)) {
+      nodes.push(
+        <h2 key={`h2-${i}`} className="text-base font-semibold text-slate-900 mt-1">
+          {renderInlineMarkdown(line.replace(/^##\s+/, ""))}
+        </h2>,
+      )
+      i += 1
+      continue
+    }
+
+    if (/^#\s+/.test(line)) {
+      nodes.push(
+        <h1 key={`h1-${i}`} className="text-lg font-semibold text-slate-900 mt-1">
+          {renderInlineMarkdown(line.replace(/^#\s+/, ""))}
+        </h1>,
+      )
+      i += 1
+      continue
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^\d+\.\s+/, ""))
+        i += 1
+      }
+      nodes.push(
+        <ol key={`ol-${i}`} className="list-decimal pl-5 space-y-1 text-sm leading-6 text-slate-700">
+          {items.map((item, idx) => (
+            <li key={`ol-item-${i}-${idx}`}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ol>,
+      )
+      continue
+    }
+
+    if (/^-\s+/.test(line)) {
+      const items: string[] = []
+      while (i < lines.length && /^-\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^-\s+/, ""))
+        i += 1
+      }
+      nodes.push(
+        <ul key={`ul-${i}`} className="list-disc pl-5 space-y-1 text-sm leading-6 text-slate-700">
+          {items.map((item, idx) => (
+            <li key={`ul-item-${i}-${idx}`}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>,
+      )
+      continue
+    }
+
+    const para: string[] = []
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !/^#{1,3}\s+/.test(lines[i].trim()) &&
+      !/^\d+\.\s+/.test(lines[i].trim()) &&
+      !/^-\s+/.test(lines[i].trim())
+    ) {
+      para.push(lines[i])
+      i += 1
+    }
+    pushParagraph(para.join("\n"), `p-${i}`)
+  }
+
+  return <div className="space-y-3">{nodes}</div>
 }
 
 const nowTime = (timezone?: string): string => {
@@ -473,6 +814,7 @@ export default function UserAgentChatPage() {
   const [sessionToDelete, setSessionToDelete] = useState<UserChatSession | null>(null)
   const [deletingSession, setDeletingSession] = useState(false)
   const [conversationTitle, setConversationTitle] = useState<string | null>(null)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const loadedHistoryRef = useRef<Set<string>>(new Set())
   const activeChatIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
@@ -485,6 +827,7 @@ export default function UserAgentChatPage() {
   const lastSessionsFetchAtRef = useRef(0)
   const agentsRequestInFlightRef = useRef(false)
   const sessionsRequestInFlightRef = useRef(false)
+  const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
   const SESSIONS_REFRESH_COOLDOWN_MS = 30000
@@ -818,6 +1161,37 @@ export default function UserAgentChatPage() {
     setIsMicActive((prev) => !prev)
   }
 
+  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
+    const valueToCopy = message.role === "assistant" ? sanitizeAssistantText(message.text) : String(message.text || "")
+    if (!valueToCopy.trim()) return
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(valueToCopy)
+      } else {
+        const textarea = document.createElement("textarea")
+        textarea.value = valueToCopy
+        textarea.setAttribute("readonly", "true")
+        textarea.style.position = "absolute"
+        textarea.style.left = "-9999px"
+        document.body.appendChild(textarea)
+        textarea.select()
+        document.execCommand("copy")
+        document.body.removeChild(textarea)
+      }
+
+      setCopiedMessageId(message.id)
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current)
+      }
+      copyFeedbackTimeoutRef.current = setTimeout(() => {
+        setCopiedMessageId((prev) => (prev === message.id ? null : prev))
+      }, 1800)
+    } catch {
+      setError("Unable to copy message. Please try again.")
+    }
+  }, [])
+
   useEffect(() => {
     if (!attachmentMenuOpen) return
 
@@ -836,6 +1210,14 @@ export default function UserAgentChatPage() {
       document.removeEventListener("touchstart", handlePointerDown)
     }
   }, [attachmentMenuOpen])
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!editingSessionId) return
@@ -1065,7 +1447,9 @@ export default function UserAgentChatPage() {
         router.replace(buildChatUrl(selectedAgentId, returnedChatId))
       }
 
-      const replyText = sanitizeAssistantText(String(payload.answer || payload.response || payload.reply || "I analyzed your request and prepared a response."))
+      const replyText = sanitizeAssistantText(
+        String(payload.markdown_summary || payload.answer || payload.response || payload.reply || "I analyzed your request and prepared a response."),
+      )
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
@@ -1427,37 +1811,65 @@ export default function UserAgentChatPage() {
                   {activeMessages.map((message) => {
                     const isUser = message.role === "user"
                     const isSystem = message.role === "system"
+                    const isCopied = copiedMessageId === message.id
 
                     return (
-                      <div key={message.id} className={`w-full flex items-end gap-3 ${isUser ? "justify-end" : "justify-start pb-4"}`}>
+                      <div key={message.id} className={`group/message w-full flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
                         {!isUser ? (
                           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600" : "bg-primary text-white"}`}>
                             {isSystem ? <Wand2 className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                           </div>
                         ) : null}
 
-                        <div className={`max-w-[86%] md:max-w-[70%] lg:max-w-[60%] inline-block rounded-[24px] px-4 py-3 shadow-sm ${
-                            isUser
-                              ? "rounded-br-md bg-primary text-white"
-                              : isSystem
-                                ? "rounded-tl-md border border-dashed border-slate-300 bg-white text-slate-600"
-                                : "rounded-tl-md border border-white/80 bg-white text-slate-700"
-                          }`}
-                        >
-                          {message.attachments?.length ? <AttachmentGallery attachments={message.attachments.map(createAttachmentView)} isUser={isUser} /> : null}
-                          <p className="text-sm leading-6 whitespace-pre-wrap wrap-break-word">{!isUser ? sanitizeAssistantText(message.text) : message.text}</p>
-                          {message.meta ? <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.meta}</p> : null}
-                          {/* Source badge: demo vs AI */}
-                          {/* {!isUser && message.source ? (
-                            <div className="mt-2">
-                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${message.source === "server" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}`}>
-                                {message.source === "server" ? "Backend AI" : "AI"}
-                              </span>
-                            </div>
-                          ) : null} */}
-                          <p className={`mt-1 w-full text-right text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`} aria-label={`message-time-${message.id}`} >
-                            {message.time}
-                          </p>
+                        <div className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}`}>
+                          <div
+                            className={`inline-block rounded-[24px] px-4 py-3 ${
+                              isUser
+                                ? "w-fit max-w-[96%] md:max-w-[90%] lg:max-w-[84%] rounded-br-md bg-slate-900 text-white shadow-sm"
+                                : isSystem
+                                  ? "w-[92%] md:w-[84%] lg:w-[78%] rounded-tl-md border border-dashed border-slate-300 bg-white text-slate-600"
+                                  : "w-[92%] md:w-[84%] lg:w-[78%] rounded-tl-md border border-slate-200 bg-white text-slate-700"
+                            }`}
+                          >
+                            {message.attachments?.length ? <AttachmentGallery attachments={message.attachments.map(createAttachmentView)} isUser={isUser} /> : null}
+                            {!isUser ? (
+                              <div className="text-sm leading-6 wrap-break-word">{renderAssistantRichText(message.text)}</div>
+                            ) : (
+                              <p className="text-sm leading-6 whitespace-pre-wrap wrap-break-word">{message.text}</p>
+                            )}
+                            {message.meta ? <p className={`mt-1 text-[11px] ${isUser ? "text-white/80" : "text-slate-400"}`}>{message.meta}</p> : null}
+                            {/* Source badge: demo vs AI */}
+                            {/* {!isUser && message.source ? (
+                              <div className="mt-2">
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${message.source === "server" ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}`}>
+                                  {message.source === "server" ? "Backend AI" : "AI"}
+                                </span>
+                              </div>
+                            ) : null} */}
+                          </div>
+
+                          <div className={`mt-1 flex items-center gap-1.5 px-1 ${isUser ? "justify-end" : "justify-start"}`}>
+                            <p className={`${isUser ? "text-slate-400" : "text-slate-400"} text-[11px]`} aria-label={`message-time-${message.id}`}>
+                              {message.time}
+                            </p>
+                            <button
+                              type="button"
+                              className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition hover:cursor-pointer ${
+                                !isUser || isCopied
+                                  ? "opacity-100"
+                                  : "pointer-events-none opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100"
+                              } ${
+                                isUser
+                                  ? "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                              onClick={() => void handleCopyMessage(message)}
+                              aria-label={`Copy message ${message.id}`}
+                            >
+                              {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                              {/* {isCopied ? "Copied" : "Copy"} */}
+                            </button>
+                          </div>
                         </div>
 
                         {isUser ? (
