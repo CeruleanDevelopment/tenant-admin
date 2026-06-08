@@ -214,6 +214,7 @@ type TenantAgentChatResponse = {
   response?: string
   reply?: string
   answer?: string
+  markdown_summary?: string
   chatId?: string
   title?: string
   messageId?: string
@@ -565,13 +566,15 @@ export const sendTenantAgentChat = (
       })
       const raw = (response?.data || {}) as Record<string, unknown>
       const reply = raw.reply && typeof raw.reply === "object" ? (raw.reply as Record<string, unknown>) : null
-      const answer = String(raw.response || reply?.answer || reply?.reply || raw.answer || "").trim()
+        const markdownSummary = String(raw.markdown_summary || reply?.markdown_summary || "").trim()
+        const answer = String(markdownSummary || raw.response || reply?.answer || reply?.reply || raw.answer || "").trim()
 
       return {
         ...raw,
         chatId: String(raw.chatId || "").trim() || undefined,
         reply: typeof raw.reply === "string" ? raw.reply : answer,
         answer,
+          markdown_summary: markdownSummary || undefined,
         response: String(raw.response || answer || "").trim(),
       } as TenantAgentChatResponse
     } catch (error: unknown) {

@@ -193,6 +193,9 @@ const sanitizeAssistantText = (value: string): string => {
   // normalize newlines
   text = text.replace(/\r\n/g, "\n")
 
+  // normalize split list markers: "1." on one line and content on next line -> "1. content"
+  text = text.replace(/(^|\n)(\d+)[.)]\s*\n([^\n]+)/g, "$1$2. $3")
+
   // remove explicit conversation dumps like "USER:" or "ASSISTANT:" or section headers
   text = text
     .split("\n")
@@ -261,14 +264,47 @@ const renderAssistantRichText = (value: string): ReactNode => {
   const nodes: ReactNode[] = []
   let i = 0
   let activeSection = ""
+  let highlightCardCounter = 0
   const sectionHeadings = new Set(["key themes", "highlights", "urgent items", "next actions"])
+  const orderedListPattern = /^\d+[.)]\s+/
+  const unorderedListPattern = /^(?:[-*+]|•)\s+/
+  const normalizeHeadingText = (input: string): string => String(input || "").replace(/^#{1,6}\s+/, "").trim().toLowerCase()
 
-  const isKeyValueLine = (input: string): boolean => /^[A-Za-z][A-Za-z ]{1,40}:\s+.+$/.test(input)
+  const parseKeyValueLine = (input: string): { label: string; content: string } | null => {
+    const trimmed = String(input || "").trim()
+    if (!trimmed) return null
+
+    const match = trimmed.match(/^(?:[-*]\s*)?(?:\d+\.\s*)?(?:\*\*([^*]+)\*\*|([A-Za-z][A-Za-z ]{1,40}))\s*:\s+(.+)$/)
+    if (!match) return null
+
+    const label = String(match[1] || match[2] || "").trim()
+    const content = String(match[3] || "").trim()
+    if (!label || !content) return null
+
+    return { label, content }
+  }
+
+  const isKeyValueLine = (input: string): boolean => Boolean(parseKeyValueLine(input))
+
+  const parseEmailItemTitle = (input: string): { title: string; numberLabel: string | null } | null => {
+    const raw = String(input || "").trim()
+    if (!raw) return null
+
+    const unwrapped = raw.replace(/^\*\*(.+)\*\*$/, "$1").trim()
+    const numbered = unwrapped.match(/^(\d+)[.)]\s+(.+)$/)
+    const numberLabel = numbered ? String(numbered[1]) : null
+    const title = numbered ? String(numbered[2] || "").trim() : unwrapped
+
+    if (!title || title.includes(":")) return null
+    if (title.length > 120) return null
+    if (/^[#\-*+•]/.test(title)) return null
+
+    return { title, numberLabel }
+  }
 
   const isLikelyEmailItemTitle = (input: string, nextLine?: string): boolean => {
-    if (!input || input.includes(":")) return false
-    if (input.length > 80) return false
-    if (/^[#\-*\d]/.test(input.trim())) return false
+    const parsed = parseEmailItemTitle(input)
+    if (!parsed) return false
     return Boolean(nextLine && isKeyValueLine(nextLine.trim()))
   }
 
@@ -319,9 +355,36 @@ const renderAssistantRichText = (value: string): ReactNode => {
 
     if (activeSection === "highlights") {
       const tryReadEmailCard = (): { consumed: number; node: ReactNode } | null => {
-        const titleLine = line
-        const titleNext = (() => {
+        let titleLineIndex = i
+        let parsedTitle = parseEmailItemTitle(line)
+
+        const numberOnlyLine = line.match(/^(\d+)[.)]?$/)
+        if (!parsedTitle && numberOnlyLine) {
           let j = i + 1
+          while (j < lines.length && !lines[j].trim()) j += 1
+          if (j < lines.length) {
+            const nextRaw = lines[j].trim()
+            const parsedNext = parseEmailItemTitle(nextRaw)
+            if (parsedNext) {
+              parsedTitle = {
+                ...parsedNext,
+                numberLabel: parsedNext.numberLabel || String(numberOnlyLine[1]),
+              }
+              titleLineIndex = j
+            } else {
+              const plainTitle = nextRaw.replace(/^\*\*(.+)\*\*$/, "$1").trim()
+              parsedTitle = {
+                title: plainTitle,
+                numberLabel: String(numberOnlyLine[1]),
+              }
+              titleLineIndex = j
+            }
+          }
+        }
+
+        const titleLine = parsedTitle?.title || line
+        const titleNext = (() => {
+          let j = titleLineIndex + 1
           while (j < lines.length && !lines[j].trim()) j += 1
           return j < lines.length ? lines[j].trim() : ""
         })()
@@ -332,7 +395,7 @@ const renderAssistantRichText = (value: string): ReactNode => {
 
         const fieldMap: Record<string, string> = {}
         const order: string[] = []
-        let cursor = i + 1
+        let cursor = titleLineIndex + 1
         while (cursor < lines.length) {
           const rawNext = lines[cursor]
           const next = rawNext.trim()
@@ -353,18 +416,16 @@ const renderAssistantRichText = (value: string): ReactNode => {
             break
           }
 
-          if (!isKeyValueLine(next)) {
+          const keyValue = parseKeyValueLine(next)
+          if (!keyValue) {
             break
           }
 
-          const splitAt = next.indexOf(":")
-          const label = next.slice(0, splitAt).trim()
-          const content = next.slice(splitAt + 1).trim()
-          const lowerLabel = label.toLowerCase()
+          const lowerLabel = keyValue.label.toLowerCase()
           if (!fieldMap[lowerLabel]) {
             order.push(lowerLabel)
           }
-          fieldMap[lowerLabel] = content
+          fieldMap[lowerLabel] = keyValue.content
           cursor += 1
         }
 
@@ -376,10 +437,19 @@ const renderAssistantRichText = (value: string): ReactNode => {
         const mergedOrder = [...preferredOrder.filter((key) => key in fieldMap), ...order.filter((key) => !preferredOrder.includes(key))]
 
         const labelText = fieldMap.label ? String(fieldMap.label).toUpperCase() : ""
+        highlightCardCounter += 1
+        const displayNumber = String(highlightCardCounter)
 
         const cardNode = (
           <article key={`email-card-${i}`} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-            <h4 className="text-sm font-semibold text-slate-900">{renderInlineMarkdown(titleLine)}</h4>
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              {displayNumber ? (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-200 px-1.5 text-[11px] font-bold text-slate-700">
+                  {displayNumber}
+                </span>
+              ) : null}
+              <span>{renderInlineMarkdown(titleLine)}</span>
+            </h4>
             <div className="space-y-1.5">
               {mergedOrder
                 .filter((key) => key !== "label")
@@ -418,13 +488,15 @@ const renderAssistantRichText = (value: string): ReactNode => {
     }
 
     if (isKeyValueLine(line)) {
-      const splitAt = line.indexOf(":")
-      const label = line.slice(0, splitAt).trim()
-      const content = line.slice(splitAt + 1).trim()
+      const parsedLine = parseKeyValueLine(line)
+      if (!parsedLine) {
+        i += 1
+        continue
+      }
       nodes.push(
         <p key={`kv-${i}`} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
-          <strong className="font-semibold text-slate-900">{label}: </strong>
-          {renderInlineMarkdown(content)}
+          <strong className="font-semibold text-slate-900">{parsedLine.label}: </strong>
+          {renderInlineMarkdown(parsedLine.content)}
         </p>,
       )
       i += 1
@@ -438,9 +510,10 @@ const renderAssistantRichText = (value: string): ReactNode => {
     })()
 
     if (isLikelyEmailItemTitle(line, nextNonEmptyLine)) {
+      const parsedTitle = parseEmailItemTitle(line)
       nodes.push(
         <h4 key={`item-title-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(line)}
+          {renderInlineMarkdown(parsedTitle?.title || line)}
         </h4>,
       )
       i += 1
@@ -448,9 +521,12 @@ const renderAssistantRichText = (value: string): ReactNode => {
     }
 
     if (/^###\s+/.test(line)) {
+      const headingText = line.replace(/^###\s+/, "").trim()
+      const normalizedHeading = normalizeHeadingText(headingText)
+      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
       nodes.push(
         <h3 key={`h3-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(line.replace(/^###\s+/, ""))}
+          {renderInlineMarkdown(headingText)}
         </h3>,
       )
       i += 1
@@ -458,9 +534,12 @@ const renderAssistantRichText = (value: string): ReactNode => {
     }
 
     if (/^####\s+/.test(line)) {
+      const headingText = line.replace(/^####\s+/, "").trim()
+      const normalizedHeading = normalizeHeadingText(headingText)
+      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
       nodes.push(
         <h4 key={`h4-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(line.replace(/^####\s+/, ""))}
+          {renderInlineMarkdown(headingText)}
         </h4>,
       )
       i += 1
@@ -468,9 +547,12 @@ const renderAssistantRichText = (value: string): ReactNode => {
     }
 
     if (/^##\s+/.test(line)) {
+      const headingText = line.replace(/^##\s+/, "").trim()
+      const normalizedHeading = normalizeHeadingText(headingText)
+      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
       nodes.push(
         <h2 key={`h2-${i}`} className="text-base font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(line.replace(/^##\s+/, ""))}
+          {renderInlineMarkdown(headingText)}
         </h2>,
       )
       i += 1
@@ -478,41 +560,56 @@ const renderAssistantRichText = (value: string): ReactNode => {
     }
 
     if (/^#\s+/.test(line)) {
+      const headingText = line.replace(/^#\s+/, "").trim()
+      const normalizedHeading = normalizeHeadingText(headingText)
+      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
       nodes.push(
         <h1 key={`h1-${i}`} className="text-lg font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(line.replace(/^#\s+/, ""))}
+          {renderInlineMarkdown(headingText)}
         </h1>,
       )
       i += 1
       continue
     }
 
-    if (/^\d+\.\s+/.test(line)) {
-      const items: string[] = []
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^\d+\.\s+/, ""))
+    if (orderedListPattern.test(line)) {
+      const items: Array<{ marker: string; text: string }> = []
+      while (i < lines.length && orderedListPattern.test(lines[i].trim())) {
+        const listLine = lines[i].trim()
+        const markerMatch = listLine.match(/^(\d+)[.)]\s+(.+)$/)
+        if (markerMatch) {
+          items.push({ marker: `${markerMatch[1]}.`, text: String(markerMatch[2] || "") })
+        } else {
+          items.push({ marker: `${items.length + 1}.`, text: listLine.replace(orderedListPattern, "") })
+        }
         i += 1
       }
       nodes.push(
-        <ol key={`ol-${i}`} className="list-decimal pl-5 space-y-1 text-sm leading-6 text-slate-700">
+        <ol key={`ol-${i}`} className="space-y-1 text-sm leading-6 text-slate-700">
           {items.map((item, idx) => (
-            <li key={`ol-item-${i}-${idx}`}>{renderInlineMarkdown(item)}</li>
+            <li key={`ol-item-${i}-${idx}`} className="flex items-start gap-2">
+              <span className="mt-0.5 w-5 shrink-0 text-right font-semibold text-slate-700">{item.marker}</span>
+              <span className="min-w-0 wrap-break-word">{renderInlineMarkdown(item.text)}</span>
+            </li>
           ))}
         </ol>,
       )
       continue
     }
 
-    if (/^-\s+/.test(line)) {
+    if (unorderedListPattern.test(line)) {
       const items: string[] = []
-      while (i < lines.length && /^-\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^-\s+/, ""))
+      while (i < lines.length && unorderedListPattern.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(unorderedListPattern, ""))
         i += 1
       }
       nodes.push(
-        <ul key={`ul-${i}`} className="list-disc pl-5 space-y-1 text-sm leading-6 text-slate-700">
+        <ul key={`ul-${i}`} className="space-y-1 text-sm leading-6 text-slate-700">
           {items.map((item, idx) => (
-            <li key={`ul-item-${i}-${idx}`}>{renderInlineMarkdown(item)}</li>
+            <li key={`ul-item-${i}-${idx}`} className="flex items-start gap-2">
+              <span className="mt-2.25 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
+              <span className="min-w-0 wrap-break-word">{renderInlineMarkdown(item)}</span>
+            </li>
           ))}
         </ul>,
       )
@@ -524,8 +621,8 @@ const renderAssistantRichText = (value: string): ReactNode => {
       i < lines.length &&
       lines[i].trim() &&
       !/^#{1,3}\s+/.test(lines[i].trim()) &&
-      !/^\d+\.\s+/.test(lines[i].trim()) &&
-      !/^-\s+/.test(lines[i].trim())
+      !orderedListPattern.test(lines[i].trim()) &&
+      !unorderedListPattern.test(lines[i].trim())
     ) {
       para.push(lines[i])
       i += 1
@@ -1854,7 +1951,7 @@ export default function UserAgentChatPage() {
                             </p>
                             <button
                               type="button"
-                              className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition hover:cursor-pointer ${
+                              className={`inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium transition hover:cursor-pointer ${
                                 !isUser || isCopied
                                   ? "opacity-100"
                                   : "pointer-events-none opacity-0 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100"
