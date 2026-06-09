@@ -316,7 +316,7 @@ const renderAssistantRichText = (value: string): ReactNode => {
   if (!text) return null
 
   return (
-    <div className="chat-markdown text-sm leading-6 text-slate-700 wrap-break-word">
+    <div className="chat-markdown text-sm leading-6 text-slate-700 wrap-break-word [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-lg [&_thead]:bg-slate-100 [&_th]:border [&_th]:border-slate-200 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:text-slate-700 [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_tbody_tr:nth-child(even)]:bg-slate-50/60 [&_hr]:my-3 [&_hr]:border-slate-200 [&_strong]:font-semibold [&_strong]:text-slate-900 [&_em]:italic [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-slate-900 [&_pre]:p-3 [&_pre]:text-[12px] [&_pre]:text-slate-100">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -328,15 +328,24 @@ const renderAssistantRichText = (value: string): ReactNode => {
           ul: ({ children }) => <ul className="my-1 list-disc pl-5 space-y-0.5">{children}</ul>,
           ol: ({ children }) => <ol className="my-1 list-decimal pl-5 space-y-0.5">{children}</ol>,
           li: ({ children }) => <li className="my-0 whitespace-pre-line marker:text-slate-500">{children}</li>,
+          table: ({ children }) => <div className="my-2 overflow-x-auto"><table>{children}</table></div>,
+          thead: ({ children }) => <thead>{children}</thead>,
+          tbody: ({ children }) => <tbody>{children}</tbody>,
+          tr: ({ children }) => <tr>{children}</tr>,
+          th: ({ children }) => <th>{children}</th>,
+          td: ({ children }) => <td>{children}</td>,
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
               {children}
             </a>
           ),
           blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-3 text-slate-600">{children}</blockquote>,
+          strong: ({ children }) => <strong className="font-semibold text-slate-900">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          hr: () => <hr className="my-3 border-slate-200" />,
           code: ({ className, children }) =>
             className?.includes("language-") ? (
-              <code className="block overflow-x-auto rounded-lg bg-slate-900 p-3 text-[12px] text-slate-100">{children}</code>
+              <code className="text-[12px] text-slate-100">{children}</code>
             ) : (
               <code className="rounded bg-slate-100 px-1 py-0.5 text-[12px] text-slate-800">{children}</code>
             ),
@@ -473,6 +482,17 @@ const createChatId = (): string => {
     return crypto.randomUUID()
   }
   return `chat-${Date.now()}`
+}
+
+const buildOptimisticSessionTitle = (message: string, hasAttachments: boolean): string => {
+  const trimmed = String(message || "").trim()
+  if (trimmed) {
+    return trimmed.length > 72 ? `${trimmed.slice(0, 72).trimEnd()}...` : trimmed
+  }
+  if (hasAttachments) {
+    return "Shared attachments"
+  }
+  return "New chat"
 }
 
 const buildChatUrl = (agentId: string, chatId?: string): string => {
@@ -639,6 +659,7 @@ export default function UserAgentChatPage() {
   const lastSessionsFetchAtRef = useRef(0)
   const agentsRequestInFlightRef = useRef(false)
   const sessionsRequestInFlightRef = useRef(false)
+  const pendingSessionsForceRefreshRef = useRef(false)
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
@@ -648,7 +669,13 @@ export default function UserAgentChatPage() {
     const silent = Boolean(options?.silent)
     const now = Date.now()
     if (!force && now - lastSessionsFetchAtRef.current < SESSIONS_REFRESH_COOLDOWN_MS) return
-    if (sessionsRequestInFlightRef.current) return
+    if (sessionsRequestInFlightRef.current) {
+      // If a refresh is requested while one is in progress, queue one follow-up refresh.
+      if (force) {
+        pendingSessionsForceRefreshRef.current = true
+      }
+      return
+    }
 
     sessionsRequestInFlightRef.current = true
     lastSessionsFetchAtRef.current = now
@@ -667,6 +694,11 @@ export default function UserAgentChatPage() {
       sessionsRequestInFlightRef.current = false
       if (!silent) {
         setLoadingUserSessions(false)
+      }
+
+      if (pendingSessionsForceRefreshRef.current) {
+        pendingSessionsForceRefreshRef.current = false
+        void loadUserSessions(true, { silent: true })
       }
     }
   }, [dispatch])
@@ -1226,6 +1258,27 @@ export default function UserAgentChatPage() {
       router.replace(buildChatUrl(selectedAgentId, resolvedChatId))
     }
 
+    // Optimistic recent chats update: reflect the active conversation immediately without waiting for API.
+    setUserSessions((prev) => {
+      const optimisticNow = new Date().toISOString()
+      const existing = prev.find((session) => String(session.id) === resolvedChatId)
+      const fallbackTitle = buildOptimisticSessionTitle(message, attachments.length > 0)
+      const nextSession: UserChatSession = existing
+        ? {
+            ...existing,
+            created_at: optimisticNow,
+            title: String(existing.title || fallbackTitle),
+          }
+        : {
+            id: resolvedChatId,
+            message_id: null,
+            created_at: optimisticNow,
+            title: fallbackTitle,
+          }
+
+      return [nextSession, ...prev.filter((session) => String(session.id) !== resolvedChatId)]
+    })
+
     const targetBucketKey = buildMessageBucketKey(selectedAgentId, resolvedChatId)
 
     setMessagesByBucket((prev) => ({
@@ -1257,6 +1310,30 @@ export default function UserAgentChatPage() {
           [selectedAgentId]: returnedChatId,
         }))
         router.replace(buildChatUrl(selectedAgentId, returnedChatId))
+
+        // Keep optimistic recent chats coherent if backend normalizes chatId.
+        setUserSessions((prev) => {
+          const normalized = prev.find((session) => String(session.id) === returnedChatId)
+          const fallback = prev.find((session) => String(session.id) === resolvedChatId)
+          if (normalized) {
+            return [
+              {
+                ...normalized,
+                created_at: new Date().toISOString(),
+              },
+              ...prev.filter((session) => String(session.id) !== returnedChatId && String(session.id) !== resolvedChatId),
+            ]
+          }
+          if (fallback) {
+            const remapped: UserChatSession = {
+              ...fallback,
+              id: returnedChatId,
+              created_at: new Date().toISOString(),
+            }
+            return [remapped, ...prev.filter((session) => String(session.id) !== resolvedChatId)]
+          }
+          return prev
+        })
       }
 
       const replyText = sanitizeAssistantText(
@@ -1290,7 +1367,6 @@ export default function UserAgentChatPage() {
       setAttachments([])
       setAttachmentMenuOpen(false)
       setIsMicActive(false)
-      void loadUserSessions(true)
     } catch (chatError: unknown) {
       const extracted = extractApiMessage(chatError as any)
       const rawMessage =
