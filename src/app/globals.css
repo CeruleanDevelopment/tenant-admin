@@ -271,7 +271,7 @@
   color: white !important;
 }
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -279,7 +279,7 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 149, 255, 0.2);
+  background: rgba(16, 88, 244, 0.2);
   border-radius: 2px;
 }
 

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useDispatch } from "react-redux"
 import {
@@ -211,22 +213,73 @@ const sanitizeAssistantText = (value: string): string => {
   // remove internal tokens that might leak file or symbol refs
   text = text.replace(/`?#?(sym|file):[A-Za-z0-9_.\/:\\-]+`?/g, "")
 
-  // split into paragraphs and remove immediate duplicates to avoid repeated blocks
-  const paragraphs = text
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean)
+  // generic markdown whitespace normalization (no field-specific/static shaping)
+  const normalizedLines = text
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/g, ""))
 
-  const deduped: string[] = []
-  for (const p of paragraphs) {
-    if (deduped.length === 0 || deduped[deduped.length - 1] !== p) deduped.push(p)
+  const compactLines: string[] = []
+  let previousWasBlank = false
+  for (const line of normalizedLines) {
+    const blank = line.trim().length === 0
+    if (blank) {
+      if (!previousWasBlank) {
+        compactLines.push("")
+      }
+      previousWasBlank = true
+      continue
+    }
+
+    compactLines.push(line)
+    previousWasBlank = false
   }
 
-  text = deduped.join("\n\n")
+  text = compactLines.join("\n").trim()
 
-  // collapse excessive blank lines and trim
-  text = text.replace(/\n{3,}/g, "\n\n").trim()
+  // Generic reflow for compressed AI output: restore readable markdown-like line breaks
+  // without relying on message-type specific templates.
+  text = text
+    // Ensure headings start on their own line.
+    .replace(/\s+(?=#{1,6}\s+)/g, "\n")
+    // Ensure numbered list markers start on their own line.
+    .replace(/\s+(?=\d+[.)]\s+)/g, "\n")
+    // Break before generic key-value fields like "From:", "Date:", "Snippet:".
+    .replace(/\s+(?=(?:\*\*)?[A-Z][A-Za-z ]{1,24}(?:\*\*)?:\s+)/g, "\n")
+    // Re-collapse excessive blank lines after reflow.
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+
+  // Repair malformed markdown tokens coming from model output without using static templates.
+  text = text
+    // Bullet marker separated from content: "-\n**Text**" -> "- **Text**"
+    .replace(/(^|\n)\s*[-*+]\s*\n\s*(?=\S)/g, "$1- ")
+    // Numbered marker separated from content: "1.\n**Text**" -> "1. **Text**"
+    .replace(/(^|\n)\s*(\d+[.)])\s*\n\s*(?=\S)/g, "$1$2 ")
+
+  // Collapse line breaks inside bold spans so markdown emphasis renders correctly.
+  text = text.replace(/\*\*([\s\S]*?)\*\*/g, (full, inner) => {
+    const normalizedInner = String(inner || "")
+      .replace(/\s*\n\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim()
+    return `**${normalizedInner}**`
+  })
+
   return text
+}
+
+const assistantTextForCopy = (value: string): string => {
+  const text = sanitizeAssistantText(value)
+
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!?\[([^\]]+)\]\([^\)]+\)/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
 }
 
 const renderInlineMarkdown = (value: string): ReactNode[] => {
@@ -260,377 +313,39 @@ const renderInlineMarkdown = (value: string): ReactNode[] => {
 
 const renderAssistantRichText = (value: string): ReactNode => {
   const text = sanitizeAssistantText(value)
-  const lines = text.split("\n")
-  const nodes: ReactNode[] = []
-  let i = 0
-  let activeSection = ""
-  let highlightCardCounter = 0
-  const sectionHeadings = new Set(["key themes", "highlights", "urgent items", "next actions"])
-  const orderedListPattern = /^\d+[.)]\s+/
-  const unorderedListPattern = /^(?:[-*+]|•)\s+/
-  const normalizeHeadingText = (input: string): string => String(input || "").replace(/^#{1,6}\s+/, "").trim().toLowerCase()
+  if (!text) return null
 
-  const parseKeyValueLine = (input: string): { label: string; content: string } | null => {
-    const trimmed = String(input || "").trim()
-    if (!trimmed) return null
-
-    const match = trimmed.match(/^(?:[-*]\s*)?(?:\d+\.\s*)?(?:\*\*([^*]+)\*\*|([A-Za-z][A-Za-z ]{1,40}))\s*:\s+(.+)$/)
-    if (!match) return null
-
-    const label = String(match[1] || match[2] || "").trim()
-    const content = String(match[3] || "").trim()
-    if (!label || !content) return null
-
-    return { label, content }
-  }
-
-  const isKeyValueLine = (input: string): boolean => Boolean(parseKeyValueLine(input))
-
-  const parseEmailItemTitle = (input: string): { title: string; numberLabel: string | null } | null => {
-    const raw = String(input || "").trim()
-    if (!raw) return null
-
-    const unwrapped = raw.replace(/^\*\*(.+)\*\*$/, "$1").trim()
-    const numbered = unwrapped.match(/^(\d+)[.)]\s+(.+)$/)
-    const numberLabel = numbered ? String(numbered[1]) : null
-    const title = numbered ? String(numbered[2] || "").trim() : unwrapped
-
-    if (!title || title.includes(":")) return null
-    if (title.length > 120) return null
-    if (/^[#\-*+•]/.test(title)) return null
-
-    return { title, numberLabel }
-  }
-
-  const isLikelyEmailItemTitle = (input: string, nextLine?: string): boolean => {
-    const parsed = parseEmailItemTitle(input)
-    if (!parsed) return false
-    return Boolean(nextLine && isKeyValueLine(nextLine.trim()))
-  }
-
-  const pushParagraph = (content: string, key: string) => {
-    if (!content.trim()) return
-    const paragraphLines = content.split("\n")
-    nodes.push(
-      <p key={key} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
-        {paragraphLines.map((line, idx) => (
-          <span key={`${key}-line-${idx}`}>
-            {renderInlineMarkdown(line)}
-            {idx < paragraphLines.length - 1 ? <br /> : null}
-          </span>
-        ))}
-      </p>,
-    )
-  }
-
-  while (i < lines.length) {
-    const raw = lines[i]
-    const line = raw.trim()
-
-    if (!line) {
-      i += 1
-      continue
-    }
-
-    if (/^email summary\b/i.test(line)) {
-      nodes.push(
-        <h2 key={`summary-title-${i}`} className="text-base font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(line)}
-        </h2>,
-      )
-      i += 1
-      continue
-    }
-
-    if (sectionHeadings.has(line.toLowerCase())) {
-      activeSection = line.toLowerCase()
-      nodes.push(
-        <h3 key={`section-${i}`} className="text-sm font-semibold text-slate-900 mt-2">
-          {renderInlineMarkdown(line)}
-        </h3>,
-      )
-      i += 1
-      continue
-    }
-
-    if (activeSection === "highlights") {
-      const tryReadEmailCard = (): { consumed: number; node: ReactNode } | null => {
-        let titleLineIndex = i
-        let parsedTitle = parseEmailItemTitle(line)
-
-        const numberOnlyLine = line.match(/^(\d+)[.)]?$/)
-        if (!parsedTitle && numberOnlyLine) {
-          let j = i + 1
-          while (j < lines.length && !lines[j].trim()) j += 1
-          if (j < lines.length) {
-            const nextRaw = lines[j].trim()
-            const parsedNext = parseEmailItemTitle(nextRaw)
-            if (parsedNext) {
-              parsedTitle = {
-                ...parsedNext,
-                numberLabel: parsedNext.numberLabel || String(numberOnlyLine[1]),
-              }
-              titleLineIndex = j
-            } else {
-              const plainTitle = nextRaw.replace(/^\*\*(.+)\*\*$/, "$1").trim()
-              parsedTitle = {
-                title: plainTitle,
-                numberLabel: String(numberOnlyLine[1]),
-              }
-              titleLineIndex = j
-            }
-          }
-        }
-
-        const titleLine = parsedTitle?.title || line
-        const titleNext = (() => {
-          let j = titleLineIndex + 1
-          while (j < lines.length && !lines[j].trim()) j += 1
-          return j < lines.length ? lines[j].trim() : ""
-        })()
-
-        if (!isLikelyEmailItemTitle(titleLine, titleNext)) {
-          return null
-        }
-
-        const fieldMap: Record<string, string> = {}
-        const order: string[] = []
-        let cursor = titleLineIndex + 1
-        while (cursor < lines.length) {
-          const rawNext = lines[cursor]
-          const next = rawNext.trim()
-          if (!next) {
-            cursor += 1
-            continue
-          }
-
-          if (sectionHeadings.has(next.toLowerCase())) {
-            break
-          }
-
-          if (isLikelyEmailItemTitle(next, (() => {
-            let k = cursor + 1
-            while (k < lines.length && !lines[k].trim()) k += 1
-            return k < lines.length ? lines[k].trim() : ""
-          })())) {
-            break
-          }
-
-          const keyValue = parseKeyValueLine(next)
-          if (!keyValue) {
-            break
-          }
-
-          const lowerLabel = keyValue.label.toLowerCase()
-          if (!fieldMap[lowerLabel]) {
-            order.push(lowerLabel)
-          }
-          fieldMap[lowerLabel] = keyValue.content
-          cursor += 1
-        }
-
-        if (order.length === 0) {
-          return null
-        }
-
-        const preferredOrder = ["from", "to", "date", "snippet", "label"]
-        const mergedOrder = [...preferredOrder.filter((key) => key in fieldMap), ...order.filter((key) => !preferredOrder.includes(key))]
-
-        const labelText = fieldMap.label ? String(fieldMap.label).toUpperCase() : ""
-        highlightCardCounter += 1
-        const displayNumber = String(highlightCardCounter)
-
-        const cardNode = (
-          <article key={`email-card-${i}`} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-            <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              {displayNumber ? (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-200 px-1.5 text-[11px] font-bold text-slate-700">
-                  {displayNumber}
-                </span>
-              ) : null}
-              <span>{renderInlineMarkdown(titleLine)}</span>
-            </h4>
-            <div className="space-y-1.5">
-              {mergedOrder
-                .filter((key) => key !== "label")
-                .map((key) => {
-                  const prettyLabel = key.charAt(0).toUpperCase() + key.slice(1)
-                  return (
-                    <p key={`email-card-field-${i}-${key}`} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
-                      <strong className="font-semibold text-slate-900">{prettyLabel}: </strong>
-                      {renderInlineMarkdown(fieldMap[key])}
-                    </p>
-                  )
-                })}
-            </div>
-            {labelText ? (
-              <div className="pt-1">
-                <span className="inline-flex items-center rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-slate-700">
-                  {labelText}
-                </span>
-              </div>
-            ) : null}
-          </article>
-        )
-
-        return {
-          consumed: cursor - i,
-          node: cardNode,
-        }
-      }
-
-      const parsed = tryReadEmailCard()
-      if (parsed) {
-        nodes.push(parsed.node)
-        i += parsed.consumed
-        continue
-      }
-    }
-
-    if (isKeyValueLine(line)) {
-      const parsedLine = parseKeyValueLine(line)
-      if (!parsedLine) {
-        i += 1
-        continue
-      }
-      nodes.push(
-        <p key={`kv-${i}`} className="text-sm leading-6 text-slate-700 whitespace-pre-wrap wrap-break-word">
-          <strong className="font-semibold text-slate-900">{parsedLine.label}: </strong>
-          {renderInlineMarkdown(parsedLine.content)}
-        </p>,
-      )
-      i += 1
-      continue
-    }
-
-    const nextNonEmptyLine = (() => {
-      let j = i + 1
-      while (j < lines.length && !lines[j].trim()) j += 1
-      return j < lines.length ? lines[j] : ""
-    })()
-
-    if (isLikelyEmailItemTitle(line, nextNonEmptyLine)) {
-      const parsedTitle = parseEmailItemTitle(line)
-      nodes.push(
-        <h4 key={`item-title-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(parsedTitle?.title || line)}
-        </h4>,
-      )
-      i += 1
-      continue
-    }
-
-    if (/^###\s+/.test(line)) {
-      const headingText = line.replace(/^###\s+/, "").trim()
-      const normalizedHeading = normalizeHeadingText(headingText)
-      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
-      nodes.push(
-        <h3 key={`h3-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(headingText)}
-        </h3>,
-      )
-      i += 1
-      continue
-    }
-
-    if (/^####\s+/.test(line)) {
-      const headingText = line.replace(/^####\s+/, "").trim()
-      const normalizedHeading = normalizeHeadingText(headingText)
-      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
-      nodes.push(
-        <h4 key={`h4-${i}`} className="text-sm font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(headingText)}
-        </h4>,
-      )
-      i += 1
-      continue
-    }
-
-    if (/^##\s+/.test(line)) {
-      const headingText = line.replace(/^##\s+/, "").trim()
-      const normalizedHeading = normalizeHeadingText(headingText)
-      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
-      nodes.push(
-        <h2 key={`h2-${i}`} className="text-base font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(headingText)}
-        </h2>,
-      )
-      i += 1
-      continue
-    }
-
-    if (/^#\s+/.test(line)) {
-      const headingText = line.replace(/^#\s+/, "").trim()
-      const normalizedHeading = normalizeHeadingText(headingText)
-      activeSection = sectionHeadings.has(normalizedHeading) ? normalizedHeading : ""
-      nodes.push(
-        <h1 key={`h1-${i}`} className="text-lg font-semibold text-slate-900 mt-1">
-          {renderInlineMarkdown(headingText)}
-        </h1>,
-      )
-      i += 1
-      continue
-    }
-
-    if (orderedListPattern.test(line)) {
-      const items: Array<{ marker: string; text: string }> = []
-      while (i < lines.length && orderedListPattern.test(lines[i].trim())) {
-        const listLine = lines[i].trim()
-        const markerMatch = listLine.match(/^(\d+)[.)]\s+(.+)$/)
-        if (markerMatch) {
-          items.push({ marker: `${markerMatch[1]}.`, text: String(markerMatch[2] || "") })
-        } else {
-          items.push({ marker: `${items.length + 1}.`, text: listLine.replace(orderedListPattern, "") })
-        }
-        i += 1
-      }
-      nodes.push(
-        <ol key={`ol-${i}`} className="space-y-1 text-sm leading-6 text-slate-700">
-          {items.map((item, idx) => (
-            <li key={`ol-item-${i}-${idx}`} className="flex items-start gap-2">
-              <span className="mt-0.5 w-5 shrink-0 text-right font-semibold text-slate-700">{item.marker}</span>
-              <span className="min-w-0 wrap-break-word">{renderInlineMarkdown(item.text)}</span>
-            </li>
-          ))}
-        </ol>,
-      )
-      continue
-    }
-
-    if (unorderedListPattern.test(line)) {
-      const items: string[] = []
-      while (i < lines.length && unorderedListPattern.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(unorderedListPattern, ""))
-        i += 1
-      }
-      nodes.push(
-        <ul key={`ul-${i}`} className="space-y-1 text-sm leading-6 text-slate-700">
-          {items.map((item, idx) => (
-            <li key={`ul-item-${i}-${idx}`} className="flex items-start gap-2">
-              <span className="mt-2.25 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
-              <span className="min-w-0 wrap-break-word">{renderInlineMarkdown(item)}</span>
-            </li>
-          ))}
-        </ul>,
-      )
-      continue
-    }
-
-    const para: string[] = []
-    while (
-      i < lines.length &&
-      lines[i].trim() &&
-      !/^#{1,3}\s+/.test(lines[i].trim()) &&
-      !orderedListPattern.test(lines[i].trim()) &&
-      !unorderedListPattern.test(lines[i].trim())
-    ) {
-      para.push(lines[i])
-      i += 1
-    }
-    pushParagraph(para.join("\n"), `p-${i}`)
-  }
-
-  return <div className="space-y-3">{nodes}</div>
+  return (
+    <div className="chat-markdown text-sm leading-6 text-slate-700 wrap-break-word">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h1 className="mt-1 mb-1 text-lg font-semibold text-slate-900">{children}</h1>,
+          h2: ({ children }) => <h2 className="mt-1 mb-1 text-base font-semibold text-slate-900">{children}</h2>,
+          h3: ({ children }) => <h3 className="mt-1 mb-1 text-sm font-semibold text-slate-900">{children}</h3>,
+          h4: ({ children }) => <h4 className="mt-1 mb-1 text-sm font-semibold text-slate-900">{children}</h4>,
+          p: ({ children }) => <p className="my-1 whitespace-pre-line wrap-break-word">{children}</p>,
+          ul: ({ children }) => <ul className="my-1 list-disc pl-5 space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="my-1 list-decimal pl-5 space-y-0.5">{children}</ol>,
+          li: ({ children }) => <li className="my-0 whitespace-pre-line marker:text-slate-500">{children}</li>,
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+              {children}
+            </a>
+          ),
+          blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-3 text-slate-600">{children}</blockquote>,
+          code: ({ className, children }) =>
+            className?.includes("language-") ? (
+              <code className="block overflow-x-auto rounded-lg bg-slate-900 p-3 text-[12px] text-slate-100">{children}</code>
+            ) : (
+              <code className="rounded bg-slate-100 px-1 py-0.5 text-[12px] text-slate-800">{children}</code>
+            ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  )
 }
 
 const nowTime = (timezone?: string): string => {
@@ -1259,7 +974,7 @@ export default function UserAgentChatPage() {
   }
 
   const handleCopyMessage = useCallback(async (message: ChatMessage) => {
-    const valueToCopy = message.role === "assistant" ? sanitizeAssistantText(message.text) : String(message.text || "")
+    const valueToCopy = message.role === "assistant" ? assistantTextForCopy(message.text) : String(message.text || "")
     if (!valueToCopy.trim()) return
 
     try {
@@ -1922,7 +1637,7 @@ export default function UserAgentChatPage() {
                           <div
                             className={`inline-block rounded-[24px] px-4 py-3 ${
                               isUser
-                                ? "w-fit max-w-[96%] md:max-w-[90%] lg:max-w-[84%] rounded-br-md bg-slate-900 text-white shadow-sm"
+                                ? "w-fit max-w-[96%] md:max-w-[90%] lg:max-w-[84%] rounded-br-md bg-primary text-white shadow-sm"
                                 : isSystem
                                   ? "w-[92%] md:w-[84%] lg:w-[78%] rounded-tl-md border border-dashed border-slate-300 bg-white text-slate-600"
                                   : "w-[92%] md:w-[84%] lg:w-[78%] rounded-tl-md border border-slate-200 bg-white text-slate-700"
