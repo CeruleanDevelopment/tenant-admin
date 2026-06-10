@@ -30,8 +30,7 @@ import {
 } from "../utils/authCookies"
 import { tenantAdminConfig } from "../config/config"
 import { loadUserAuthTokenCookie } from "../utils/userAuthCookies"
-import { bootstrapUserAuth } from "./userAuth"
-import { signOutUser } from "./userAuth"
+import { bootstrapUserAuth, signOutUser } from "./userAuth"
 import { resolveSessionType } from "@/utils/access-control"
 
 type TenantMeUser = {
