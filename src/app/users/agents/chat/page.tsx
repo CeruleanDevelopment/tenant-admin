@@ -1578,18 +1578,18 @@ export default function UserAgentChatPage() {
                           >
                             <button
                               type="button"
-                              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-slate-100"
+                              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 transition hover:bg-slate-100"
                               onClick={() => startInlineRename(session)}
                             >
-                              <Pencil className="h-3.5 w-3.5" />
+                              <Pencil className="h-4 w-4" />
                               Rename
                             </button>
                             <button
                               type="button"
-                              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-rose-600 transition hover:bg-rose-50"
+                              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-rose-600 transition hover:bg-rose-50"
                               onClick={() => requestDeleteSession(session)}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-4 w-4" />
                               Delete
                             </button>
                           </PopoverContent>
