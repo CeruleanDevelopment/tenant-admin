@@ -988,11 +988,11 @@ export default function UserAgentChatPage() {
 
   useEffect(() => {
     return () => {
-      attachments.forEach((attachment) => {
+      for (const attachment of attachments) {
         if (attachment.previewUrl) {
           URL.revokeObjectURL(attachment.previewUrl)
         }
-      })
+      }
     }
   }, [])
 
@@ -1359,11 +1359,11 @@ export default function UserAgentChatPage() {
         ...prev,
         [responseBucketKey]: [...(prev[responseBucketKey] ?? []), assistantMessage],
       }))
-      attachments.forEach((attachment) => {
+      for (const attachment of attachments) {
         if (attachment.previewUrl) {
           URL.revokeObjectURL(attachment.previewUrl)
         }
-      })
+      }
       setAttachments([])
       setAttachmentMenuOpen(false)
       setIsMicActive(false)
@@ -1822,11 +1822,11 @@ export default function UserAgentChatPage() {
                           type="button"
                           className="text-xs font-medium text-slate-500 transition hover:text-slate-700"
                           onClick={() => {
-                            attachments.forEach((attachment) => {
+                            for (const attachment of attachments) {
                               if (attachment.previewUrl) {
                                 URL.revokeObjectURL(attachment.previewUrl)
                               }
-                            })
+                            }
                             setAttachments([])
                           }}
                         >
