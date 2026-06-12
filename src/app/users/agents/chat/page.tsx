@@ -179,14 +179,98 @@ const normalizeOAuthErrorMessage = (value: string): string => {
 
   if (
     lower.includes("no refresh token") ||
-    lower.includes("refresh token is set") ||
     lower.includes("missing_refresh_token") ||
-    lower.includes("no access token")
+    lower.includes("no access token") ||
+    lower.includes("refresh token is set")
   ) {
-    return "Google OAuth refresh token missing or expired. Please reconnect Google (tenant or user) from the Assigned Agents page and refresh this page."
+    return "Google OAuth refresh token is missing or expired. Reconnect Google from the Assigned Agents page and then refresh this page."
   }
 
-  return text
+  if (
+    lower.includes("insufficient permission") ||
+    lower.includes("insufficient_permissions") ||
+    lower.includes("insufficient scope") ||
+    lower.includes("insufficient_scopes")
+  ) {
+    return "Google OAuth permissions are insufficient. Reconnect Google and grant the requested Gmail permissions (read/send) so the agent can access email content and send messages."
+  }
+
+  if (lower.includes("consent_required") || lower.includes("consent required") || lower.includes("access_denied")) {
+    return "Access to the Google account was denied or consent is required. Reconnect Google and approve the requested permissions to continue."
+  }
+
+  if (lower.includes("invalid_grant") || lower.includes("invalid_token") || lower.includes("token_revoked") || lower.includes("revoked")) {
+    return "Google OAuth token is invalid or has been revoked. Reconnect Google from the Assigned Agents page to restore access."
+  }
+
+  if (lower.includes("rate limit") || lower.includes("quotaexceeded") || lower.includes("quota") || lower.includes("429")) {
+    return "Google API quota or rate limit reached. Try again shortly; if it persists, check your Google API quota and usage in the Google Cloud Console."
+  }
+
+  if (lower.includes("network") || lower.includes("timeout") || lower.includes("failed to fetch") || lower.includes("econnrefused")) {
+    return "Network error contacting Google API. Check your network connection and try again."
+  }
+
+  const short = text.length > 300 ? `${text.slice(0, 300).trim()}…` : text
+  return `Google API error: ${short}`
+}
+
+const normalizeNumberedListDetailBullets = (value: string): string => {
+  const lines = String(value || "").split("\n")
+  const normalized: string[] = []
+  let insideNumberedItem = false
+  let seenNumberedItem = false
+
+  const getLastNonEmptyLine = (): string => {
+    for (let idx = normalized.length - 1; idx >= 0; idx -= 1) {
+      const candidate = String(normalized[idx] || "")
+      if (candidate.trim()) return candidate
+    }
+    return ""
+  }
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || "")
+    const trimmed = line.trim()
+
+    if (!trimmed) {
+      normalized.push("")
+      continue
+    }
+
+    if (/^\d+[.)]\s+/.test(trimmed)) {
+      if (seenNumberedItem) {
+        const lastNonEmpty = getLastNonEmptyLine()
+        if (lastNonEmpty) {
+          normalized.push("")
+        }
+      }
+      insideNumberedItem = true
+      seenNumberedItem = true
+      normalized.push(trimmed)
+      continue
+    }
+
+    if (insideNumberedItem && /^[-*+]\s+/.test(trimmed)) {
+      // Keep detail bullets nested under the active numbered item.
+      normalized.push(`    ${trimmed}`)
+      continue
+    }
+
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      insideNumberedItem = false
+      normalized.push(trimmed)
+      continue
+    }
+
+    if (!/^\s+/.test(line) && !/^[-*+]\s+/.test(trimmed)) {
+      insideNumberedItem = false
+    }
+
+    normalized.push(line)
+  }
+
+  return normalized.join("\n")
 }
 
 // Sanitize assistant text to remove conversation dumps, prefatory lines, repeated paragraphs, and internal tokens
@@ -248,6 +332,8 @@ const sanitizeAssistantText = (value: string): string => {
     // Re-collapse excessive blank lines after reflow.
     .replace(/\n{3,}/g, "\n\n")
     .trim()
+
+  text = normalizeNumberedListDetailBullets(text)
 
   // Repair malformed markdown tokens coming from model output without using static templates.
   text = text
@@ -311,9 +397,53 @@ const renderInlineMarkdown = (value: string): ReactNode[] => {
   return nodes
 }
 
+const shouldRenderAsPlainNumberedRecords = (value: string): boolean => {
+  const text = String(value || "")
+  if (!text) return false
+
+  const numberedLineMatches = text.match(/(^|\n)\s*\d+[.)]\s+/g)
+  const hasMultipleNumberedRows = Array.isArray(numberedLineMatches) && numberedLineMatches.length >= 2
+  if (!hasMultipleNumberedRows) return false
+
+  // Match both bullet and non-bullet label formats, with or without markdown bold.
+  const fromCount = (text.match(/(?:\*\*)?from(?:\*\*)?\s*:/gi) || []).length
+  const toCount = (text.match(/(?:\*\*)?to(?:\*\*)?\s*:/gi) || []).length
+  const dateCount = (text.match(/(?:\*\*)?date(?:\*\*)?\s*:/gi) || []).length
+  const snippetCount = (text.match(/(?:\*\*)?snippet(?:\*\*)?\s*:/gi) || []).length
+  const labelsCount = (text.match(/(?:\*\*)?labels(?:\*\*)?\s*:/gi) || []).length
+  const likelyEmailRecordBlock = (fromCount + toCount + dateCount + snippetCount + labelsCount) >= 4
+
+  return likelyEmailRecordBlock
+}
+
+const toDisplayTextKeepBold = (value: string): string => {
+  return String(value || "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/__(.*?)__/g, "**$1**")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!?\[([^\]]+)\]\([^\)]+\)/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
 const renderAssistantRichText = (value: string): ReactNode => {
   const text = sanitizeAssistantText(value)
   if (!text) return null
+
+  if (shouldRenderAsPlainNumberedRecords(text)) {
+    const displayText = toDisplayTextKeepBold(text)
+    const displayLines = displayText.split("\n")
+    return (
+      <div className="text-sm leading-6 text-slate-700 font-sans">
+        {displayLines.map((line, index) => (
+          <p key={`fallback-line-${index}`} className="whitespace-pre-wrap wrap-break-word my-0">
+            {line ? renderInlineMarkdown(line) : "\u00A0"}
+          </p>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div className="chat-markdown text-sm leading-6 text-slate-700 wrap-break-word [&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-lg [&_thead]:bg-slate-100 [&_th]:border [&_th]:border-slate-200 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-xs [&_th]:font-semibold [&_th]:text-slate-700 [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_tbody_tr:nth-child(even)]:bg-slate-50/60 [&_hr]:my-3 [&_hr]:border-slate-200 [&_strong]:font-semibold [&_strong]:text-slate-900 [&_em]:italic [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-slate-900 [&_pre]:p-3 [&_pre]:text-[12px] [&_pre]:text-slate-100">
@@ -1228,7 +1358,7 @@ export default function UserAgentChatPage() {
     if (!selectedAgentId || (!message && attachments.length === 0)) return
 
     if (selectedAgent && selectedAgentIsGmail && !selectedAgent.oauthReady) {
-      setError("Google OAuth refresh token missing or expired. Please reconnect Google (tenant or user) from the Assigned Agents page and refresh this page.")
+      setError("Google OAuth refresh token missing or expired. Please reconnect Google from the Assigned Agents page and refresh this page.")
       return
     }
 
