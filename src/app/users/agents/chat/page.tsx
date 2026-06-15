@@ -745,7 +745,7 @@ function AttachmentGallery({ attachments, isUser }: { attachments: ChatAttachmen
 //   },
 // ]
 
-export default function UserAgentChatPage() {
+export default function ChatPage() {
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter() as { push: (href: string) => void; replace: (href: string) => void }
   const searchParams = useSearchParams()
