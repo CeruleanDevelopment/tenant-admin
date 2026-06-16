@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { CSSProperties } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
@@ -30,10 +31,15 @@ import { Textarea } from "@/components/ui/textarea"
 import ReactFlow, {
   Background,
   Controls,
+  NodeResizer,
   useEdgesState,
   useNodesState,
+  addEdge,
+  Handle,
+  Position,
   type Edge,
   type Node as FlowNode,
+  type NodeProps,
 } from "reactflow"
 import "reactflow/dist/style.css"
 import { Plus } from "lucide-react"
@@ -63,6 +69,25 @@ type FlowNodeData = {
   label: string
   hint?: string
   kind?: ConfigNodeType
+  shape?: NodeShape
+  tone?: NodeTone
+}
+
+type NodeShape = "rounded" | "pill" | "square" | "diamond" | "circle"
+type NodeTone = "slate" | "cyan" | "emerald" | "amber" | "rose"
+type NodeDesignPreset = "card" | "compact" | "outlined" | "custom"
+
+const styleFromDesignPreset = (preset: NodeDesignPreset): CSSProperties | undefined => {
+  if (preset === "card") {
+    return { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 }
+  }
+  if (preset === "compact") {
+    return { borderRadius: 8, border: "1px solid #cbd5e1", background: "#ffffff", width: 160 }
+  }
+  if (preset === "outlined") {
+    return { borderRadius: 14, border: "2px dashed #94a3b8", background: "#f8fafc", width: 220 }
+  }
+  return undefined
 }
 
 type AgentCategory = "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
@@ -268,21 +293,10 @@ const buildCanvasGraph = (input: {
     return { nodes: [], edges: [] }
   }
 
-  const nodes: FlowNode<FlowNodeData>[] = [
-    {
-      id: "blueprint_start",
-      type: "input",
-      position: { x: 80, y: 120 },
-      data: {
-        label: `Blueprint: ${input.blueprintTitle || "Select blueprint"}`,
-        hint: "Starting node",
-      },
-      style: { borderRadius: 14, border: "1px solid #94a3b8", background: "#f8fafc", width: 220 },
-    },
-  ]
+  const nodes: FlowNode<FlowNodeData>[] = []
 
   const edges: Edge[] = []
-  let previousNodeId = "blueprint_start"
+  let previousNodeId: string | null = null
 
   input.kinds.forEach((kind, index) => {
     const info = nodeLabelForKind(kind, input.values)
@@ -291,7 +305,7 @@ const buildCanvasGraph = (input: {
 
     nodes.push({
       id,
-      type: "default",
+      type: "config",
       position: { x, y: 120 },
       data: {
         label: info.label,
@@ -301,13 +315,15 @@ const buildCanvasGraph = (input: {
       style: { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 },
     })
 
-    edges.push({
-      id: `edge_${previousNodeId}_${id}`,
-      source: previousNodeId,
-      target: id,
-      animated: true,
-      style: { strokeWidth: 1.5 },
-    })
+    if (previousNodeId) {
+      edges.push({
+        id: `edge_${previousNodeId}_${id}`,
+        source: previousNodeId,
+        target: id,
+        animated: true,
+        style: { strokeWidth: 1.5 },
+      })
+    }
 
     previousNodeId = id
   })
@@ -355,11 +371,26 @@ export default function TenantAgentCreatePage() {
 
   const [flowNodeKinds, setFlowNodeKinds] = useState<ConfigNodeType[]>([])
   const [showNodePicker, setShowNodePicker] = useState(false)
-  const [activeCanvasNodeId, setActiveCanvasNodeId] = useState<string>("blueprint_start")
+  const [activeCanvasNodeId, setActiveCanvasNodeId] = useState<string>("")
   const nodePickerRef = useRef<HTMLDivElement | null>(null)
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
+
+  const [selectedEdgeType, setSelectedEdgeType] = useState<string>("smoothstep")
+  const [nodeOverrides, setNodeOverrides] = useState<
+    Record<string, Partial<FlowNodeData> & { style?: CSSProperties; designPreset?: NodeDesignPreset }>
+  >({})
+  const [connectTargetId, setConnectTargetId] = useState<string>("none")
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string>("")
+  const [edgeEditType, setEdgeEditType] = useState<string>("")
+  const [edgeColor, setEdgeColor] = useState<string>("#0f766e")
+  const [edgeWidth, setEdgeWidth] = useState<string>("2")
+  const [edgeDashed, setEdgeDashed] = useState<boolean>(false)
+  const [edgeAnimated, setEdgeAnimated] = useState<boolean>(true)
+  const [designDraft, setDesignDraft] = useState<NodeDesignPreset>("card")
+  const [shapeDraft, setShapeDraft] = useState<NodeShape>("rounded")
+  const [toneDraft, setToneDraft] = useState<NodeTone>("slate")
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -420,9 +451,20 @@ export default function TenantAgentCreatePage() {
     setMemberCanRun(Boolean(defaults.memberCanRun ?? false))
     setIsActive(Boolean(defaults.isActive ?? true))
     setFlowNodeKinds([])
-    setActiveCanvasNodeId("blueprint_start")
+    setActiveCanvasNodeId("")
     setAppliedBlueprintId(String(selectedBlueprint.id))
   }, [selectedBlueprint, appliedBlueprintId])
+
+  // Show nodes only when flow nodes have been added; keep canvas blank otherwise
+  useEffect(() => {
+    if (flowNodeKinds.length > 0) {
+      setShowNodes(true)
+    } else {
+      setShowNodes(false)
+      setShowNodeEditor(false)
+      setActiveCanvasNodeId("")
+    }
+  }, [flowNodeKinds])
 
   const loadUsers = useCallback(async () => {
     setLoadingUsers(true)
@@ -457,7 +499,8 @@ export default function TenantAgentCreatePage() {
   const generatedGraph = useMemo(
     () =>
       buildCanvasGraph({
-        hasBlueprint: Boolean(selectedBlueprint),
+        // only show the blueprint start node when a blueprint is selected AND there are flow nodes
+        hasBlueprint: Boolean(selectedBlueprint) && flowNodeKinds.length > 0,
         blueprintTitle: selectedBlueprint?.title || "Choose blueprint",
         kinds: flowNodeKinds,
         values: {
@@ -500,9 +543,25 @@ export default function TenantAgentCreatePage() {
   )
 
   useEffect(() => {
-    setNodes(generatedGraph.nodes)
+    // Merge existing node positions and any per-node overrides so tenant edits aren't lost.
+    setNodes((prevNodes) =>
+      generatedGraph.nodes.map((n) => {
+        const prev = prevNodes.find((p) => p.id === n.id) as FlowNode<FlowNodeData> | undefined
+        const override = nodeOverrides[n.id]
+
+        return {
+          ...n,
+          position: prev?.position || n.position,
+          data: {
+            ...(n.data || {}),
+            ...(override ? override : {}),
+          },
+          style: override?.style || n.style,
+        }
+      }),
+    )
     setEdges(generatedGraph.edges)
-  }, [generatedGraph, setNodes, setEdges])
+  }, [generatedGraph, setNodes, setEdges, nodeOverrides])
 
   useEffect(() => {
     if (!showNodePicker) return
@@ -565,7 +624,7 @@ export default function TenantAgentCreatePage() {
 
   const removeFlowNode = (kind: ConfigNodeType) => {
     setFlowNodeKinds((prev) => prev.filter((item) => item !== kind))
-    setActiveCanvasNodeId("blueprint_start")
+    setActiveCanvasNodeId("")
   }
 
   const createAgent = async () => {
@@ -724,6 +783,72 @@ export default function TenantAgentCreatePage() {
     [activeNodeKind],
   )
 
+  // Custom node renderer so each node has visible handles and can apply nodeOverrides
+  const ConfigNode = ({ data, id, selected }: NodeProps<FlowNodeData>) => {
+    const override = nodeOverrides[id]
+    const style = { ...(override?.style || (data && (data as any).style) || {}) }
+    const shape = (override?.shape || data?.shape || "rounded") as NodeShape
+    const tone = (override?.tone || data?.tone || "slate") as NodeTone
+
+    const toneClass: Record<NodeTone, string> = {
+      slate: "border-slate-300 bg-white text-slate-900",
+      cyan: "border-cyan-300 bg-cyan-50 text-cyan-900",
+      emerald: "border-emerald-300 bg-emerald-50 text-emerald-900",
+      amber: "border-amber-300 bg-amber-50 text-amber-900",
+      rose: "border-rose-300 bg-rose-50 text-rose-900",
+    }
+
+    const shapeClass: Record<NodeShape, string> = {
+      rounded: "rounded-xl",
+      pill: "rounded-full",
+      square: "rounded-none",
+      diamond: "rounded-lg rotate-45",
+      circle: "rounded-full",
+    }
+
+    if (shape === "circle") {
+      style.width = 150
+      style.height = 150
+    }
+
+    if (shape === "diamond") {
+      style.width = 170
+      style.height = 170
+    }
+
+    return (
+      <div style={style as any} className={`border p-3 shadow-sm ${toneClass[tone]} ${shapeClass[shape]}`}>
+        <NodeResizer
+          isVisible={Boolean(selected)}
+          minWidth={140}
+          minHeight={80}
+          lineClassName="border-cyan-500"
+          handleClassName="h-2.5 w-2.5 rounded-sm border border-cyan-700 bg-cyan-400"
+        />
+        <Handle type="target" position={Position.Top} />
+        <div className={shape === "diamond" ? "-rotate-45" : ""}>
+          <div className="text-sm font-semibold leading-tight">{data?.label}</div>
+          <div className="mt-1 text-xs opacity-80">{data?.hint}</div>
+        </div>
+        <Handle type="source" position={Position.Bottom} />
+      </div>
+    )
+  }
+
+  const nodeTypes = useMemo(() => ({ config: ConfigNode }), [nodeOverrides])
+
+  const [showNodeEditor, setShowNodeEditor] = useState(false)
+  const [showNodes, setShowNodes] = useState(false)
+
+  useEffect(() => {
+    if (!showNodeEditor || !activeCanvasNodeId) return
+
+    const override = nodeOverrides[activeCanvasNodeId]
+    setDesignDraft((override?.designPreset || "card") as NodeDesignPreset)
+    setShapeDraft((override?.shape || "rounded") as NodeShape)
+    setToneDraft((override?.tone || "slate") as NodeTone)
+  }, [showNodeEditor, activeCanvasNodeId, nodeOverrides])
+
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#ecfeff_0%,#ffffff_28%)] px-4 py-4 sm:px-4 lg:px-4">
       <div className="mx-auto flex w-full max-w-450 flex-col gap-4">
@@ -748,7 +873,7 @@ export default function TenantAgentCreatePage() {
                       setAppliedBlueprintId("")
                       setFlowNodeKinds([])
                       setShowNodePicker(false)
-                      setActiveCanvasNodeId("blueprint_start")
+                      setActiveCanvasNodeId("")
                     }}
                   >
                     <SelectTrigger className="h-10 w-full">
@@ -775,7 +900,7 @@ export default function TenantAgentCreatePage() {
                     setAppliedBlueprintId("")
                     setFlowNodeKinds([])
                     setShowNodePicker(false)
-                    setActiveCanvasNodeId("blueprint_start")
+                    setActiveCanvasNodeId("")
                   }}
                 >
                   Clear
@@ -815,7 +940,7 @@ export default function TenantAgentCreatePage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <CardTitle>Flow Builder Canvas</CardTitle>
-                  <CardDescription>Click a node to edit its settings from the right-side inspector.</CardDescription>
+                  {/* <CardDescription>Click a node to edit its settings from the right-side inspector.</CardDescription> */}
                 </div>
                 <div ref={nodePickerRef} className="relative flex items-center gap-2">
                   <Button
@@ -828,6 +953,48 @@ export default function TenantAgentCreatePage() {
                     <Plus className="mr-1 h-4 w-4" />
                     Add Node
                   </Button>
+
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs">Connector:</Label>
+                    <Select value={selectedEdgeType} onValueChange={(v) => setSelectedEdgeType(v)}>
+                      <SelectTrigger className="h-8 w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="smoothstep">Smooth</SelectItem>
+                        <SelectItem value="step">Step</SelectItem>
+                        <SelectItem value="straight">Straight</SelectItem>
+                        <SelectItem value="bezier">Bezier</SelectItem>
+                        <SelectItem value="default">Default</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Label className="text-xs">Width:</Label>
+                    <Select value={edgeWidth} onValueChange={(v) => setEdgeWidth(v)}>
+                      <SelectTrigger className="h-8 w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1px</SelectItem>
+                        <SelectItem value="2">2px</SelectItem>
+                        <SelectItem value="3">3px</SelectItem>
+                        <SelectItem value="4">4px</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="color"
+                      value={edgeColor}
+                      onChange={(e) => setEdgeColor(e.target.value)}
+                      className="h-8 w-10 p-1"
+                    />
+                    {/* <div className="flex items-center gap-1">
+                      <Label className="text-[11px]">Dash:</Label>
+                      <Switch checked={edgeDashed} onCheckedChange={(v) => setEdgeDashed(Boolean(v))} />
+                    </div> */}
+                    <div className="flex items-center gap-1">
+                      <Label className="text-[11px]">Anim:</Label>
+                      <Switch checked={edgeAnimated} onCheckedChange={(v) => setEdgeAnimated(Boolean(v))} />
+                    </div>
+                  </div>
 
                   {showNodePicker ? (
                     <div className="absolute right-0 top-11 z-30 w-[min(48rem,92vw)] rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-lg">
@@ -852,35 +1019,458 @@ export default function TenantAgentCreatePage() {
                       )}
                     </div>
                   ) : null}
+
+                  {selectedEdgeId ? (
+                    <div className="absolute left-6 top-6 z-50 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold">Edit Connector</div>
+                        <Button size="sm" variant="ghost" onClick={() => setSelectedEdgeId("")}>Close</Button>
+                      </div>
+
+                      <div className="mt-2">
+                        <Label className="text-xs">Type</Label>
+                        <Select value={edgeEditType || "default"} onValueChange={(v) => setEdgeEditType(v)}>
+                          <SelectTrigger className="h-8 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="smoothstep">Smooth</SelectItem>
+                            <SelectItem value="step">Step</SelectItem>
+                            <SelectItem value="straight">Straight</SelectItem>
+                            <SelectItem value="bezier">Bezier</SelectItem>
+                            <SelectItem value="default">Default</SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-xs">Width</Label>
+                            <Select value={edgeWidth} onValueChange={(v) => setEdgeWidth(v)}>
+                              <SelectTrigger className="h-8 w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="1">1px</SelectItem>
+                                <SelectItem value="2">2px</SelectItem>
+                                <SelectItem value="3">3px</SelectItem>
+                                <SelectItem value="4">4px</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-xs">Color</Label>
+                            <Input
+                              type="color"
+                              value={edgeColor}
+                              onChange={(e) => setEdgeColor(e.target.value)}
+                              className="h-8 w-full p-1"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex items-center gap-3">
+                          {/* <div className="flex items-center gap-1">
+                            <Label className="text-[11px]">Dash</Label>
+                            <Switch checked={edgeDashed} onCheckedChange={(v) => setEdgeDashed(Boolean(v))} />
+                          </div> */}
+                          <div className="flex items-center gap-1">
+                            <Label className="text-[11px]">Anim</Label>
+                            <Switch checked={edgeAnimated} onCheckedChange={(v) => setEdgeAnimated(Boolean(v))} />
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 justify-end mt-3">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedEdgeId("")}>Cancel</Button>
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setEdges((prev) =>
+                                prev.map((e) =>
+                                  e.id === selectedEdgeId
+                                    ? {
+                                        ...e,
+                                        type: edgeEditType === "default" ? undefined : edgeEditType,
+                                        animated: edgeAnimated,
+                                        style: {
+                                          ...(e.style || {}),
+                                          stroke: edgeColor,
+                                          strokeWidth: Number(edgeWidth),
+                                          strokeDasharray: edgeDashed ? "6 4" : undefined,
+                                        },
+                                      }
+                                    : e,
+                                ),
+                              )
+                              setSelectedEdgeId("")
+                            }}
+                          >
+                            Save
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </CardHeader>
 
             <CardContent className="space-y-3 p-3 sm:p-4">
-              <div className="relative h-[80vh] min-h-160 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,#dbeafe_1px,transparent_0)] bg-size-[22px_22px]">
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onNodeClick={(_, node) => setActiveCanvasNodeId(node.id)}
-                  fitView
-                  nodesDraggable={false}
-                  nodesConnectable={false}
-                  elementsSelectable
-                >
-                  <Controls />
-                  <Background gap={20} size={1.1} color="#cbd5e1" />
-                </ReactFlow>
+              <div className="flex gap-4">
+                <div className="relative h-[80vh] min-h-160 flex-1 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,#dbeafe_1px,transparent_0)] bg-size-[22px_22px]">
+                  <ReactFlow
+                    nodes={showNodes ? nodes : []}
+                    edges={showNodes ? edges : []}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onNodeClick={(_, node) => {
+                      setActiveCanvasNodeId(node.id)
+                      setShowNodeEditor(true)
+                    }}
+                    onNodeDoubleClick={(_, node) => {
+                      setActiveCanvasNodeId(node.id)
+                      setShowNodeEditor(true)
+                    }}
+                    onConnect={(connection) => {
+                      // Use reactflow addEdge helper to ensure proper edge shape
+                      if (!connection.source || !connection.target) return
+                      const typed = {
+                        ...connection,
+                        id: `edge_${connection.source}_${connection.target}_${Date.now()}`,
+                        animated: edgeAnimated,
+                        type: selectedEdgeType === "default" ? undefined : (selectedEdgeType as any),
+                        style: {
+                          stroke: edgeColor,
+                          strokeWidth: Number(edgeWidth),
+                          strokeDasharray: edgeDashed ? "6 4" : undefined,
+                        },
+                      } as Edge
 
-                {!selectedBlueprint ? (
-                  <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/95 px-5 py-4 text-center shadow-sm">
-                      <p className="text-sm font-semibold text-slate-800">Canvas is waiting for a blueprint</p>
-                      <p className="mt-1 text-xs text-slate-500">Select a blueprint from top bar, then add nodes.</p>
+                      setEdges((eds) => addEdge(typed, eds))
+                    }}
+                    fitView
+                    nodesDraggable={true}
+                    nodesConnectable={true}
+                    elementsSelectable
+                    nodeTypes={nodeTypes}
+                    onEdgeClick={(_, edge) => {
+                      setSelectedEdgeId(edge.id)
+                      setEdgeEditType(edge.type || "default")
+                      setEdgeColor(String((edge.style as any)?.stroke || "#0f766e"))
+                      setEdgeWidth(String((edge.style as any)?.strokeWidth || 2))
+                      setEdgeDashed(Boolean((edge.style as any)?.strokeDasharray))
+                      setEdgeAnimated(Boolean(edge.animated))
+                    }}
+                  >
+                    <Controls />
+                    <Background gap={20} size={1.1} color="#cbd5e1" />
+                  </ReactFlow>
+
+                  {showNodeEditor && activeNodeKind ? (
+                    <div className="absolute inset-0 z-40 grid place-items-center">
+                      <div className="w-[min(640px,96vw)] rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="text-sm font-semibold">Edit: {activeNodeMeta?.title}</h4>
+                            <p className="text-xs text-slate-500">Edit settings for the selected node.</p>
+                          </div>
+                          <div>
+                            <Button variant="ghost" size="sm" onClick={() => setShowNodeEditor(false)}>Close</Button>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 space-y-3">
+                          <div className="space-y-2">
+                            <Label className="text-xs">Design</Label>
+                            <Select
+                              value={designDraft}
+                              onValueChange={(v) => setDesignDraft(v as NodeDesignPreset)}
+                            >
+                              <SelectTrigger className="h-8 w-36">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="card">Card</SelectItem>
+                                <SelectItem value="compact">Compact</SelectItem>
+                                <SelectItem value="outlined">Outlined</SelectItem>
+                                <SelectItem value="custom">Custom</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-xs">Shape</Label>
+                                <Select
+                                  value={shapeDraft}
+                                  onValueChange={(v) => setShapeDraft(v as NodeShape)}
+                                >
+                                  <SelectTrigger className="h-8 w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="rounded">Rounded</SelectItem>
+                                    <SelectItem value="pill">Pill</SelectItem>
+                                    <SelectItem value="square">Square</SelectItem>
+                                    <SelectItem value="diamond">Diamond</SelectItem>
+                                    <SelectItem value="circle">Circle</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Tone</Label>
+                                <Select
+                                  value={toneDraft}
+                                  onValueChange={(v) => setToneDraft(v as NodeTone)}
+                                >
+                                  <SelectTrigger className="h-8 w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="slate">Slate</SelectItem>
+                                    <SelectItem value="cyan">Cyan</SelectItem>
+                                    <SelectItem value="emerald">Emerald</SelectItem>
+                                    <SelectItem value="amber">Amber</SelectItem>
+                                    <SelectItem value="rose">Rose</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </div>
+                          {activeNodeKind === "agent_details" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Name</Label>
+                              <Input value={name} onChange={(e) => setName(e.target.value)} />
+                              <Label className="text-xs">Description</Label>
+                              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">Active</Label>
+                                <Switch checked={isActive} onCheckedChange={(v) => setIsActive(Boolean(v))} />
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "ai_config" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Provider</Label>
+                              <Select value={aiProvider || "none"} onValueChange={(v) => onProviderChange(v)}>
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="Select provider" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="openai">OpenAI</SelectItem>
+                                  <SelectItem value="openrouter">OpenRouter</SelectItem>
+                                </SelectContent>
+                              </Select>
+
+                              <Label className="text-xs">Model</Label>
+                              <Select value={aiModel || ""} onValueChange={(v) => setAiModel(v)}>
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="Select model" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(aiProvider ? AI_MODEL_OPTIONS[aiProvider] : []).map((m) => (
+                                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "auth" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Auth Mode</Label>
+                              <Select value={authMode || "none"} onValueChange={(v) => setAuthMode(v === "none" ? ("" as AuthMode) : (v as AuthMode))}>
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="Select auth mode" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="tenant_shared_connection">Tenant shared</SelectItem>
+                                  <SelectItem value="user_personal_connection">User personal</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "execution" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Execution Mode</Label>
+                              <Select value={executionMode || ""} onValueChange={(v) => setExecutionMode(v as ExecutionMode)}>
+                                <SelectTrigger className="h-8">
+                                  <SelectValue placeholder="Select execution" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="manual">Manual</SelectItem>
+                                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                                </SelectContent>
+                              </Select>
+
+                              {executionMode === "scheduled" ? (
+                                <>
+                                  <Label className="text-xs">Time</Label>
+                                  <Input type="time" value={executionTime} onChange={(e) => setExecutionTime(e.target.value)} />
+                                  <Label className="text-xs">Timezone</Label>
+                                  <Select value={timezone} onValueChange={(v) => setTimezone(v)}>
+                                    <SelectTrigger className="h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {TIMEZONE_OPTIONS.map((tz) => (
+                                        <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "limits" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Lookback (hours)</Label>
+                              <Input value={lookbackHours} onChange={(e) => setLookbackHours(e.target.value)} />
+                              <Label className="text-xs">Max emails per run</Label>
+                              <Input value={maxEmails} onChange={(e) => setMaxEmails(e.target.value)} />
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "prompt" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Instruction Prompt</Label>
+                              <Textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} />
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "permissions" ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">Manager can run</Label>
+                                <Switch checked={managerCanRun} onCheckedChange={(v) => setManagerCanRun(Boolean(v))} />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">Member can run</Label>
+                                <Switch checked={memberCanRun} onCheckedChange={(v) => setMemberCanRun(Boolean(v))} />
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "assignment" ? (
+                            <div className="space-y-2 text-xs text-slate-700">
+                              <div>Assigned users: {assignedUserIds.length}</div>
+                              <div className="text-xs text-slate-500">Use the assignment panel above to add/remove users.</div>
+                            </div>
+                          ) : null}
+
+                          {/* Add Connection control to create an edge programmatically */}
+                          <div className="space-y-2">
+                            <Label className="text-xs">Add Connection</Label>
+                            <div className="flex gap-2">
+                              <Select value={connectTargetId} onValueChange={(v) => setConnectTargetId(v)}>
+                                <SelectTrigger className="h-8 w-44">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Select target</SelectItem>
+                                  {nodes
+                                    .filter((n) => n.id !== activeCanvasNodeId)
+                                    .map((n) => (
+                                      <SelectItem key={n.id} value={n.id}>{String((n.data as any)?.label || n.id)}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  if (!activeCanvasNodeId || !connectTargetId || connectTargetId === "none") return
+                                  const e: Edge = {
+                                    id: `edge_${activeCanvasNodeId}_${connectTargetId}_${Date.now()}`,
+                                    source: activeCanvasNodeId,
+                                    target: connectTargetId,
+                                    animated: edgeAnimated,
+                                    type: selectedEdgeType === "default" ? undefined : (selectedEdgeType as any),
+                                    style: {
+                                      stroke: edgeColor,
+                                      strokeWidth: Number(edgeWidth),
+                                      strokeDasharray: edgeDashed ? "6 4" : undefined,
+                                    },
+                                  }
+                                  setEdges((eds) => addEdge(e, eds))
+                                  setConnectTargetId("none")
+                                }}
+                                disabled={!activeCanvasNodeId || connectTargetId === "none"}
+                              >
+                                Connect
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 pt-2 justify-end">
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                if (activeCanvasNodeId) {
+                                  setNodeOverrides((prev) => ({
+                                    ...prev,
+                                    [activeCanvasNodeId]: {
+                                      ...(prev[activeCanvasNodeId] || {}),
+                                      designPreset: "card",
+                                      shape: "rounded",
+                                      tone: "slate",
+                                      style: styleFromDesignPreset("card"),
+                                    },
+                                  }))
+                                }
+                                setShowNodeEditor(false)
+                                setActiveCanvasNodeId("")
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                  if (activeCanvasNodeId) {
+                                    setNodeOverrides((prev) => ({
+                                      ...prev,
+                                      [activeCanvasNodeId]: {
+                                        ...(prev[activeCanvasNodeId] || {}),
+                                        designPreset: designDraft,
+                                        shape: shapeDraft,
+                                        tone: toneDraft,
+                                        style: styleFromDesignPreset(designDraft),
+                                      },
+                                    }))
+                                  }
+                                  setShowNodeEditor(false)
+                                  setActiveCanvasNodeId("")
+                                }}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              onClick={() => {
+                                if (activeNodeKind) removeFlowNode(activeNodeKind)
+                                setShowNodeEditor(false)
+                                  setActiveCanvasNodeId("")
+                              }}
+                              disabled={activeNodeMeta?.required}
+                            >
+                              Remove Node
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
+
+                  {!selectedBlueprint ? (
+                    <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white/95 px-5 py-4 text-center shadow-sm">
+                        <p className="text-sm font-semibold text-slate-800">Canvas is waiting for a blueprint</p>
+                        <p className="mt-1 text-xs text-slate-500">Select a blueprint from top bar, then add nodes.</p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>               
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-wrap">
