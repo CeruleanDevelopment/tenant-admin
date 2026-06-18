@@ -968,7 +968,7 @@ export default function TenantAgentCreatePage() {
                         <SelectItem value="default">Default</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Label className="text-xs">Width:</Label>
+                    {/* <Label className="text-xs">Width:</Label>
                     <Select value={edgeWidth} onValueChange={(v) => setEdgeWidth(v)}>
                       <SelectTrigger className="h-8 w-20">
                         <SelectValue />
@@ -986,14 +986,14 @@ export default function TenantAgentCreatePage() {
                       onChange={(e) => setEdgeColor(e.target.value)}
                       className="h-8 w-10 p-1"
                     />
-                    {/* <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1">
                       <Label className="text-[11px]">Dash:</Label>
                       <Switch checked={edgeDashed} onCheckedChange={(v) => setEdgeDashed(Boolean(v))} />
-                    </div> */}
+                    </div>
                     <div className="flex items-center gap-1">
                       <Label className="text-[11px]">Anim:</Label>
                       <Switch checked={edgeAnimated} onCheckedChange={(v) => setEdgeAnimated(Boolean(v))} />
-                    </div>
+                    </div> */}
                   </div>
 
                   {showNodePicker ? (
@@ -1068,16 +1068,16 @@ export default function TenantAgentCreatePage() {
                           </div>
                         </div>
 
-                        <div className="mt-2 flex items-center gap-3">
-                          {/* <div className="flex items-center gap-1">
+                        {/* <div className="mt-2 flex items-center gap-3">
+                          <div className="flex items-center gap-1">
                             <Label className="text-[11px]">Dash</Label>
                             <Switch checked={edgeDashed} onCheckedChange={(v) => setEdgeDashed(Boolean(v))} />
-                          </div> */}
+                          </div>
                           <div className="flex items-center gap-1">
                             <Label className="text-[11px]">Anim</Label>
                             <Switch checked={edgeAnimated} onCheckedChange={(v) => setEdgeAnimated(Boolean(v))} />
                           </div>
-                        </div>
+                        </div> */}
 
                         <div className="flex gap-2 justify-end mt-3">
                           <Button variant="outline" size="sm" onClick={() => setSelectedEdgeId("")}>Cancel</Button>
