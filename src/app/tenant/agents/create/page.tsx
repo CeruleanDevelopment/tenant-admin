@@ -7,9 +7,12 @@ import { useSearchParams } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
 import {
   createTenantAgent,
+  fetchTenantAgent,
+  fetchTenantAgentAssignment,
   fetchTenantAgentBlueprints,
   fetchTenantUsers,
   type TenantAgentBlueprint,
+  updateTenantAgent,
   upsertTenantAgentAssignment,
 } from "../../../../../actions/auth"
 import type { AppDispatch } from "../../../../../redux/store"
@@ -57,6 +60,7 @@ type AuthMode = "" | "tenant_shared_connection" | "user_personal_connection"
 type ExecutionMode = "" | "manual" | "scheduled"
 type ConfigNodeType =
   | "agent_details"
+  | "service"
   | "ai_config"
   | "auth"
   | "execution"
@@ -91,6 +95,7 @@ const styleFromDesignPreset = (preset: NodeDesignPreset): CSSProperties | undefi
 }
 
 type AgentCategory = "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
+type WorkflowType = "direct" | "mastra" | "langchain"
 
 const CATEGORY_LABEL: Record<AgentCategory, string> = {
   gmail: "Gmail",
@@ -112,6 +117,12 @@ const FLOW_NODE_LIBRARY: Array<{
     kind: "agent_details",
     title: "Agent Details",
     description: "Name, short description, and active status.",
+    required: true,
+  },
+  {
+    kind: "service",
+    title: "Service Type",
+    description: "Choose service domain and workflow engine.",
     required: true,
   },
   {
@@ -158,6 +169,7 @@ const FLOW_NODE_LIBRARY: Array<{
 
 const REQUIRED_FLOW_NODES: ConfigNodeType[] = [
   "agent_details",
+  "service",
   "ai_config",
   "auth",
   "execution",
@@ -194,6 +206,8 @@ const nodeLabelForKind = (
   values: {
     name: string
     description: string
+    serviceType: AgentCategory
+    workflowType: WorkflowType
     aiProvider: AiProvider
     aiModel: string
     authMode: AuthMode
@@ -219,6 +233,12 @@ const nodeLabelForKind = (
     return {
       label: values.aiProvider && values.aiModel ? `Model: ${values.aiProvider} / ${values.aiModel}` : "AI model",
       hint: values.aiProvider ? "Provider selected" : "Select provider and model",
+    }
+  }
+  if (kind === "service") {
+    return {
+      label: `Service: ${String(values.serviceType || "general")}`,
+      hint: `Workflow: ${String(values.workflowType || "direct")}`,
     }
   }
   if (kind === "auth") {
@@ -274,6 +294,8 @@ const buildCanvasGraph = (input: {
   values: {
     name: string
     description: string
+    serviceType: AgentCategory
+    workflowType: WorkflowType
     aiProvider: AiProvider
     aiModel: string
     authMode: AuthMode
@@ -338,6 +360,9 @@ export default function TenantAgentCreatePage() {
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const tenantId = String(tenantProfile?.id || "")
   const initialBlueprintId = String(searchParams.get("blueprint") || "").trim()
+  const editingAgentId = String(searchParams.get("agentId") || "").trim()
+  const isEditMode = Boolean(editingAgentId)
+  const [workingAgentId, setWorkingAgentId] = useState<string>(editingAgentId)
   const [blueprints, setBlueprints] = useState<TenantAgentBlueprint[]>([])
   const [loadingBlueprints, setLoadingBlueprints] = useState(false)
   const [selectedBlueprintId, setSelectedBlueprintId] = useState<string>(initialBlueprintId)
@@ -349,6 +374,7 @@ export default function TenantAgentCreatePage() {
 
   const [users, setUsers] = useState<TenantUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
+  const [loadingEditData, setLoadingEditData] = useState(false)
 
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -366,6 +392,8 @@ export default function TenantAgentCreatePage() {
   const [managerCanRun, setManagerCanRun] = useState(true)
   const [memberCanRun, setMemberCanRun] = useState(false)
   const [isActive, setIsActive] = useState(true)
+  const [serviceType, setServiceType] = useState<AgentCategory>("general")
+  const [workflowType, setWorkflowType] = useState<WorkflowType>("direct")
   const [assignedUserIds, setAssignedUserIds] = useState<string[]>([])
   const [userSearch, setUserSearch] = useState("")
 
@@ -381,7 +409,6 @@ export default function TenantAgentCreatePage() {
   const [nodeOverrides, setNodeOverrides] = useState<
     Record<string, Partial<FlowNodeData> & { style?: CSSProperties; designPreset?: NodeDesignPreset }>
   >({})
-  const [connectTargetId, setConnectTargetId] = useState<string>("none")
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>("")
   const [edgeEditType, setEdgeEditType] = useState<string>("")
   const [edgeColor, setEdgeColor] = useState<string>("#0f766e")
@@ -424,6 +451,11 @@ export default function TenantAgentCreatePage() {
   }, [loadBlueprints])
 
   useEffect(() => {
+    setWorkingAgentId(editingAgentId)
+  }, [editingAgentId])
+
+  useEffect(() => {
+    if (isEditMode) return
     if (!selectedBlueprint) return
     if (appliedBlueprintId === String(selectedBlueprint.id)) return
 
@@ -450,10 +482,18 @@ export default function TenantAgentCreatePage() {
     setManagerCanRun(Boolean(defaults.managerCanRun ?? true))
     setMemberCanRun(Boolean(defaults.memberCanRun ?? false))
     setIsActive(Boolean(defaults.isActive ?? true))
+    setServiceType(normalizeCategory(String((defaults as { serviceType?: string }).serviceType || selectedBlueprint.category || "general")))
+    setWorkflowType(
+      String((defaults as { workflowType?: string }).workflowType || "direct") === "mastra"
+        ? "mastra"
+        : String((defaults as { workflowType?: string }).workflowType || "direct") === "langchain"
+          ? "langchain"
+          : "direct",
+    )
     setFlowNodeKinds([])
     setActiveCanvasNodeId("")
     setAppliedBlueprintId(String(selectedBlueprint.id))
-  }, [selectedBlueprint, appliedBlueprintId])
+  }, [selectedBlueprint, appliedBlueprintId, isEditMode])
 
   // Show nodes only when flow nodes have been added; keep canvas blank otherwise
   useEffect(() => {
@@ -479,6 +519,90 @@ export default function TenantAgentCreatePage() {
   useEffect(() => {
     void loadUsers()
   }, [loadUsers])
+
+  useEffect(() => {
+    if (!isEditMode || !editingAgentId) return
+
+    const loadEditData = async () => {
+      setLoadingEditData(true)
+      setError(null)
+      try {
+        const [agent, assignment] = await Promise.all([
+          dispatch(fetchTenantAgent(editingAgentId)) as Promise<Record<string, unknown> | null>,
+          dispatch(fetchTenantAgentAssignment(editingAgentId)) as Promise<Record<string, unknown> | null>,
+        ])
+
+        const assignmentRow = assignment || {}
+
+        setName(String(agent?.name || assignmentRow.agentName || ""))
+        setDescription(String(agent?.description || ""))
+        setSystemPrompt(String(agent?.systemPrompt || ""))
+        setAgentSkill(String(agent?.agentSkill || ""))
+        setAgentInstruction(String(agent?.agentInstruction || ""))
+        setIsActive(Number(assignmentRow.isActive ?? agent?.isActive ?? 1) !== 0)
+
+        const aiProviderValue =
+          assignmentRow.aiProvider === "openrouter" ? "openrouter" : assignmentRow.aiProvider === "openai" ? "openai" : ""
+        setAiProvider(aiProviderValue)
+        setAiModel(String(assignmentRow.aiModel || ""))
+
+        setAuthMode(
+          assignmentRow.authMode === "user_personal_connection"
+            ? "user_personal_connection"
+            : assignmentRow.authMode === "tenant_shared_connection"
+              ? "tenant_shared_connection"
+              : "",
+        )
+        setExecutionMode(
+          assignmentRow.executionMode === "scheduled"
+            ? "scheduled"
+            : assignmentRow.executionMode === "manual"
+              ? "manual"
+              : "",
+        )
+        setExecutionTime(String(assignmentRow.executionTime || "09:00"))
+        setTimezone(String(assignmentRow.timezone || "UTC"))
+        setLookbackHours(String(assignmentRow.lookbackHours ?? 24))
+        setMaxEmails(String(assignmentRow.maxEmails ?? 75))
+        setManagerCanRun(Boolean(assignmentRow.managerCanRun ?? true))
+        setMemberCanRun(Boolean(assignmentRow.memberCanRun ?? false))
+        setServiceType(
+          normalizeCategory(String(agent?.serviceType || selectedBlueprint?.category || "general")),
+        )
+        setWorkflowType(
+          String(agent?.workflowType || "direct") === "mastra"
+            ? "mastra"
+            : String(agent?.workflowType || "direct") === "langchain"
+              ? "langchain"
+              : "direct",
+        )
+        setAssignedUserIds(
+          Array.isArray(assignmentRow.assignedUserIds)
+            ? assignmentRow.assignedUserIds.map((value: unknown) => String(value || "")).filter(Boolean)
+            : [],
+        )
+
+        const initialKinds: ConfigNodeType[] = [
+          "agent_details",
+          "service",
+          "ai_config",
+          "auth",
+          "execution",
+          "limits",
+          "permissions",
+          "assignment",
+        ]
+        if (String(agent?.systemPrompt || "").trim()) initialKinds.push("prompt")
+        setFlowNodeKinds(Array.from(new Set(initialKinds)))
+      } catch {
+        setError("Failed to load agent details for editing.")
+      } finally {
+        setLoadingEditData(false)
+      }
+    }
+
+    void loadEditData()
+  }, [dispatch, editingAgentId, isEditMode])
 
   const activeUsers = useMemo(
     () => users.filter((user) => Boolean(user.isActive ?? true)),
@@ -506,6 +630,8 @@ export default function TenantAgentCreatePage() {
         values: {
           name,
           description,
+          serviceType,
+          workflowType,
           aiProvider,
           aiModel,
           authMode,
@@ -526,6 +652,8 @@ export default function TenantAgentCreatePage() {
       flowNodeKinds,
       name,
       description,
+      serviceType,
+      workflowType,
       aiProvider,
       aiModel,
       authMode,
@@ -588,7 +716,18 @@ export default function TenantAgentCreatePage() {
 
   const activeNodeKind = useMemo(() => {
     const node = nodes.find((item) => item.id === activeCanvasNodeId)
-    return node?.data?.kind
+    if (node?.data?.kind) {
+      return node.data.kind
+    }
+
+    if (activeCanvasNodeId.startsWith("cfg_")) {
+      const fallbackKind = activeCanvasNodeId.slice(4) as ConfigNodeType
+      if (FLOW_NODE_LIBRARY.some((item) => item.kind === fallbackKind)) {
+        return fallbackKind
+      }
+    }
+
+    return undefined
   }, [nodes, activeCanvasNodeId])
 
   const onProviderChange = (value: string) => {
@@ -627,22 +766,205 @@ export default function TenantAgentCreatePage() {
     setActiveCanvasNodeId("")
   }
 
+  const createCanvasConnection = (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return
+
+    let created = false
+    let duplicate = false
+
+    setEdges((prev) => {
+      if (prev.some((edge) => edge.source === sourceId && edge.target === targetId)) {
+        duplicate = true
+        return prev
+      }
+
+      created = true
+      const e: Edge = {
+        id: `edge_${sourceId}_${targetId}_${Date.now()}`,
+        source: sourceId,
+        target: targetId,
+        animated: edgeAnimated,
+        type: selectedEdgeType === "default" ? undefined : (selectedEdgeType as any),
+        style: {
+          stroke: edgeColor,
+          strokeWidth: Number(edgeWidth),
+          strokeDasharray: edgeDashed ? "6 4" : undefined,
+        },
+      }
+
+      return addEdge(e, prev)
+    })
+
+    if (duplicate) {
+      setSuccess("This connection already exists.")
+      return
+    }
+
+    if (created) {
+      const sourceLabel = String(nodes.find((n) => n.id === sourceId)?.data?.label || sourceId)
+      const targetLabel = String(nodes.find((n) => n.id === targetId)?.data?.label || targetId)
+      setSuccess(`Connected: ${sourceLabel} -> ${targetLabel}`)
+      setError(null)
+    }
+  }
+
+  const buildFinalPrompt = () => {
+    const flowSummary = flowSummaryText(nodes, edges)
+    return [
+      systemPrompt.trim() || "You are a read-only Gmail analysis assistant. Return strict JSON.",
+      agentSkill.trim() ? `Agent Skill:\n${agentSkill.trim()}` : "",
+      agentInstruction.trim() ? `User Instruction:\n${agentInstruction.trim()}` : "",
+      "",
+      `Tenant scope: ${tenantId}`,
+      `Execution: ${executionMode}${executionMode === "scheduled" ? ` at ${executionTime} ${timezone}` : ""}`,
+      `Flow: ${flowSummary}`,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  }
+
+  const currentAllowedCollections = () =>
+    Array.isArray(selectedBlueprint?.defaults.allowedCollections)
+      ? selectedBlueprint?.defaults.allowedCollections
+      : []
+
+  const ensureWorkingAgent = async (): Promise<string> => {
+    if (workingAgentId) return workingAgentId
+
+    const safeName = name.trim()
+    if (!safeName) {
+      throw new Error("Agent name is required before saving node settings.")
+    }
+
+    const createResp = await (dispatch(
+      createTenantAgent({
+        name: safeName,
+        description: description.trim(),
+        systemPrompt: buildFinalPrompt(),
+        agentSkill: agentSkill.trim(),
+        agentInstruction: agentInstruction.trim(),
+        topK: selectedBlueprint?.defaults.topK || 6,
+        isActive: isActive ? 1 : 0,
+        workflowType,
+        serviceType,
+        allowedCollections: currentAllowedCollections(),
+      }),
+    ) as Promise<{ agent?: { id?: string } }>)
+
+    const createdId = String(createResp?.agent?.id || "")
+    if (!createdId) {
+      throw new Error("Agent id missing from create response.")
+    }
+
+    setWorkingAgentId(createdId)
+    return createdId
+  }
+
+  const saveCoreAgentConfig = async (agentId: string) => {
+    const safeName = name.trim()
+    if (!safeName) {
+      throw new Error("Agent name is required.")
+    }
+
+    await (dispatch(
+      updateTenantAgent({
+        agentId,
+        name: safeName,
+        description: description.trim(),
+        systemPrompt: buildFinalPrompt(),
+        agentSkill: agentSkill.trim(),
+        agentInstruction: agentInstruction.trim(),
+        isActive: isActive ? 1 : 0,
+        topK: selectedBlueprint?.defaults.topK || 6,
+        workflowType,
+        serviceType,
+        allowedCollections: currentAllowedCollections(),
+      }),
+    ) as Promise<unknown>)
+  }
+
+  const saveAssignmentConfig = async (agentId: string) => {
+    const provider = aiProvider || "openai"
+    const model = aiModel.trim() || AI_MODEL_OPTIONS[provider][0]
+    const resolvedAuthMode: AuthMode = authMode || "tenant_shared_connection"
+    const resolvedExecutionMode: ExecutionMode = executionMode || "manual"
+
+    if (!aiProvider) setAiProvider(provider)
+    if (!aiModel.trim()) setAiModel(model)
+    if (!authMode) setAuthMode(resolvedAuthMode)
+    if (!executionMode) setExecutionMode(resolvedExecutionMode)
+
+    const parsedLookback = Number(lookbackHours)
+    const parsedMax = Number(maxEmails)
+    if (resolvedExecutionMode === "scheduled" && !executionTime.trim()) {
+      throw new Error("Execution time is required for scheduled mode.")
+    }
+    if (!Number.isFinite(parsedLookback) || parsedLookback < 1 || parsedLookback > 168) {
+      throw new Error("Lookback window must be between 1 and 168 hours.")
+    }
+    if (!Number.isFinite(parsedMax) || parsedMax < 1 || parsedMax > 100) {
+      throw new Error("Max emails per run must be between 1 and 100.")
+    }
+
+    await (dispatch(
+      upsertTenantAgentAssignment({
+        agentId,
+        aiProvider: provider,
+        aiModel: model,
+        authMode: resolvedAuthMode,
+        executionMode: resolvedExecutionMode,
+        executionTime,
+        timezone,
+        lookbackHours: parsedLookback,
+        maxEmails: parsedMax,
+        managerCanRun,
+        memberCanRun,
+        assignedUserIds,
+      }),
+    ) as Promise<unknown>)
+  }
+
+  const saveEditedSection = async (kind: ConfigNodeType) => {
+    const agentId = await ensureWorkingAgent()
+
+    if (kind === "agent_details" || kind === "prompt" || kind === "service") {
+      await saveCoreAgentConfig(agentId)
+      return
+    }
+
+    if (
+      kind === "ai_config"
+      || kind === "auth"
+      || kind === "execution"
+      || kind === "limits"
+      || kind === "permissions"
+      || kind === "assignment"
+    ) {
+      await saveAssignmentConfig(agentId)
+      return
+    }
+
+    throw new Error("Unsupported node type for save.")
+  }
+
   const createAgent = async () => {
     setError(null)
     setSuccess(null)
 
-    if (!selectedBlueprint) {
+    if (!workingAgentId && !selectedBlueprint) {
       setError("Select a blueprint before creating an agent.")
       return
     }
 
-    const missingRequired = REQUIRED_FLOW_NODES.filter((kind) => !flowNodeKinds.includes(kind))
-    if (missingRequired.length > 0) {
-      const labels = missingRequired
-        .map((kind) => FLOW_NODE_LIBRARY.find((item) => item.kind === kind)?.title || kind)
-        .join(", ")
-      setError(`Add required nodes from + Add Node first: ${labels}.`)
-      return
+    if (!workingAgentId) {
+      const missingRequired = REQUIRED_FLOW_NODES.filter((kind) => !flowNodeKinds.includes(kind))
+      if (missingRequired.length > 0) {
+        const labels = missingRequired
+          .map((kind) => FLOW_NODE_LIBRARY.find((item) => item.kind === kind)?.title || kind)
+          .join(", ")
+        setError(`Add required nodes from + Add Node first: ${labels}.`)
+        return
+      }
     }
 
     if (!tenantId) {
@@ -695,56 +1017,10 @@ export default function TenantAgentCreatePage() {
 
     setSaving(true)
     try {
-      const flowSummary = flowSummaryText(nodes, edges)
-      const finalPrompt = [
-        systemPrompt.trim() || "You are a read-only Gmail analysis assistant. Return strict JSON.",
-        agentSkill.trim() ? `Agent Skill:\n${agentSkill.trim()}` : "",
-        agentInstruction.trim() ? `User Instruction:\n${agentInstruction.trim()}` : "",
-        "",
-        `Tenant scope: ${tenantId}`,
-        `Execution: ${executionMode}${executionMode === "scheduled" ? ` at ${executionTime} ${timezone}` : ""}`,
-        `Flow: ${flowSummary}`,
-      ]
-        .filter(Boolean)
-        .join("\n")
-
-      const createResp = await (dispatch(
-        createTenantAgent({
-          name: safeName,
-          description: description.trim(),
-          systemPrompt: finalPrompt,
-          agentSkill: agentSkill.trim(),
-          agentInstruction: agentInstruction.trim(),
-          topK: selectedBlueprint?.defaults.topK || 6,
-          isActive: isActive ? 1 : 0,
-          allowedCollections: Array.isArray(selectedBlueprint?.defaults.allowedCollections)
-            ? selectedBlueprint?.defaults.allowedCollections
-            : [],
-        }),
-      ) as Promise<{ agent?: { id?: string } }>)
-
-      const agentId = String(createResp?.agent?.id || "")
-      if (!agentId) {
-        throw new Error("Agent id missing from create response.")
-      }
-
-      await (dispatch(upsertTenantAgentAssignment({
-          agentId,
-          aiProvider,
-          aiModel,
-          authMode,
-          executionMode,
-          executionTime,
-          timezone,
-          lookbackHours: parsedLookback,
-          maxEmails: parsedMax,
-          managerCanRun,
-          memberCanRun,
-          assignedUserIds,
-        }),
-      ) as Promise<unknown>)
-
-      setSuccess(`${selectedBlueprint?.title || "Agent"} created with canvas flow and assignment permissions.`)
+      const agentId = await ensureWorkingAgent()
+      await saveCoreAgentConfig(agentId)
+      await saveAssignmentConfig(agentId)
+      setSuccess(workingAgentId ? "Agent updated and saved to database." : `${selectedBlueprint?.title || "Agent"} created and saved to database.`)
     } catch (err: unknown) {
       let message = "Failed to create agent"
 
@@ -856,9 +1132,11 @@ export default function TenantAgentCreatePage() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-3">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Create Agent Studio</h1>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{workingAgentId ? "Edit Agent Studio" : "Create Agent Studio"}</h1>
                 <p className="mt-1 text-sm text-slate-600">
-                  Build your agent in a canvas-first workflow. Add required nodes, configure settings, then publish.
+                  {workingAgentId
+                    ? "Edit section-wise settings and save each section directly to database."
+                    : "Build your agent in a canvas-first workflow. Add required nodes, configure settings, then publish."}
                 </p>
               </div>
 
@@ -920,6 +1198,7 @@ export default function TenantAgentCreatePage() {
                   <Badge className="bg-violet-50 text-violet-700 hover:bg-violet-50">Active: {activeNodeMeta.title}</Badge>
                 ) : null}
                 {loadingBlueprints ? <Badge variant="outline">Loading...</Badge> : null}
+                {loadingEditData ? <Badge variant="outline">Loading agent...</Badge> : null}
               </div>
             </div>
 
@@ -927,8 +1206,16 @@ export default function TenantAgentCreatePage() {
               <Link href="/tenant/agents" prefetch={false}>
                 <Button variant="outline" className="cursor-pointer">Back to Agents</Button>
               </Link>
-              <Button className="cursor-pointer bg-cyan-700 hover:bg-cyan-800" disabled={!selectedBlueprint || saving} onClick={createAgent}>
-                {saving ? "Saving..." : `Create ${selectedBlueprint?.title || "Agent"}`}
+              <Button
+                className="cursor-pointer bg-cyan-700 hover:bg-cyan-800"
+                disabled={(workingAgentId ? false : !selectedBlueprint) || saving || loadingEditData}
+                onClick={createAgent}
+              >
+                {saving
+                  ? "Saving..."
+                  : workingAgentId
+                    ? "Save Agent"
+                    : `Create ${selectedBlueprint?.title || "Agent"}`}
               </Button>
             </div>
           </div>
@@ -948,7 +1235,10 @@ export default function TenantAgentCreatePage() {
                     variant="outline"
                     className="cursor-pointer"
                     disabled={!selectedBlueprint}
-                    onClick={() => setShowNodePicker((prev) => !prev)}
+                    onClick={() => {
+                      setShowNodeEditor(false)
+                      setShowNodePicker((prev) => !prev)
+                    }}
                   >
                     <Plus className="mr-1 h-4 w-4" />
                     Add Node
@@ -1131,21 +1421,8 @@ export default function TenantAgentCreatePage() {
                       setShowNodeEditor(true)
                     }}
                     onConnect={(connection) => {
-                      // Use reactflow addEdge helper to ensure proper edge shape
                       if (!connection.source || !connection.target) return
-                      const typed = {
-                        ...connection,
-                        id: `edge_${connection.source}_${connection.target}_${Date.now()}`,
-                        animated: edgeAnimated,
-                        type: selectedEdgeType === "default" ? undefined : (selectedEdgeType as any),
-                        style: {
-                          stroke: edgeColor,
-                          strokeWidth: Number(edgeWidth),
-                          strokeDasharray: edgeDashed ? "6 4" : undefined,
-                        },
-                      } as Edge
-
-                      setEdges((eds) => addEdge(typed, eds))
+                      createCanvasConnection(connection.source, connection.target)
                     }}
                     fitView
                     nodesDraggable={true}
@@ -1171,7 +1448,10 @@ export default function TenantAgentCreatePage() {
                         <div className="flex items-start justify-between">
                           <div>
                             <h4 className="text-sm font-semibold">Edit: {activeNodeMeta?.title}</h4>
-                            <p className="text-xs text-slate-500">Edit settings for the selected node.</p>
+                            <p className="text-xs text-slate-500">
+                              Edit settings for the selected node.
+                              {" Save will persist this node to database."}
+                            </p>
                           </div>
                           <div>
                             <Button variant="ghost" size="sm" onClick={() => setShowNodeEditor(false)}>Close</Button>
@@ -1244,6 +1524,41 @@ export default function TenantAgentCreatePage() {
                                 <Label className="text-xs">Active</Label>
                                 <Switch checked={isActive} onCheckedChange={(v) => setIsActive(Boolean(v))} />
                               </div>
+                            </div>
+                          ) : null}
+
+                          {activeNodeKind === "service" ? (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Service Type</Label>
+                              <Select value={serviceType} onValueChange={(v) => setServiceType(normalizeCategory(v))}>
+                                <SelectTrigger className="h-8">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="gmail">Gmail</SelectItem>
+                                  <SelectItem value="crm">CRM</SelectItem>
+                                  <SelectItem value="support">Support</SelectItem>
+                                  <SelectItem value="calendar">Calendar</SelectItem>
+                                  <SelectItem value="knowledge">Knowledge</SelectItem>
+                                  <SelectItem value="automation">Automation</SelectItem>
+                                  <SelectItem value="general">General</SelectItem>
+                                </SelectContent>
+                              </Select>
+
+                              <Label className="text-xs">Workflow Engine</Label>
+                              <Select
+                                value={workflowType}
+                                onValueChange={(v) => setWorkflowType(v === "mastra" ? "mastra" : v === "langchain" ? "langchain" : "direct")}
+                              >
+                                <SelectTrigger className="h-8">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="direct">Direct</SelectItem>
+                                  <SelectItem value="mastra">Mastra</SelectItem>
+                                  <SelectItem value="langchain">LangChain</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
                           ) : null}
 
@@ -1337,6 +1652,10 @@ export default function TenantAgentCreatePage() {
                             <div className="space-y-2">
                               <Label className="text-xs">Instruction Prompt</Label>
                               <Textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} />
+                              <Label className="text-xs">Agent Skill</Label>
+                              <Textarea value={agentSkill} onChange={(e) => setAgentSkill(e.target.value)} />
+                              <Label className="text-xs">User Instruction</Label>
+                              <Textarea value={agentInstruction} onChange={(e) => setAgentInstruction(e.target.value)} />
                             </div>
                           ) : null}
 
@@ -1355,53 +1674,66 @@ export default function TenantAgentCreatePage() {
 
                           {activeNodeKind === "assignment" ? (
                             <div className="space-y-2 text-xs text-slate-700">
-                              <div>Assigned users: {assignedUserIds.length}</div>
-                              <div className="text-xs text-slate-500">Use the assignment panel above to add/remove users.</div>
+                              <div className="flex items-center justify-between">
+                                <div>Assigned users: {assignedUserIds.length}</div>
+                                <Button type="button" size="sm" variant="outline" onClick={toggleSelectAllFiltered}>
+                                  Select all visible
+                                </Button>
+                              </div>
+
+                              <Input
+                                placeholder="Search users by name/email"
+                                value={userSearch}
+                                onChange={(e) => setUserSearch(e.target.value)}
+                              />
+
+                              <div className="max-h-44 overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-2">
+                                {loadingUsers ? <p className="text-[11px] text-slate-500">Loading users...</p> : null}
+                                {!loadingUsers && filteredUsers.length === 0 ? (
+                                  <p className="text-[11px] text-slate-500">No active users found.</p>
+                                ) : null}
+                                {!loadingUsers
+                                  ? filteredUsers.map((user) => {
+                                      const id = String(user.id)
+                                      const checked = assignedUserIds.includes(id)
+                                      return (
+                                        <label key={id} className="flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5 hover:bg-white">
+                                          <div className="min-w-0">
+                                            <p className="truncate text-xs font-medium text-slate-900">{formatUserName(user)}</p>
+                                            <p className="truncate text-[11px] text-slate-600">{user.email}</p>
+                                          </div>
+                                          <Switch checked={checked} onCheckedChange={() => toggleAssigned(id)} />
+                                        </label>
+                                      )
+                                    })
+                                  : null}
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <div className="text-[11px] text-slate-500">Save Assignment will persist selected users to database.</div>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={async () => {
+                                    setError(null)
+                                    setSuccess(null)
+                                    setSaving(true)
+                                    try {
+                                      await saveEditedSection("assignment")
+                                      setSuccess("User assignment saved to database.")
+                                    } catch (err: unknown) {
+                                      setError(err instanceof Error ? err.message : "Failed to save user assignment.")
+                                    } finally {
+                                      setSaving(false)
+                                    }
+                                  }}
+                                  disabled={saving}
+                                >
+                                  {saving ? "Saving..." : "Save Assignment"}
+                                </Button>
+                              </div>
                             </div>
                           ) : null}
-
-                          {/* Add Connection control to create an edge programmatically */}
-                          <div className="space-y-2">
-                            <Label className="text-xs">Add Connection</Label>
-                            <div className="flex gap-2">
-                              <Select value={connectTargetId} onValueChange={(v) => setConnectTargetId(v)}>
-                                <SelectTrigger className="h-8 w-44">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">Select target</SelectItem>
-                                  {nodes
-                                    .filter((n) => n.id !== activeCanvasNodeId)
-                                    .map((n) => (
-                                      <SelectItem key={n.id} value={n.id}>{String((n.data as any)?.label || n.id)}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                              </Select>
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  if (!activeCanvasNodeId || !connectTargetId || connectTargetId === "none") return
-                                  const e: Edge = {
-                                    id: `edge_${activeCanvasNodeId}_${connectTargetId}_${Date.now()}`,
-                                    source: activeCanvasNodeId,
-                                    target: connectTargetId,
-                                    animated: edgeAnimated,
-                                    type: selectedEdgeType === "default" ? undefined : (selectedEdgeType as any),
-                                    style: {
-                                      stroke: edgeColor,
-                                      strokeWidth: Number(edgeWidth),
-                                      strokeDasharray: edgeDashed ? "6 4" : undefined,
-                                    },
-                                  }
-                                  setEdges((eds) => addEdge(e, eds))
-                                  setConnectTargetId("none")
-                                }}
-                                disabled={!activeCanvasNodeId || connectTargetId === "none"}
-                              >
-                                Connect
-                              </Button>
-                            </div>
-                          </div>
 
                           <div className="flex gap-2 pt-2 justify-end">
                             <Button
@@ -1426,7 +1758,22 @@ export default function TenantAgentCreatePage() {
                               Cancel
                             </Button>
                             <Button
-                              onClick={() => {
+                              onClick={async () => {
+                                  setError(null)
+                                  setSuccess(null)
+                                  if (activeNodeKind) {
+                                    setSaving(true)
+                                    try {
+                                      await saveEditedSection(activeNodeKind)
+                                      setSuccess(`${activeNodeMeta?.title || "Section"} saved to database.`)
+                                    } catch (err: unknown) {
+                                      setError(err instanceof Error ? err.message : "Failed to save section.")
+                                      return
+                                    } finally {
+                                      setSaving(false)
+                                    }
+                                  }
+
                                   if (activeCanvasNodeId) {
                                     setNodeOverrides((prev) => ({
                                       ...prev,
@@ -1442,6 +1789,7 @@ export default function TenantAgentCreatePage() {
                                   setShowNodeEditor(false)
                                   setActiveCanvasNodeId("")
                                 }}
+                              disabled={saving || loadingEditData}
                             >
                               Save
                             </Button>

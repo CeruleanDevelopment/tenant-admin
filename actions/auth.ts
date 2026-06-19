@@ -144,6 +144,12 @@ type TenantAgentCreateInput = {
   topK?: number
   isActive?: 0 | 1
   allowedCollections?: string[]
+  workflowType?: "direct" | "mastra" | "langchain"
+  serviceType?: "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
+}
+
+type TenantAgentUpdateInput = TenantAgentCreateInput & {
+  agentId: string
 }
 
 type TenantAgentAssignmentInput = {
@@ -168,6 +174,8 @@ type TenantGmailStatus = {
 }
 
 type TenantAgentListItem = Record<string, unknown>
+
+type TenantAgentDetail = Record<string, unknown>
 
 export type TenantAgentBlueprintDefaults = {
   name?: string
@@ -1068,6 +1076,46 @@ export const createTenantAgent =
         topK: input.topK ?? 6,
         isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
         allowedCollections: Array.isArray(input.allowedCollections) ? input.allowedCollections : [],
+        workflowType: input.workflowType || "direct",
+        serviceType: input.serviceType || "general",
+      },
+      { headers },
+    )
+
+    return (resp?.data || {}) as { agent?: { id?: string } }
+  }
+
+export const fetchTenantAgent =
+  (agentId: string): ThunkAction<Promise<TenantAgentDetail | null>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.get(`/ai/agents/${encodeURIComponent(String(agentId || ""))}`, { headers })
+    return (resp?.data?.agent || null) as TenantAgentDetail | null
+  }
+
+export const updateTenantAgent =
+  (input: TenantAgentUpdateInput): ThunkAction<Promise<{ agent?: { id?: string } }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const resp = await axios.patch(
+      `/ai/agents/${encodeURIComponent(String(input.agentId || ""))}`,
+      {
+        name: input.name,
+        description: input.description || "",
+        systemPrompt: input.systemPrompt || "",
+        agentSkill: input.agentSkill || "",
+        agentInstruction: input.agentInstruction || "",
+        topK: input.topK ?? 6,
+        isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
+        allowedCollections: Array.isArray(input.allowedCollections) ? input.allowedCollections : [],
+        workflowType: input.workflowType || "direct",
+        serviceType: input.serviceType || "general",
       },
       { headers },
     )

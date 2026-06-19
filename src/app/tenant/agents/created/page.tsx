@@ -261,6 +261,12 @@ export default function TenantCreatedAgentsPage() {
                       created: {agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : "-"}
                     </Badge>
                   </div>
+
+                  <div className="mt-3 flex items-center gap-2">
+                    <Link href={`/tenant/agents/create?agentId=${encodeURIComponent(agent.id)}`} prefetch={false}>
+                      <Button size="sm" className="cursor-pointer">Edit Agent</Button>
+                    </Link>
+                  </div>
                 </div>
               ))}
             </div>
