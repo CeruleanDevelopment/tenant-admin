@@ -1376,8 +1376,8 @@ export default function TenantAgentCreatePage() {
                         <SelectItem value="bezier">Bezier</SelectItem>
                         <SelectItem value="default">Default</SelectItem>
                       </SelectContent>
-                    </Select> */}
-                    {/* <Label className="text-xs">Width:</Label>
+                    </Select>
+                    <Label className="text-xs">Width:</Label>
                     <Select value={edgeWidth} onValueChange={(v) => setEdgeWidth(v)}>
                       <SelectTrigger className="h-8 w-20">
                         <SelectValue />
