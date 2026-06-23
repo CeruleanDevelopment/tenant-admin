@@ -23,6 +23,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -45,7 +53,7 @@ import ReactFlow, {
   type NodeProps,
 } from "reactflow"
 import "reactflow/dist/style.css"
-import { Plus } from "lucide-react"
+import { Plus, X } from "lucide-react"
 
 type TenantUser = {
   id: string
@@ -80,6 +88,11 @@ type FlowNodeData = {
 type NodeShape = "rounded" | "pill" | "square" | "diamond" | "circle"
 type NodeTone = "slate" | "cyan" | "emerald" | "amber" | "rose"
 type NodeDesignPreset = "card" | "compact" | "outlined" | "custom"
+type NodeOverride = Partial<FlowNodeData> & {
+  style?: CSSProperties
+  designPreset?: NodeDesignPreset
+  position?: { x: number; y: number }
+}
 
 const styleFromDesignPreset = (preset: NodeDesignPreset): CSSProperties | undefined => {
   if (preset === "card") {
@@ -406,9 +419,7 @@ export default function TenantAgentCreatePage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
   const [selectedEdgeType, setSelectedEdgeType] = useState<string>("smoothstep")
-  const [nodeOverrides, setNodeOverrides] = useState<
-    Record<string, Partial<FlowNodeData> & { style?: CSSProperties; designPreset?: NodeDesignPreset }>
-  >({})
+  const [nodeOverrides, setNodeOverrides] = useState<Record<string, NodeOverride>>({})
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>("")
   const [edgeEditType, setEdgeEditType] = useState<string>("")
   const [edgeColor, setEdgeColor] = useState<string>("#0f766e")
@@ -422,6 +433,12 @@ export default function TenantAgentCreatePage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [isRemoveDialogOpen, setIsRemoveDialogOpen] = useState(false)
+  const [pendingRemoveNode, setPendingRemoveNode] = useState<{
+    nodeId: string
+    kind: ConfigNodeType
+    title: string
+  } | null>(null)
 
   const normalizeCategory = (value: string): AgentCategory => {
     const key = String(value || "").toLowerCase()
@@ -679,7 +696,7 @@ export default function TenantAgentCreatePage() {
 
         return {
           ...n,
-          position: prev?.position || n.position,
+          position: prev?.position || override?.position || n.position,
           data: {
             ...(n.data || {}),
             ...(override ? override : {}),
@@ -688,8 +705,28 @@ export default function TenantAgentCreatePage() {
         }
       }),
     )
-    setEdges(generatedGraph.edges)
+    // Preserve edge customizations when graph is regenerated.
+    setEdges((prevEdges) =>
+      generatedGraph.edges.map((edge) => {
+        const previous = prevEdges.find(
+          (item) => item.id === edge.id || (item.source === edge.source && item.target === edge.target),
+        )
+        if (!previous) return edge
+
+        return {
+          ...edge,
+          type: previous.type,
+          animated: previous.animated,
+          style: previous.style,
+        }
+      }),
+    )
   }, [generatedGraph, setNodes, setEdges, nodeOverrides])
+
+  useEffect(() => {
+    const type = selectedEdgeType === "default" ? undefined : selectedEdgeType
+    setEdges((prev) => prev.map((edge) => ({ ...edge, type })))
+  }, [selectedEdgeType, setEdges])
 
   useEffect(() => {
     if (!showNodePicker) return
@@ -756,14 +793,96 @@ export default function TenantAgentCreatePage() {
 
   const addFlowNode = (kind: ConfigNodeType) => {
     if (flowNodeKinds.includes(kind)) return
+
+    const newNodeId = `cfg_${kind}`
+    const sourceNode = nodes.find((item) => item.id === activeCanvasNodeId) || nodes[nodes.length - 1]
+    const baseX = sourceNode ? sourceNode.position.x : 340 + flowNodeKinds.length * 260
+    const baseY = sourceNode ? sourceNode.position.y : 120
+
+    const SLOT_GAP_X = 260
+    const LANE_GAP_Y = 170
+    const COLLISION_X = 220
+    const COLLISION_Y = 120
+
+    const hasCollision = (x: number, y: number) =>
+      nodes.some((node) => Math.abs(node.position.x - x) < COLLISION_X && Math.abs(node.position.y - y) < COLLISION_Y)
+
+    const laneOffsets = [0, LANE_GAP_Y, -LANE_GAP_Y, LANE_GAP_Y * 2, -(LANE_GAP_Y * 2)]
+    let candidatePosition = { x: baseX + SLOT_GAP_X, y: baseY }
+
+    let placed = false
+    for (let slot = 1; slot <= 8 && !placed; slot += 1) {
+      for (const laneOffset of laneOffsets) {
+        const x = baseX + slot * SLOT_GAP_X
+        const y = baseY + laneOffset
+        if (!hasCollision(x, y)) {
+          candidatePosition = { x, y }
+          placed = true
+          break
+        }
+      }
+    }
+
+    setNodeOverrides((prev) => ({
+      ...prev,
+      [newNodeId]: {
+        ...(prev[newNodeId] || {}),
+        position: candidatePosition,
+      },
+    }))
+
     setFlowNodeKinds((prev) => [...prev, kind])
-    setActiveCanvasNodeId(`cfg_${kind}`)
+    setActiveCanvasNodeId(newNodeId)
     setShowNodePicker(false)
   }
 
   const removeFlowNode = (kind: ConfigNodeType) => {
+    const nodeId = `cfg_${kind}`
     setFlowNodeKinds((prev) => prev.filter((item) => item !== kind))
+    setNodeOverrides((prev) => {
+      if (!(nodeId in prev)) return prev
+      const next = { ...prev }
+      delete next[nodeId]
+      return next
+    })
     setActiveCanvasNodeId("")
+  }
+
+  const removeSelectedNodeFromCanvas = () => {
+    if (!activeCanvasNodeId) {
+      setError("Select a node to remove from canvas.")
+      return
+    }
+
+    const selectedNodeId = activeCanvasNodeId
+    const resolvedKind = activeNodeKind
+      || (selectedNodeId.startsWith("cfg_") ? (selectedNodeId.slice(4) as ConfigNodeType) : undefined)
+
+    if (!resolvedKind || !FLOW_NODE_LIBRARY.some((item) => item.kind === resolvedKind)) {
+      setError("Unable to identify selected node for removal.")
+      return
+    }
+
+    const nodeMeta = FLOW_NODE_LIBRARY.find((item) => item.kind === resolvedKind)
+    setPendingRemoveNode({
+      nodeId: selectedNodeId,
+      kind: resolvedKind,
+      title: nodeMeta?.title || "this node",
+    })
+    setIsRemoveDialogOpen(true)
+  }
+
+  const confirmRemoveNodeFromCanvas = () => {
+    if (!pendingRemoveNode) return
+
+    removeFlowNode(pendingRemoveNode.kind)
+    setEdges((prev) => prev.filter((edge) => edge.source !== pendingRemoveNode.nodeId && edge.target !== pendingRemoveNode.nodeId))
+    setShowNodeEditor(false)
+    setActiveCanvasNodeId("")
+    setIsRemoveDialogOpen(false)
+    setPendingRemoveNode(null)
+    setError(null)
+    setSuccess(`${pendingRemoveNode.title} removed from canvas.`)
   }
 
   const createCanvasConnection = (sourceId: string, targetId: string) => {
@@ -1245,7 +1364,7 @@ export default function TenantAgentCreatePage() {
                   </Button>
 
                   <div className="flex items-center gap-2">
-                    <Label className="text-xs">Connector:</Label>
+                    {/* <Label className="text-xs">Connector:</Label>
                     <Select value={selectedEdgeType} onValueChange={(v) => setSelectedEdgeType(v)}>
                       <SelectTrigger className="h-8 w-36">
                         <SelectValue />
@@ -1257,7 +1376,7 @@ export default function TenantAgentCreatePage() {
                         <SelectItem value="bezier">Bezier</SelectItem>
                         <SelectItem value="default">Default</SelectItem>
                       </SelectContent>
-                    </Select>
+                    </Select> */}
                     {/* <Label className="text-xs">Width:</Label>
                     <Select value={edgeWidth} onValueChange={(v) => setEdgeWidth(v)}>
                       <SelectTrigger className="h-8 w-20">
@@ -1314,7 +1433,7 @@ export default function TenantAgentCreatePage() {
                     <div className="absolute left-6 top-6 z-50 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
                       <div className="flex items-center justify-between">
                         <div className="text-sm font-semibold">Edit Connector</div>
-                        <Button size="sm" variant="ghost" onClick={() => setSelectedEdgeId("")}>Close</Button>
+                        <Button size="sm" variant="ghost" className="cursor-pointer" onClick={() => setSelectedEdgeId("")}><X /></Button>
                       </div>
 
                       <div className="mt-2">
@@ -1454,7 +1573,7 @@ export default function TenantAgentCreatePage() {
                             </p>
                           </div>
                           <div>
-                            <Button variant="ghost" size="sm" onClick={() => setShowNodeEditor(false)}>Close</Button>
+                            <Button variant="ghost" size="sm" className="cursor-pointer" onClick={() => setShowNodeEditor(false)}><X /></Button>
                           </div>
                         </div>
 
@@ -1738,6 +1857,7 @@ export default function TenantAgentCreatePage() {
                           <div className="flex gap-2 pt-2 justify-end">
                             <Button
                               variant="outline"
+                              className="cursor-pointer" 
                               onClick={() => {
                                 if (activeCanvasNodeId) {
                                   setNodeOverrides((prev) => ({
@@ -1758,6 +1878,7 @@ export default function TenantAgentCreatePage() {
                               Cancel
                             </Button>
                             <Button
+                              className="cursor-pointer" 
                               onClick={async () => {
                                   setError(null)
                                   setSuccess(null)
@@ -1795,12 +1916,12 @@ export default function TenantAgentCreatePage() {
                             </Button>
                             <Button
                               variant="destructive"
+                              className="cursor-pointer"
+                              type="button"
                               onClick={() => {
-                                if (activeNodeKind) removeFlowNode(activeNodeKind)
-                                setShowNodeEditor(false)
-                                  setActiveCanvasNodeId("")
+                                removeSelectedNodeFromCanvas()
                               }}
-                              disabled={activeNodeMeta?.required}
+                              disabled={saving || loadingEditData}
                             >
                               Remove Node
                             </Button>
@@ -1830,6 +1951,44 @@ export default function TenantAgentCreatePage() {
           </Card>
         </section>
       </div>
+
+      <Dialog
+        open={isRemoveDialogOpen}
+        onOpenChange={(open) => {
+          setIsRemoveDialogOpen(open)
+          if (!open) setPendingRemoveNode(null)
+        }}
+      >
+        <DialogContent showCloseButton={false} className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 sm:max-w-sm">
+          <DialogHeader className="space-y-2 px-5 pt-5 pb-0">
+            <DialogTitle className="text-base font-semibold text-slate-900">Remove node from canvas?</DialogTitle>
+            <DialogDescription>
+              {`Are you sure you want to remove ${pendingRemoveNode?.title || "this node"}?`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mx-0 mb-0 mt-4 rounded-b-2xl border-slate-200 bg-slate-50 px-5 py-4">
+            <Button
+              type="button"
+              className="cursor-pointer" 
+              variant="outline"
+              onClick={() => {
+                setIsRemoveDialogOpen(false)
+                setPendingRemoveNode(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="cursor-pointer" 
+              variant="destructive"
+              onClick={confirmRemoveNodeFromCanvas}
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   )
 }
