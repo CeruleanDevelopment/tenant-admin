@@ -1535,7 +1535,7 @@ export default function ChatPage() {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">Agent Workspace</p>
               <h1 className="text-xl font-semibold sm:text-2xl">
-                {selectedAgent?.name || "Select an agent"}
+                {selectedAgent?.name}
               </h1>
               <p className="text-sm text-muted-foreground">
                 Use one shared chat page for different agent workflows.
@@ -1733,7 +1733,7 @@ export default function ChatPage() {
           </Card>
 
           <Card className="flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:rounded-l-none lg:border-l-0">
-            <CardHeader className="border-b border-slate-200 bg-white p-4">
+            <CardHeader className="border-b border-slate-200 bg-white p-2.5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base">

@@ -1310,7 +1310,7 @@ export default function TenantAgentCreatePage() {
                 ) : null} */}
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              {/* <div className="flex flex-wrap gap-2">
                 <Badge className="bg-cyan-50 text-cyan-700 hover:bg-cyan-50">Nodes: {flowNodeKinds.length}</Badge>
                 <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">Assigned: {assignedUserIds.length}</Badge>
                 {activeNodeMeta ? (
@@ -1318,7 +1318,7 @@ export default function TenantAgentCreatePage() {
                 ) : null}
                 {loadingBlueprints ? <Badge variant="outline">Loading...</Badge> : null}
                 {loadingEditData ? <Badge variant="outline">Loading agent...</Badge> : null}
-              </div>
+              </div> */}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
