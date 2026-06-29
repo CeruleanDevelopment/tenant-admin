@@ -40,20 +40,26 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import ReactFlow, {
+  BaseEdge,
   Background,
   Controls,
+  EdgeLabelRenderer,
   NodeResizer,
+  getBezierPath,
+  reconnectEdge,
   useEdgesState,
   useNodesState,
   addEdge,
   Handle,
   Position,
+  type Connection,
   type Edge,
+  type EdgeProps,
   type Node as FlowNode,
   type NodeProps,
 } from "reactflow"
 import "reactflow/dist/style.css"
-import { Plus, X } from "lucide-react"
+import { Plus, Trash, X } from "lucide-react"
 
 type TenantUser = {
   id: string
@@ -94,6 +100,57 @@ type NodeOverride = Partial<FlowNodeData> & {
   position?: { x: number; y: number }
 }
 
+type DeletableEdgeData = {
+  showDelete?: boolean
+  onDelete?: () => void
+}
+
+const DeletableEdge = ({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps<DeletableEdgeData>) => {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  })
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      {data?.showDelete ? (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            className="cursor-pointer rounded-md border border-red-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-red-600 shadow-sm hover:bg-red-50"
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            }}
+            onClick={(event) => {
+              event.stopPropagation()
+              data?.onDelete?.()
+            }}
+          >
+            <Trash className="h-4 w-4"/>
+          </button>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  )
+}
+
 const styleFromDesignPreset = (preset: NodeDesignPreset): CSSProperties | undefined => {
   if (preset === "card") {
     return { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 }
@@ -118,6 +175,18 @@ const CATEGORY_LABEL: Record<AgentCategory, string> = {
   knowledge: "Knowledge",
   automation: "Automation",
   general: "General",
+}
+
+const NODE_TONE_BY_KIND: Record<ConfigNodeType, NodeTone> = {
+  agent_details: "cyan",
+  service: "emerald",
+  ai_config: "amber",
+  auth: "rose",
+  execution: "slate",
+  limits: "amber",
+  prompt: "cyan",
+  permissions: "emerald",
+  assignment: "rose",
 }
 
 const FLOW_NODE_LIBRARY: Array<{
@@ -330,9 +399,6 @@ const buildCanvasGraph = (input: {
 
   const nodes: FlowNode<FlowNodeData>[] = []
 
-  const edges: Edge[] = []
-  let previousNodeId: string | null = null
-
   input.kinds.forEach((kind, index) => {
     const info = nodeLabelForKind(kind, input.values)
     const x = 340 + index * 240
@@ -346,24 +412,13 @@ const buildCanvasGraph = (input: {
         label: info.label,
         hint: info.hint,
         kind,
+        tone: NODE_TONE_BY_KIND[kind],
       },
       style: { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 },
     })
-
-    if (previousNodeId) {
-      edges.push({
-        id: `edge_${previousNodeId}_${id}`,
-        source: previousNodeId,
-        target: id,
-        animated: true,
-        style: { strokeWidth: 1.5 },
-      })
-    }
-
-    previousNodeId = id
   })
 
-  return { nodes, edges }
+  return { nodes, edges: [] }
 }
 
 export default function TenantAgentCreatePage() {
@@ -420,8 +475,9 @@ export default function TenantAgentCreatePage() {
 
   const [selectedEdgeType, setSelectedEdgeType] = useState<string>("smoothstep")
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, NodeOverride>>({})
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string>("")
-  const [edgeEditType, setEdgeEditType] = useState<string>("")
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string>("")
+  const [newConnectionSource, setNewConnectionSource] = useState<string>("")
+  const [newConnectionTarget, setNewConnectionTarget] = useState<string>("")
   const [edgeColor, setEdgeColor] = useState<string>("#0f766e")
   const [edgeWidth, setEdgeWidth] = useState<string>("2")
   const [edgeDashed, setEdgeDashed] = useState<boolean>(false)
@@ -707,19 +763,30 @@ export default function TenantAgentCreatePage() {
     )
     // Preserve edge customizations when graph is regenerated.
     setEdges((prevEdges) =>
-      generatedGraph.edges.map((edge) => {
-        const previous = prevEdges.find(
-          (item) => item.id === edge.id || (item.source === edge.source && item.target === edge.target),
-        )
-        if (!previous) return edge
+      {
+        const regenerated = generatedGraph.edges.map((edge) => {
+          const previous = prevEdges.find(
+            (item) => item.id === edge.id || (item.source === edge.source && item.target === edge.target),
+          )
+          if (!previous) return edge
 
-        return {
-          ...edge,
-          type: previous.type,
-          animated: previous.animated,
-          style: previous.style,
-        }
-      }),
+          return {
+            ...edge,
+            type: previous.type,
+            animated: previous.animated,
+            style: previous.style,
+          }
+        })
+
+        const custom = prevEdges.filter(
+          (item) =>
+            !generatedGraph.edges.some(
+              (edge) => edge.id === item.id || (edge.source === item.source && edge.target === item.target),
+            ),
+        )
+
+        return [...regenerated, ...custom]
+      },
     )
   }, [generatedGraph, setNodes, setEdges, nodeOverrides])
 
@@ -766,6 +833,35 @@ export default function TenantAgentCreatePage() {
 
     return undefined
   }, [nodes, activeCanvasNodeId])
+
+  const edgeNodeOptions = useMemo(
+    () =>
+      nodes.map((node) => ({
+        id: node.id,
+        label: String(node.data?.label || node.id),
+      })),
+    [nodes],
+  )
+
+  useEffect(() => {
+    if (!activeCanvasNodeId) return
+    setNewConnectionSource(activeCanvasNodeId)
+  }, [activeCanvasNodeId])
+
+  useEffect(() => {
+    if (!hoveredEdgeId) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return
+      event.preventDefault()
+      removeConnectionById(hoveredEdgeId)
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [hoveredEdgeId])
 
   const onProviderChange = (value: string) => {
     const provider = value === "openrouter" ? "openrouter" : value === "openai" ? "openai" : ""
@@ -926,6 +1022,66 @@ export default function TenantAgentCreatePage() {
       setError(null)
     }
   }
+
+  const removeConnectionById = (edgeId: string) => {
+    if (!edgeId) return
+
+    setEdges((prev) => prev.filter((edge) => edge.id !== edgeId))
+    if (hoveredEdgeId === edgeId) {
+      setHoveredEdgeId("")
+    }
+    setSuccess("Connection removed.")
+    setError(null)
+  }
+
+  const handleEdgeReconnect = useCallback(
+    (oldEdge: Edge, connection: Connection) => {
+      if (!connection.source || !connection.target) return
+
+      if (connection.source === connection.target) {
+        setError("Source and target must be different.")
+        return
+      }
+
+      let duplicate = false
+      let reconnected = false
+
+      setEdges((prev) => {
+        duplicate = prev.some(
+          (edge) =>
+            edge.id !== oldEdge.id
+            && edge.source === connection.source
+            && edge.target === connection.target,
+        )
+        if (duplicate) return prev
+
+        reconnected = true
+        return reconnectEdge(
+          oldEdge,
+          {
+            source: connection.source,
+            target: connection.target,
+            sourceHandle: connection.sourceHandle ?? null,
+            targetHandle: connection.targetHandle ?? null,
+          },
+          prev,
+        )
+      })
+
+      if (duplicate) {
+        setError("This connection already exists.")
+        return
+      }
+
+      if (reconnected) {
+        const sourceLabel = String(nodes.find((n) => n.id === connection.source)?.data?.label || connection.source)
+        const targetLabel = String(nodes.find((n) => n.id === connection.target)?.data?.label || connection.target)
+        setSuccess(`Reconnected: ${sourceLabel} -> ${targetLabel}`)
+        setError(null)
+      }
+    },
+    [nodes, setEdges],
+  )
 
   const buildFinalPrompt = () => {
     const flowSummary = flowSummaryText(nodes, edges)
@@ -1220,17 +1376,33 @@ export default function TenantAgentCreatePage() {
           lineClassName="border-cyan-500"
           handleClassName="h-2.5 w-2.5 rounded-sm border border-cyan-700 bg-cyan-400"
         />
-        <Handle type="target" position={Position.Top} />
+        <Handle type="target" position={Position.Left} />
         <div className={shape === "diamond" ? "-rotate-45" : ""}>
           <div className="text-sm font-semibold leading-tight">{data?.label}</div>
           <div className="mt-1 text-xs opacity-80">{data?.hint}</div>
         </div>
-        <Handle type="source" position={Position.Bottom} />
+        <Handle type="source" position={Position.Right} />
       </div>
     )
   }
 
   const nodeTypes = useMemo(() => ({ config: ConfigNode }), [nodeOverrides])
+
+  const edgeTypes = useMemo(() => ({ deletable: DeletableEdge }), [])
+
+  const displayEdges = useMemo(
+    () =>
+      edges.map((edge) => ({
+        ...edge,
+        type: "deletable",
+        data: {
+          ...(edge.data as DeletableEdgeData | undefined),
+          showDelete: hoveredEdgeId === edge.id,
+          onDelete: () => removeConnectionById(edge.id),
+        },
+      })),
+    [edges, hoveredEdgeId],
+  )
 
   const [showNodeEditor, setShowNodeEditor] = useState(false)
   const [showNodes, setShowNodes] = useState(false)
@@ -1428,97 +1600,6 @@ export default function TenantAgentCreatePage() {
                       )}
                     </div>
                   ) : null}
-
-                  {selectedEdgeId ? (
-                    <div className="absolute left-6 top-6 z-50 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold">Edit Connector</div>
-                        <Button size="sm" variant="ghost" className="cursor-pointer" onClick={() => setSelectedEdgeId("")}><X /></Button>
-                      </div>
-
-                      <div className="mt-2">
-                        <Label className="text-xs">Type</Label>
-                        <Select value={edgeEditType || "default"} onValueChange={(v) => setEdgeEditType(v)}>
-                          <SelectTrigger className="h-8 w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="smoothstep">Smooth</SelectItem>
-                            <SelectItem value="step">Step</SelectItem>
-                            <SelectItem value="straight">Straight</SelectItem>
-                            <SelectItem value="bezier">Bezier</SelectItem>
-                            <SelectItem value="default">Default</SelectItem>
-                          </SelectContent>
-                        </Select>
-
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          <div>
-                            <Label className="text-xs">Width</Label>
-                            <Select value={edgeWidth} onValueChange={(v) => setEdgeWidth(v)}>
-                              <SelectTrigger className="h-8 w-full">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="1">1px</SelectItem>
-                                <SelectItem value="2">2px</SelectItem>
-                                <SelectItem value="3">3px</SelectItem>
-                                <SelectItem value="4">4px</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="text-xs">Color</Label>
-                            <Input
-                              type="color"
-                              value={edgeColor}
-                              onChange={(e) => setEdgeColor(e.target.value)}
-                              className="h-8 w-full p-1"
-                            />
-                          </div>
-                        </div>
-
-                        {/* <div className="mt-2 flex items-center gap-3">
-                          <div className="flex items-center gap-1">
-                            <Label className="text-[11px]">Dash</Label>
-                            <Switch checked={edgeDashed} onCheckedChange={(v) => setEdgeDashed(Boolean(v))} />
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Label className="text-[11px]">Anim</Label>
-                            <Switch checked={edgeAnimated} onCheckedChange={(v) => setEdgeAnimated(Boolean(v))} />
-                          </div>
-                        </div> */}
-
-                        <div className="flex gap-2 justify-end mt-3">
-                          <Button variant="outline" size="sm" onClick={() => setSelectedEdgeId("")}>Cancel</Button>
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              setEdges((prev) =>
-                                prev.map((e) =>
-                                  e.id === selectedEdgeId
-                                    ? {
-                                        ...e,
-                                        type: edgeEditType === "default" ? undefined : edgeEditType,
-                                        animated: edgeAnimated,
-                                        style: {
-                                          ...(e.style || {}),
-                                          stroke: edgeColor,
-                                          strokeWidth: Number(edgeWidth),
-                                          strokeDasharray: edgeDashed ? "6 4" : undefined,
-                                        },
-                                      }
-                                    : e,
-                                ),
-                              )
-                              setSelectedEdgeId("")
-                            }}
-                          >
-                            Save
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </CardHeader>
@@ -1528,7 +1609,7 @@ export default function TenantAgentCreatePage() {
                 <div className="relative h-[80vh] min-h-160 flex-1 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,#dbeafe_1px,transparent_0)] bg-size-[22px_22px]">
                   <ReactFlow
                     nodes={showNodes ? nodes : []}
-                    edges={showNodes ? edges : []}
+                    edges={showNodes ? displayEdges : []}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
                     onNodeClick={(_, node) => {
@@ -1546,15 +1627,19 @@ export default function TenantAgentCreatePage() {
                     fitView
                     nodesDraggable={true}
                     nodesConnectable={true}
+                    edgesUpdatable={true}
+                    onReconnect={handleEdgeReconnect}
                     elementsSelectable
                     nodeTypes={nodeTypes}
-                    onEdgeClick={(_, edge) => {
-                      setSelectedEdgeId(edge.id)
-                      setEdgeEditType(edge.type || "default")
-                      setEdgeColor(String((edge.style as any)?.stroke || "#0f766e"))
-                      setEdgeWidth(String((edge.style as any)?.strokeWidth || 2))
-                      setEdgeDashed(Boolean((edge.style as any)?.strokeDasharray))
-                      setEdgeAnimated(Boolean(edge.animated))
+                    edgeTypes={edgeTypes}
+                    onEdgeMouseEnter={(_, edge) => {
+                      setHoveredEdgeId(edge.id)
+                    }}
+                    onEdgeMouseLeave={() => {
+                      setHoveredEdgeId("")
+                    }}
+                    onPaneClick={() => {
+                      setHoveredEdgeId("")
                     }}
                   >
                     <Controls />
@@ -1941,6 +2026,89 @@ export default function TenantAgentCreatePage() {
                   ) : null}
                 </div>               
               </div>
+
+              {showNodes && edgeNodeOptions.length > 1 ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-sm font-semibold text-slate-900">Connection Manager</p>
+                  <p className="mt-1 text-xs text-slate-600">Drag from one node handle to another to connect, or use the controls below to add, edit, and delete links.</p>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <div className="space-y-1">
+                      <Label className="text-xs">From Node</Label>
+                      <Select value={newConnectionSource || "none"} onValueChange={(v) => setNewConnectionSource(v === "none" ? "" : v)}>
+                        <SelectTrigger className="h-8 w-full">
+                          <SelectValue placeholder="Select source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Select source</SelectItem>
+                          {edgeNodeOptions.map((node) => (
+                            <SelectItem key={node.id} value={node.id}>{node.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs">To Node</Label>
+                      <Select value={newConnectionTarget || "none"} onValueChange={(v) => setNewConnectionTarget(v === "none" ? "" : v)}>
+                        <SelectTrigger className="h-8 w-full">
+                          <SelectValue placeholder="Select target" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Select target</SelectItem>
+                          {edgeNodeOptions.map((node) => (
+                            <SelectItem key={node.id} value={node.id}>{node.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <Button
+                      type="button"
+                      className="h-8 cursor-pointer"
+                      onClick={() => {
+                        if (!newConnectionSource || !newConnectionTarget) {
+                          setError("Select source and target node to create a connection.")
+                          return
+                        }
+                        createCanvasConnection(newConnectionSource, newConnectionTarget)
+                      }}
+                    >
+                      Add Connection
+                    </Button>
+                  </div>
+
+                  <div className="mt-3 max-h-44 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    {edges.length === 0 ? (
+                      <p className="text-xs text-slate-500">No connections yet.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {edges.map((edge) => {
+                          const sourceLabel = edgeNodeOptions.find((n) => n.id === edge.source)?.label || edge.source
+                          const targetLabel = edgeNodeOptions.find((n) => n.id === edge.target)?.label || edge.target
+
+                          return (
+                            <div key={edge.id} className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                              <div className="min-w-0 truncate text-slate-700">{sourceLabel} -&gt; {targetLabel}</div>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  className="h-7 cursor-pointer px-2"
+                                  onClick={() => removeConnectionById(edge.id)}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-wrap">
                 {flowSummaryText(nodes, edges)}
