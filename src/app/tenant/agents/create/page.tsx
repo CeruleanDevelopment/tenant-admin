@@ -45,7 +45,7 @@ import ReactFlow, {
   Controls,
   EdgeLabelRenderer,
   NodeResizer,
-  getBezierPath,
+  getStraightPath,
   reconnectEdge,
   useEdgesState,
   useNodesState,
@@ -92,7 +92,7 @@ type FlowNodeData = {
 }
 
 type NodeShape = "rounded" | "pill" | "square" | "diamond" | "circle"
-type NodeTone = "slate" | "cyan" | "emerald" | "amber" | "rose"
+type NodeTone = "slate" | "cyan" | "emerald" | "amber" | "rose" | "indigo" | "violet" | "teal" | "orange" | "lime"
 type NodeDesignPreset = "card" | "compact" | "outlined" | "custom"
 type NodeOverride = Partial<FlowNodeData> & {
   style?: CSSProperties
@@ -103,6 +103,8 @@ type NodeOverride = Partial<FlowNodeData> & {
 type DeletableEdgeData = {
   showDelete?: boolean
   onDelete?: () => void
+  sourceColor?: string
+  targetColor?: string
 }
 
 const DeletableEdge = ({
@@ -117,18 +119,37 @@ const DeletableEdge = ({
   style,
   data,
 }: EdgeProps<DeletableEdgeData>) => {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath, labelX, labelY] = getStraightPath({
     sourceX,
     sourceY,
-    sourcePosition,
     targetX,
     targetY,
-    targetPosition,
   })
+  const gradientId = `edge-gradient-${id}`
+  const gradientStyle = {
+    ...(style || {}),
+    stroke: `url(#${gradientId})`,
+    strokeDasharray: "none",
+  }
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      <defs>
+        <linearGradient
+          id={gradientId}
+          gradientUnits="userSpaceOnUse"
+          x1={sourceX}
+          y1={sourceY}
+          x2={targetX}
+          y2={targetY}
+        >
+          <stop offset="0%" stopColor={data?.sourceColor || "#475569"} />
+          <stop offset="100%" stopColor={data?.targetColor || "#475569"} />
+        </linearGradient>
+      </defs>
+      <BaseEdge id={id} path={edgePath} style={gradientStyle} />
+      <circle cx={sourceX} cy={sourceY} r={3.5} fill={data?.sourceColor || "#64748b"} />
+      <circle cx={targetX} cy={targetY} r={3.5} fill={data?.targetColor || "#64748b"} />
       {data?.showDelete ? (
         <EdgeLabelRenderer>
           <button
@@ -187,6 +208,19 @@ const NODE_TONE_BY_KIND: Record<ConfigNodeType, NodeTone> = {
   prompt: "cyan",
   permissions: "emerald",
   assignment: "rose",
+}
+
+const EDGE_COLOR_BY_TONE: Record<NodeTone, string> = {
+  slate: "#64748b",
+  cyan: "#06b6d4",
+  emerald: "#10b981",
+  amber: "#f59e0b",
+  rose: "#f43f5e",
+  indigo: "#6366f1",
+  violet: "#8b5cf6",
+  teal: "#14b8a6",
+  orange: "#fb923c",
+  lime: "#84cc16",
 }
 
 const FLOW_NODE_LIBRARY: Array<{
@@ -473,7 +507,7 @@ export default function TenantAgentCreatePage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
-  const [selectedEdgeType, setSelectedEdgeType] = useState<string>("smoothstep")
+  const [selectedEdgeType, setSelectedEdgeType] = useState<string>("straight")
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, NodeOverride>>({})
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string>("")
   const [newConnectionSource, setNewConnectionSource] = useState<string>("")
@@ -1003,7 +1037,7 @@ export default function TenantAgentCreatePage() {
         style: {
           stroke: edgeColor,
           strokeWidth: Number(edgeWidth),
-          strokeDasharray: edgeDashed ? "6 4" : undefined,
+          strokeDasharray: undefined,
         },
       }
 
@@ -1347,6 +1381,11 @@ export default function TenantAgentCreatePage() {
       emerald: "border-emerald-300 bg-emerald-50 text-emerald-900",
       amber: "border-amber-300 bg-amber-50 text-amber-900",
       rose: "border-rose-300 bg-rose-50 text-rose-900",
+      indigo: "border-indigo-300 bg-indigo-50 text-indigo-900",
+      violet: "border-violet-300 bg-violet-50 text-violet-900",
+      teal: "border-teal-300 bg-teal-50 text-teal-900",
+      orange: "border-orange-300 bg-orange-50 text-orange-900",
+      lime: "border-lime-300 bg-lime-50 text-lime-900",
     }
 
     const shapeClass: Record<NodeShape, string> = {
@@ -1376,12 +1415,20 @@ export default function TenantAgentCreatePage() {
           lineClassName="border-cyan-500"
           handleClassName="h-2.5 w-2.5 rounded-sm border border-cyan-700 bg-cyan-400"
         />
-        <Handle type="target" position={Position.Left} />
+        <Handle
+          type="target"
+          position={Position.Left}
+          style={{ width: 12, height: 12, background: "transparent", border: "none" }}
+        />
         <div className={shape === "diamond" ? "-rotate-45" : ""}>
           <div className="text-sm font-semibold leading-tight">{data?.label}</div>
           <div className="mt-1 text-xs opacity-80">{data?.hint}</div>
         </div>
-        <Handle type="source" position={Position.Right} />
+        <Handle
+          type="source"
+          position={Position.Right}
+          style={{ width: 12, height: 12, background: "transparent", border: "none" }}
+        />
       </div>
     )
   }
@@ -1392,16 +1439,29 @@ export default function TenantAgentCreatePage() {
 
   const displayEdges = useMemo(
     () =>
-      edges.map((edge) => ({
-        ...edge,
-        type: "deletable",
-        data: {
-          ...(edge.data as DeletableEdgeData | undefined),
-          showDelete: hoveredEdgeId === edge.id,
-          onDelete: () => removeConnectionById(edge.id),
-        },
-      })),
-    [edges, hoveredEdgeId],
+      edges.map((edge) => {
+        const sourceTone = (nodes.find((node) => node.id === edge.source)?.data?.tone as NodeTone | undefined) || "slate"
+        const targetTone = (nodes.find((node) => node.id === edge.target)?.data?.tone as NodeTone | undefined) || "slate"
+
+        return {
+          ...edge,
+          type: "deletable",
+          markerStart: undefined,
+          markerEnd: undefined,
+          style: {
+            ...(edge.style || {}),
+            strokeDasharray: "none",
+          },
+          data: {
+            ...(edge.data as DeletableEdgeData | undefined),
+            showDelete: hoveredEdgeId === edge.id,
+            onDelete: () => removeConnectionById(edge.id),
+            sourceColor: EDGE_COLOR_BY_TONE[sourceTone],
+            targetColor: EDGE_COLOR_BY_TONE[targetTone],
+          },
+        }
+      }),
+    [edges, hoveredEdgeId, nodes],
   )
 
   const [showNodeEditor, setShowNodeEditor] = useState(false)
@@ -1614,7 +1674,6 @@ export default function TenantAgentCreatePage() {
                     onEdgesChange={onEdgesChange}
                     onNodeClick={(_, node) => {
                       setActiveCanvasNodeId(node.id)
-                      setShowNodeEditor(true)
                     }}
                     onNodeDoubleClick={(_, node) => {
                       setActiveCanvasNodeId(node.id)
@@ -1713,6 +1772,11 @@ export default function TenantAgentCreatePage() {
                                     <SelectItem value="emerald">Emerald</SelectItem>
                                     <SelectItem value="amber">Amber</SelectItem>
                                     <SelectItem value="rose">Rose</SelectItem>
+                                    <SelectItem value="indigo">Indigo</SelectItem>
+                                    <SelectItem value="violet">Violet</SelectItem>
+                                    <SelectItem value="teal">Teal</SelectItem>
+                                    <SelectItem value="orange">Orange</SelectItem>
+                                    <SelectItem value="lime">Lime</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
