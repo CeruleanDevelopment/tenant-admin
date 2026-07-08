@@ -335,6 +335,8 @@ const nodeLabelForKind = (
     systemPrompt: string
     managerCanRun: boolean
     memberCanRun: boolean
+    meetingAutomationEnabled: boolean
+    meetingCreationMode: "auto" | "confirm_first"
     isActive: boolean
     assignedCount: number
   },
@@ -394,7 +396,7 @@ const nodeLabelForKind = (
   if (kind === "permissions") {
     return {
       label: `Permissions: Mgr ${values.managerCanRun ? "yes" : "no"}, Member ${values.memberCanRun ? "yes" : "no"}`,
-      hint: `Agent active: ${values.isActive ? "yes" : "no"}`,
+      hint: `Meeting: ${values.meetingAutomationEnabled ? "enabled" : "disabled"}, mode: ${values.meetingCreationMode === "confirm_first" ? "confirm-first" : "auto"}`,
     }
   }
   return {
@@ -423,6 +425,8 @@ const buildCanvasGraph = (input: {
     systemPrompt: string
     managerCanRun: boolean
     memberCanRun: boolean
+    meetingAutomationEnabled: boolean
+    meetingCreationMode: "auto" | "confirm_first"
     isActive: boolean
     assignedCount: number
   }
@@ -493,6 +497,8 @@ export default function TenantAgentCreatePage() {
   const [maxEmails, setMaxEmails] = useState("75")
   const [managerCanRun, setManagerCanRun] = useState(true)
   const [memberCanRun, setMemberCanRun] = useState(false)
+  const [meetingAutomationEnabled, setMeetingAutomationEnabled] = useState(true)
+  const [meetingCreationMode, setMeetingCreationMode] = useState<"auto" | "confirm_first">("auto")
   const [isActive, setIsActive] = useState(true)
   const [serviceType, setServiceType] = useState<AgentCategory>("general")
   const [workflowType, setWorkflowType] = useState<WorkflowType>("direct")
@@ -588,6 +594,12 @@ export default function TenantAgentCreatePage() {
     setMaxEmails(String(defaults.maxEmails ?? 75))
     setManagerCanRun(Boolean(defaults.managerCanRun ?? true))
     setMemberCanRun(Boolean(defaults.memberCanRun ?? false))
+    setMeetingAutomationEnabled(Boolean((defaults as { meetingAutomationEnabled?: boolean }).meetingAutomationEnabled ?? true))
+    setMeetingCreationMode(
+      String((defaults as { meetingCreationMode?: string }).meetingCreationMode || "") === "confirm_first"
+        ? "confirm_first"
+        : "auto",
+    )
     setIsActive(Boolean(defaults.isActive ?? true))
     setServiceType(normalizeCategory(String((defaults as { serviceType?: string }).serviceType || selectedBlueprint.category || "general")))
     setWorkflowType(
@@ -673,6 +685,12 @@ export default function TenantAgentCreatePage() {
         setMaxEmails(String(assignmentRow.maxEmails ?? 75))
         setManagerCanRun(Boolean(assignmentRow.managerCanRun ?? true))
         setMemberCanRun(Boolean(assignmentRow.memberCanRun ?? false))
+        setMeetingAutomationEnabled(Boolean(assignmentRow.meetingAutomationEnabled ?? true))
+        setMeetingCreationMode(
+          String(assignmentRow.meetingCreationMode || "") === "confirm_first"
+            ? "confirm_first"
+            : "auto",
+        )
         setServiceType(
           normalizeCategory(String(agent?.serviceType || selectedBlueprint?.category || "general")),
         )
@@ -750,6 +768,8 @@ export default function TenantAgentCreatePage() {
           systemPrompt,
           managerCanRun,
           memberCanRun,
+          meetingAutomationEnabled,
+          meetingCreationMode,
           isActive,
           assignedCount: assignedUserIds.length,
         },
@@ -772,6 +792,8 @@ export default function TenantAgentCreatePage() {
       systemPrompt,
       managerCanRun,
       memberCanRun,
+      meetingAutomationEnabled,
+      meetingCreationMode,
       isActive,
       assignedUserIds.length,
     ],
@@ -1229,6 +1251,8 @@ export default function TenantAgentCreatePage() {
         managerCanRun,
         memberCanRun,
         assignedUserIds,
+        meetingAutomationEnabled,
+        meetingCreationMode,
       }),
     ) as Promise<unknown>)
   }
@@ -1936,6 +1960,25 @@ export default function TenantAgentCreatePage() {
                               <div className="flex items-center justify-between">
                                 <Label className="text-xs">Member can run</Label>
                                 <Switch checked={memberCanRun} onCheckedChange={(v) => setMemberCanRun(Boolean(v))} />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">Enable meeting automation</Label>
+                                <Switch checked={meetingAutomationEnabled} onCheckedChange={(v) => setMeetingAutomationEnabled(Boolean(v))} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Meeting creation mode (tenant-wide)</Label>
+                                <Select
+                                  value={meetingCreationMode}
+                                  onValueChange={(v) => setMeetingCreationMode(v === "confirm_first" ? "confirm_first" : "auto")}
+                                >
+                                  <SelectTrigger className="h-8">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="auto">Auto create and send</SelectItem>
+                                    <SelectItem value="confirm_first">Confirm first</SelectItem>
+                                  </SelectContent>
+                                </Select>
                               </div>
                             </div>
                           ) : null}

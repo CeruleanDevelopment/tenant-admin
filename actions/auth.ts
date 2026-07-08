@@ -165,6 +165,8 @@ type TenantAgentAssignmentInput = {
   managerCanRun: boolean
   memberCanRun: boolean
   assignedUserIds: string[]
+  meetingAutomationEnabled?: boolean
+  meetingCreationMode?: "auto" | "confirm_first"
 }
 
 type TenantGmailStatus = {
@@ -193,6 +195,8 @@ export type TenantAgentBlueprintDefaults = {
   maxEmails?: number
   managerCanRun?: boolean
   memberCanRun?: boolean
+  meetingAutomationEnabled?: boolean
+  meetingCreationMode?: "auto" | "confirm_first"
   isActive?: boolean
   topK?: number
   allowedCollections?: string[]
@@ -1144,6 +1148,8 @@ export const upsertTenantAgentAssignment =
         managerCanRun: input.managerCanRun,
         memberCanRun: input.memberCanRun,
         assignedUserIds: input.assignedUserIds,
+        meetingAutomationEnabled: Boolean(input.meetingAutomationEnabled ?? true),
+        meetingCreationMode: input.meetingCreationMode || "auto",
       },
       { headers },
     )
