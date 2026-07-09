@@ -300,6 +300,13 @@ const AI_MODEL_OPTIONS: Record<"openai" | "openrouter", string[]> = {
 
 const TIMEZONE_OPTIONS = ["UTC", "Asia/Kolkata", "America/New_York", "Europe/London"]
 
+const BLUEPRINTS_CACHE = new Map<string, TenantAgentBlueprint[]>()
+const BLUEPRINTS_IN_FLIGHT = new Map<string, Promise<TenantAgentBlueprint[]>>()
+const USERS_CACHE = new Map<string, TenantUser[]>()
+const USERS_IN_FLIGHT = new Map<string, Promise<TenantUser[]>>()
+
+const tenantCacheKey = (tenantId: string) => String(tenantId || "__default__")
+
 const formatUserName = (user: TenantUser): string => {
   const full = [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
   return full || String(user.email || "User")
@@ -548,16 +555,35 @@ export default function TenantAgentCreatePage() {
   }
 
   const loadBlueprints = useCallback(async () => {
+    const key = tenantCacheKey(tenantId)
+    const cached = BLUEPRINTS_CACHE.get(key)
+    if (cached) {
+      setBlueprints(cached)
+      return
+    }
+
     setLoadingBlueprints(true)
+    const pending = BLUEPRINTS_IN_FLIGHT.get(key)
+
     try {
-      const rows = await (dispatch(fetchTenantAgentBlueprints()) as Promise<TenantAgentBlueprint[]>)
-      setBlueprints(Array.isArray(rows) ? rows : [])
+      const rows = pending
+        ? await pending
+        : await (() => {
+            const request = (dispatch(fetchTenantAgentBlueprints()) as Promise<TenantAgentBlueprint[]>)
+              .then((result) => (Array.isArray(result) ? result : []))
+            BLUEPRINTS_IN_FLIGHT.set(key, request)
+            return request
+          })()
+
+      BLUEPRINTS_CACHE.set(key, rows)
+      setBlueprints(rows)
     } catch {
       setBlueprints([])
     } finally {
       setLoadingBlueprints(false)
+      BLUEPRINTS_IN_FLIGHT.delete(key)
     }
-  }, [dispatch])
+  }, [dispatch, tenantId])
 
   useEffect(() => {
     void loadBlueprints()
@@ -626,14 +652,33 @@ export default function TenantAgentCreatePage() {
   }, [flowNodeKinds])
 
   const loadUsers = useCallback(async () => {
+    const key = tenantCacheKey(tenantId)
+    const cached = USERS_CACHE.get(key)
+    if (cached) {
+      setUsers(cached)
+      return
+    }
+
     setLoadingUsers(true)
+    const pending = USERS_IN_FLIGHT.get(key)
+
     try {
-      const result = await (dispatch(fetchTenantUsers()) as Promise<unknown>)
-      setUsers(Array.isArray(result) ? (result as TenantUser[]) : [])
+      const rows = pending
+        ? await pending
+        : await (() => {
+            const request = (dispatch(fetchTenantUsers()) as Promise<unknown>)
+              .then((result) => (Array.isArray(result) ? (result as TenantUser[]) : []))
+            USERS_IN_FLIGHT.set(key, request)
+            return request
+          })()
+
+      USERS_CACHE.set(key, rows)
+      setUsers(rows)
     } finally {
       setLoadingUsers(false)
+      USERS_IN_FLIGHT.delete(key)
     }
-  }, [dispatch])
+  }, [dispatch, tenantId])
 
   useEffect(() => {
     void loadUsers()
