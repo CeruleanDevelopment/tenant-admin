@@ -219,7 +219,7 @@ export default function UserAssignedAgentsPage() {
     }
   }
   return (
-    <main className="p-6">
+    <main className="p-0">
       <div className="mx-auto max-w-6xl space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
