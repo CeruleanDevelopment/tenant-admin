@@ -2048,7 +2048,7 @@ export default function ChatPage() {
                           }
                         }}
                         placeholder={selectedAgent ? "Ask the agent..." : "Select an agent first..."}
-                        className="w-full min-h-[38px] max-h-44 bg-transparent px-0 py-1 text-sm outline-none placeholder:text-slate-400"
+                        className="w-full min-h-9.5 max-h-44 bg-transparent px-0 py-1 text-sm outline-none placeholder:text-slate-400"
                         disabled={!selectedAgentId || sending}
                         maxRows={8}
                       />

@@ -1,12 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useDispatch } from "react-redux"
 import type { AppDispatch } from "../../../../redux/store"
 import { fetchAssignedAgents, startUserGmailIntegration, startTenantGmailIntegration } from "../../../../actions/auth"
-import api from "../../../../service/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,15 +29,12 @@ type AssignedAgent = {
 
 export default function UserAssignedAgentsPage() {
   const [agents, setAgents] = useState<AssignedAgent[]>([])
-  const [gmailHealth, setGmailHealth] = useState<{ tenantConnected?: boolean; tenantExpiresAt?: string | null; userConnected?: boolean; userExpiresAt?: string | null; error?: string | null }>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectingAgentId, setConnectingAgentId] = useState<string | null>(null)
 
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter() as { push: (href: string) => void }
-  const [healthLoading, setHealthLoading] = useState(false)
-  const [healthError, setHealthError] = useState<string | null>(null)
   // Load assigned agents on mount using the thunk via `dispatch`.
   useEffect(() => {
     let mounted = true
@@ -70,73 +65,6 @@ export default function UserAssignedAgentsPage() {
 
     return () => {
       mounted = false
-    }
-  }, [dispatch])
-
-  // Gmail health probe (tenant + user). Polls periodically.
-  useEffect(() => {
-    let mounted = true
-    let timer: ReturnType<typeof setInterval> | null = null
-
-    const fetchHealth = async () => {
-      setHealthLoading(true)
-      setHealthError(null)
-      try {
-        const results: any = {}
-
-        // Try tenant-level health (best-effort). This endpoint may require platform/tenant auth.
-        try {
-          const resp = await api.get("/integrations/gmail/health")
-          if (mounted) {
-            results.tenantConnected = Boolean(resp?.data?.connected)
-            results.tenantExpiresAt = resp?.data?.expiresAt || null
-          }
-        } catch (err) {
-          // ignore tenant probe errors, capture reason if available
-          if (mounted) {
-            results.tenantConnected = false
-            try {
-              const msg = err && typeof err === "object" && "response" in err ? String((err as any).response?.data?.message || (err as any).response?.data?.error || "") : String(err || "")
-              results.tenantError = msg || null
-            } catch {
-              results.tenantError = null
-            }
-          }
-        }
-
-        // User-level health (requires user auth) — best-effort
-        try {
-          const resp2 = await api.get("/integrations/gmail/health/user")
-          if (mounted) {
-            results.userConnected = Boolean(resp2?.data?.connected)
-            results.userExpiresAt = resp2?.data?.expiresAt || null
-          }
-        } catch (err) {
-          if (mounted) {
-            results.userConnected = false
-            try {
-              const msg2 = err && typeof err === "object" && "response" in err ? String((err as any).response?.data?.message || (err as any).response?.data?.error || "") : String(err || "")
-              results.userError = msg2 || null
-            } catch {
-              results.userError = null
-            }
-          }
-        }
-
-        if (mounted) setGmailHealth(results)
-      } catch (err) {
-        if (mounted) setHealthError(String(err || "Failed to fetch Gmail health"))
-      } finally {
-        if (mounted) setHealthLoading(false)
-      }
-    }
-
-    void fetchHealth()
-    timer = setInterval(() => void fetchHealth(), 30 * 1000)
-
-    return () => {
-      mounted = false
-      if (timer) clearInterval(timer)
     }
   }, [dispatch])
 

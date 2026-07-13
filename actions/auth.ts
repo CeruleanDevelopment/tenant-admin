@@ -484,40 +484,52 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
   }
 }
 
+let fetchAssignedAgentsInFlight: Promise<unknown[]> | null = null
+
 export const fetchAssignedAgents = (): ThunkAction<Promise<unknown[]>, RootState, unknown, AnyAction> => {
   return async (): Promise<unknown[]> => {
+    if (fetchAssignedAgentsInFlight) {
+      return fetchAssignedAgentsInFlight
+    }
+
     const headers: Record<string, string> = {}
     const userToken = String(loadUserAuthTokenCookie() || "").trim()
     if (userToken) {
       headers.user = userToken
       headers.Authorization = `Bearer ${userToken}`
     }
-    try {
-      const response = await axios.get("/api/users/agents/assigned", { headers })
-      const agents = (response?.data?.agents || []) as unknown[]
-      return agents
-    } catch (error: unknown) {
-      const message =
-        typeof error === "object" && error !== null && "message" in error
-          ? String((error as { message?: string }).message || "")
-          : ""
+    fetchAssignedAgentsInFlight = (async (): Promise<unknown[]> => {
+      try {
+        const response = await axios.get("/api/users/agents/assigned", { headers })
+        const agents = (response?.data?.agents || []) as unknown[]
+        return agents
+      } catch (error: unknown) {
+        const message =
+          typeof error === "object" && error !== null && "message" in error
+            ? String((error as { message?: string }).message || "")
+            : ""
 
-      const responseMessage =
-        typeof error === "object" && error !== null && "response" in error
-          ? String(
-              (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.message ||
-                (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.error ||
-                "",
-            ).trim()
-          : ""
+        const responseMessage =
+          typeof error === "object" && error !== null && "response" in error
+            ? String(
+                (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.message ||
+                  (error as { response?: { data?: { message?: string; error?: string } } }).response?.data?.error ||
+                  "",
+              ).trim()
+            : ""
 
-      const extracted = extractApiMessage(error)
-      if (!responseMessage) {
-        throw new Error(extracted || message || "Failed to load assigned agents.")
+        const extracted = extractApiMessage(error)
+        if (!responseMessage) {
+          throw new Error(extracted || message || "Failed to load assigned agents.")
+        }
+
+        throw new Error(responseMessage || message || "Failed to load assigned agents.")
+      } finally {
+        fetchAssignedAgentsInFlight = null
       }
+    })()
 
-      throw new Error(responseMessage || message || "Failed to load assigned agents.")
-    }
+    return fetchAssignedAgentsInFlight
   }
 }
 
