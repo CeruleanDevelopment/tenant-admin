@@ -307,7 +307,7 @@ export default function UserAssignedAgentsPage() {
             <Card key={agent.id} className="rounded-2xl">
               <CardHeader>
                 <CardTitle className="text-lg">{agent.name}</CardTitle>
-                <CardDescription>{agent.description || "Gmail analysis agent"}</CardDescription>
+                <CardDescription>{agent.description}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-2 text-xs">
@@ -317,7 +317,7 @@ export default function UserAssignedAgentsPage() {
                   <Badge variant="outline">{agent.aiProvider}</Badge>
                   <Badge variant="outline">{agent.aiModel}</Badge>
                   <Badge variant="outline">lookback {agent.lookbackHours}h</Badge>
-                  <Badge variant="outline">max {agent.maxEmails}</Badge>
+                  {/* <Badge variant="outline">max {agent.maxEmails}</Badge> */}
                 </div>
 
                 <div className="rounded-md border bg-muted/40 p-3 text-sm">
