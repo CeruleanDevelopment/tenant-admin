@@ -59,7 +59,7 @@ import ReactFlow, {
   type NodeProps,
 } from "reactflow"
 import "reactflow/dist/style.css"
-import { Plus, Trash, X } from "lucide-react"
+import { Plus, Trash, Trash2, X } from "lucide-react"
 
 type TenantUser = {
   id: string
@@ -75,18 +75,16 @@ type ExecutionMode = "" | "manual" | "scheduled"
 type ConfigNodeType =
   | "agent_details"
   | "service"
-  | "ai_config"
-  | "auth"
-  | "execution"
-  | "limits"
+  | "runtime"
   | "prompt"
-  | "permissions"
-  | "assignment"
+  | "access"
 
 type FlowNodeData = {
   label: string
   hint?: string
   kind?: ConfigNodeType
+  isFirst?: boolean
+  isStart?: boolean
   shape?: NodeShape
   tone?: NodeTone
 }
@@ -148,8 +146,6 @@ const DeletableEdge = ({
         </linearGradient>
       </defs>
       <BaseEdge id={id} path={edgePath} style={gradientStyle} />
-      <circle cx={sourceX} cy={sourceY} r={3.5} fill={data?.sourceColor || "#64748b"} />
-      <circle cx={targetX} cy={targetY} r={3.5} fill={data?.targetColor || "#64748b"} />
       {data?.showDelete ? (
         <EdgeLabelRenderer>
           <button
@@ -164,7 +160,7 @@ const DeletableEdge = ({
               data?.onDelete?.()
             }}
           >
-            <Trash className="h-4 w-4"/>
+            <Trash2 className="h-4 w-4"/>
           </button>
         </EdgeLabelRenderer>
       ) : null}
@@ -201,13 +197,9 @@ const CATEGORY_LABEL: Record<AgentCategory, string> = {
 const NODE_TONE_BY_KIND: Record<ConfigNodeType, NodeTone> = {
   agent_details: "cyan",
   service: "emerald",
-  ai_config: "amber",
-  auth: "rose",
-  execution: "slate",
-  limits: "amber",
+  runtime: "amber",
   prompt: "cyan",
-  permissions: "emerald",
-  assignment: "rose",
+  access: "rose",
 }
 
 const EDGE_COLOR_BY_TONE: Record<NodeTone, string> = {
@@ -242,27 +234,9 @@ const FLOW_NODE_LIBRARY: Array<{
     required: true,
   },
   {
-    kind: "ai_config",
-    title: "AI Model",
-    description: "Choose provider and model.",
-    required: true,
-  },
-  {
-    kind: "auth",
-    title: "Google Auth",
-    description: "Select tenant shared or user personal auth mode.",
-    required: true,
-  },
-  {
-    kind: "execution",
-    title: "Execution",
-    description: "Manual or scheduled execution settings.",
-    required: true,
-  },
-  {
-    kind: "limits",
-    title: "Run Limits",
-    description: "Lookback window and max emails per run.",
+    kind: "runtime",
+    title: "Runtime Config",
+    description: "AI model, auth mode, execution schedule, and run limits.",
     required: true,
   },
   {
@@ -271,26 +245,18 @@ const FLOW_NODE_LIBRARY: Array<{
     description: "Behavior instruction for the agent.",
   },
   {
-    kind: "permissions",
-    title: "Role Permissions",
-    description: "Manager/member run access and active state.",
+    kind: "access",
+    title: "Access & Assignment",
+    description: "Role permissions, meeting automation, and user assignment.",
     required: true,
-  },
-  {
-    kind: "assignment",
-    title: "User Assignment",
-    description: "Assign this agent to tenant users.",
   },
 ]
 
 const REQUIRED_FLOW_NODES: ConfigNodeType[] = [
   "agent_details",
   "service",
-  "ai_config",
-  "auth",
-  "execution",
-  "limits",
-  "permissions",
+  "runtime",
+  "access",
 ]
 
 const AI_MODEL_OPTIONS: Record<"openai" | "openrouter", string[]> = {
@@ -354,10 +320,18 @@ const nodeLabelForKind = (
       hint: values.description.trim() ? "Name and description configured" : "Set name, description, and status",
     }
   }
-  if (kind === "ai_config") {
+  if (kind === "runtime") {
     return {
-      label: values.aiProvider && values.aiModel ? `Model: ${values.aiProvider} / ${values.aiModel}` : "AI model",
-      hint: values.aiProvider ? "Provider selected" : "Select provider and model",
+      label:
+        values.aiProvider && values.aiModel
+          ? `Runtime: ${values.aiProvider} / ${values.aiModel}`
+          : "Runtime config",
+      hint:
+        values.executionMode === "scheduled"
+          ? `Scheduled ${values.executionTime || "--:--"} (${values.timezone})`
+          : values.executionMode === "manual"
+            ? `Manual run, ${values.lookbackHours || "--"}h / ${values.maxEmails || "--"} max`
+            : "Model, auth, execution, and limits",
     }
   }
   if (kind === "service") {
@@ -366,50 +340,22 @@ const nodeLabelForKind = (
       hint: `Workflow: ${String(values.workflowType || "direct")}`,
     }
   }
-  if (kind === "auth") {
-    return {
-      label:
-        values.authMode === "user_personal_connection"
-          ? "Auth: user personal"
-          : values.authMode === "tenant_shared_connection"
-            ? "Auth: tenant shared"
-            : "Google auth",
-      hint: values.authMode ? "Auth mode configured" : "Select an auth mode",
-    }
-  }
-  if (kind === "execution") {
-    return {
-      label:
-        values.executionMode === "scheduled"
-          ? `Run: scheduled ${values.executionTime || "--:--"}`
-          : values.executionMode === "manual"
-            ? "Run: manual"
-            : "Execution",
-      hint: values.executionMode === "scheduled" ? `Timezone: ${values.timezone}` : "Choose manual or scheduled run",
-    }
-  }
-  if (kind === "limits") {
-    return {
-      label: `Window: ${values.lookbackHours || "--"}h, max ${values.maxEmails || "--"}`,
-      hint: "Run limits",
-    }
-  }
   if (kind === "prompt") {
     return {
       label: values.systemPrompt.trim() ? "Instruction prompt" : "Instruction prompt",
       hint: values.systemPrompt.trim() ? "Prompt configured" : "Optional behavior instructions",
     }
   }
-  if (kind === "permissions") {
+  if (kind === "access") {
     return {
       label: `Permissions: Mgr ${values.managerCanRun ? "yes" : "no"}, Member ${values.memberCanRun ? "yes" : "no"}`,
-      hint: `Meeting: ${values.meetingAutomationEnabled ? "enabled" : "disabled"}, mode: ${values.meetingCreationMode === "confirm_first" ? "confirm-first" : "auto"}`,
+      hint:
+        values.assignedCount > 0
+          ? `${values.assignedCount} users assigned, meeting ${values.meetingAutomationEnabled ? "enabled" : "disabled"}`
+          : `No users assigned, meeting ${values.meetingAutomationEnabled ? "enabled" : "disabled"}`,
     }
   }
-  return {
-    label: `Assignments: ${values.assignedCount}`,
-    hint: values.assignedCount > 0 ? "Users assigned" : "Optional user assignment",
-  }
+  return { label: "Configuration", hint: "Update node settings" }
 }
 
 const buildCanvasGraph = (input: {
@@ -444,9 +390,22 @@ const buildCanvasGraph = (input: {
 
   const nodes: FlowNode<FlowNodeData>[] = []
 
+  nodes.push({
+    id: "cfg_start",
+    type: "config",
+    position: { x: 120, y: 120 },
+    data: {
+      label: "Start",
+      hint: "Connect to first node",
+      isStart: true,
+      tone: "indigo",
+    },
+    style: { borderRadius: 18, border: "1px solid #c7d2fe", background: "#eef2ff", width: 180 },
+  })
+
   input.kinds.forEach((kind, index) => {
     const info = nodeLabelForKind(kind, input.values)
-    const x = 340 + index * 240
+    const x = 380 + index * 240
     const id = `cfg_${kind}`
 
     nodes.push({
@@ -457,10 +416,13 @@ const buildCanvasGraph = (input: {
         label: info.label,
         hint: info.hint,
         kind,
+        isFirst: index === 0,
+        isStart: false,
         tone: NODE_TONE_BY_KIND[kind],
       },
       style: { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 },
     })
+
   })
 
   return { nodes, edges: [] }
@@ -523,6 +485,9 @@ export default function TenantAgentCreatePage() {
   const [selectedEdgeType, setSelectedEdgeType] = useState<string>("straight")
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, NodeOverride>>({})
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string>("")
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string>("")
+  const hoveredEdgeIdRef = useRef<string>("")
+  const selectedEdgeIdRef = useRef<string>("")
   const [newConnectionSource, setNewConnectionSource] = useState<string>("")
   const [newConnectionTarget, setNewConnectionTarget] = useState<string>("")
   const [edgeColor, setEdgeColor] = useState<string>("#0f766e")
@@ -640,16 +605,16 @@ export default function TenantAgentCreatePage() {
     setAppliedBlueprintId(String(selectedBlueprint.id))
   }, [selectedBlueprint, appliedBlueprintId, isEditMode])
 
-  // Show nodes only when flow nodes have been added; keep canvas blank otherwise
+  // Show nodes when a blueprint is selected so Start node is always visible.
   useEffect(() => {
-    if (flowNodeKinds.length > 0) {
+    if (selectedBlueprint) {
       setShowNodes(true)
     } else {
       setShowNodes(false)
       setShowNodeEditor(false)
       setActiveCanvasNodeId("")
     }
-  }, [flowNodeKinds])
+  }, [selectedBlueprint])
 
   const loadUsers = useCallback(async () => {
     const key = tenantCacheKey(tenantId)
@@ -755,12 +720,8 @@ export default function TenantAgentCreatePage() {
         const initialKinds: ConfigNodeType[] = [
           "agent_details",
           "service",
-          "ai_config",
-          "auth",
-          "execution",
-          "limits",
-          "permissions",
-          "assignment",
+          "runtime",
+          "access",
         ]
         if (String(agent?.systemPrompt || "").trim()) initialKinds.push("prompt")
         setFlowNodeKinds(Array.from(new Set(initialKinds)))
@@ -793,8 +754,8 @@ export default function TenantAgentCreatePage() {
   const generatedGraph = useMemo(
     () =>
       buildCanvasGraph({
-        // only show the blueprint start node when a blueprint is selected AND there are flow nodes
-        hasBlueprint: Boolean(selectedBlueprint) && flowNodeKinds.length > 0,
+        // show Start node as soon as a blueprint is selected
+        hasBlueprint: Boolean(selectedBlueprint),
         blueprintTitle: selectedBlueprint?.title || "Choose blueprint",
         kinds: flowNodeKinds,
         values: {
@@ -919,6 +880,11 @@ export default function TenantAgentCreatePage() {
     [flowNodeKinds],
   )
 
+  const addedNodeTemplates = useMemo(
+    () => FLOW_NODE_LIBRARY.filter((node) => flowNodeKinds.includes(node.kind)),
+    [flowNodeKinds],
+  )
+
   const activeNodeKind = useMemo(() => {
     const node = nodes.find((item) => item.id === activeCanvasNodeId)
     if (node?.data?.kind) {
@@ -950,19 +916,28 @@ export default function TenantAgentCreatePage() {
   }, [activeCanvasNodeId])
 
   useEffect(() => {
-    if (!hoveredEdgeId) return
+    hoveredEdgeIdRef.current = hoveredEdgeId
+  }, [hoveredEdgeId])
 
+  useEffect(() => {
+    selectedEdgeIdRef.current = selectedEdgeId
+  }, [selectedEdgeId])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return
+      const edgeToDelete = selectedEdgeIdRef.current || hoveredEdgeIdRef.current
+      if (!edgeToDelete) return
+
       event.preventDefault()
-      removeConnectionById(hoveredEdgeId)
+      removeConnectionById(edgeToDelete)
     }
 
     window.addEventListener("keydown", onKeyDown)
     return () => {
       window.removeEventListener("keydown", onKeyDown)
     }
-  }, [hoveredEdgeId])
+  }, [])
 
   const onProviderChange = (value: string) => {
     const provider = value === "openrouter" ? "openrouter" : value === "openai" ? "openai" : ""
@@ -1124,16 +1099,17 @@ export default function TenantAgentCreatePage() {
     }
   }
 
-  const removeConnectionById = (edgeId: string) => {
+  const removeConnectionById = useCallback((edgeId: string) => {
     if (!edgeId) return
 
     setEdges((prev) => prev.filter((edge) => edge.id !== edgeId))
-    if (hoveredEdgeId === edgeId) {
-      setHoveredEdgeId("")
-    }
+    setHoveredEdgeId((current) => (current === edgeId ? "" : current))
+    setSelectedEdgeId((current) => (current === edgeId ? "" : current))
+    if (hoveredEdgeIdRef.current === edgeId) hoveredEdgeIdRef.current = ""
+    if (selectedEdgeIdRef.current === edgeId) selectedEdgeIdRef.current = ""
     setSuccess("Connection removed.")
     setError(null)
-  }
+  }, [setEdges])
 
   const handleEdgeReconnect = useCallback(
     (oldEdge: Edge, connection: Connection) => {
@@ -1310,14 +1286,7 @@ export default function TenantAgentCreatePage() {
       return
     }
 
-    if (
-      kind === "ai_config"
-      || kind === "auth"
-      || kind === "execution"
-      || kind === "limits"
-      || kind === "permissions"
-      || kind === "assignment"
-    ) {
+    if (kind === "runtime" || kind === "access") {
       await saveAssignmentConfig(agentId)
       return
     }
@@ -1475,8 +1444,28 @@ export default function TenantAgentCreatePage() {
       style.height = 170
     }
 
+    const handleColor = EDGE_COLOR_BY_TONE[tone]
+
+    const requestNodeRemove = (nodeId: string) => {
+      const resolvedKind =
+        data?.kind
+        || (nodeId.startsWith("cfg_") ? (nodeId.slice(4) as ConfigNodeType) : undefined)
+
+      if (!resolvedKind || !FLOW_NODE_LIBRARY.some((item) => item.kind === resolvedKind)) {
+        return
+      }
+
+      const nodeMeta = FLOW_NODE_LIBRARY.find((item) => item.kind === resolvedKind)
+      setPendingRemoveNode({
+        nodeId,
+        kind: resolvedKind,
+        title: nodeMeta?.title || "this node",
+      })
+      setIsRemoveDialogOpen(true)
+    }
+
     return (
-      <div style={style as any} className={`border p-3 shadow-sm ${toneClass[tone]} ${shapeClass[shape]}`}>
+      <div style={style as any} className={`group relative border p-3 shadow-sm ${toneClass[tone]} ${shapeClass[shape]}`}>
         <NodeResizer
           isVisible={Boolean(selected)}
           minWidth={140}
@@ -1484,19 +1473,48 @@ export default function TenantAgentCreatePage() {
           lineClassName="border-cyan-500"
           handleClassName="h-2.5 w-2.5 rounded-sm border border-cyan-700 bg-cyan-400"
         />
-        <Handle
-          type="target"
-          position={Position.Left}
-          style={{ width: 12, height: 12, background: "transparent", border: "none" }}
-        />
+        {!data?.isStart ? (
+          <button
+            type="button"
+            className="absolute left-1/2 top-0 z-20 inline-flex -translate-x-1/2 -translate-y-[125%] items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] font-medium text-red-600 opacity-0 shadow-md transition-opacity hover:bg-red-50 group-hover:opacity-100 cursor-pointer"
+            onClick={(event) => {
+              event.stopPropagation()
+              requestNodeRemove(id)
+            }}
+            aria-label="Delete node"
+            title="Delete node"
+          >
+            <Trash2 className="h-4 w-4" />
+            {/* Delete */}
+          </button>
+        ) : null}
+        {!data?.isStart ? (
+          <Handle
+            type="target"
+            position={Position.Left}
+            style={{
+              width: 12,
+              height: 12,
+              background: handleColor,
+              border: "2px solid #ffffff",
+              boxShadow: "0 0 0 1px rgba(15,23,42,0.35)",
+            }}
+          />
+        ) : null}
         <div className={shape === "diamond" ? "-rotate-45" : ""}>
-          <div className="text-sm font-semibold leading-tight">{data?.label}</div>
+          <div className="text-base font-semibold leading-tight">{data?.label}</div>
           <div className="mt-1 text-xs opacity-80">{data?.hint}</div>
         </div>
         <Handle
           type="source"
           position={Position.Right}
-          style={{ width: 12, height: 12, background: "transparent", border: "none" }}
+          style={{
+            width: 12,
+            height: 12,
+            background: handleColor,
+            border: "2px solid #ffffff",
+            boxShadow: "0 0 0 1px rgba(15,23,42,0.35)",
+          }}
         />
       </div>
     )
@@ -1523,14 +1541,14 @@ export default function TenantAgentCreatePage() {
           },
           data: {
             ...(edge.data as DeletableEdgeData | undefined),
-            showDelete: hoveredEdgeId === edge.id,
+            showDelete: hoveredEdgeId === edge.id || selectedEdgeId === edge.id,
             onDelete: () => removeConnectionById(edge.id),
             sourceColor: EDGE_COLOR_BY_TONE[sourceTone],
             targetColor: EDGE_COLOR_BY_TONE[targetTone],
           },
         }
       }),
-    [edges, hoveredEdgeId, nodes],
+    [edges, hoveredEdgeId, nodes, selectedEdgeId],
   )
 
   const [showNodeEditor, setShowNodeEditor] = useState(false)
@@ -1544,6 +1562,17 @@ export default function TenantAgentCreatePage() {
     setShapeDraft((override?.shape || "rounded") as NodeShape)
     setToneDraft((override?.tone || "slate") as NodeTone)
   }, [showNodeEditor, activeCanvasNodeId, nodeOverrides])
+
+  useEffect(() => {
+    if (!showNodeEditor) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [showNodeEditor])
 
   return (
     <main className="min-h-screen bg-[linear-gradient(180deg,#ecfeff_0%,#ffffff_28%)] px-4 py-4 sm:px-4 lg:px-4">
@@ -1708,25 +1737,62 @@ export default function TenantAgentCreatePage() {
 
                   {showNodePicker ? (
                     <div className="absolute right-0 top-11 z-30 w-[min(48rem,92vw)] rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-lg">
-                      {availableNodeTemplates.length === 0 ? (
-                        <p className="text-xs text-slate-500">All available configuration nodes are already on canvas.</p>
-                      ) : (
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                          {availableNodeTemplates.map((node) => (
-                            <button
-                              key={node.kind}
-                              type="button"
-                              className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-cyan-300 hover:bg-cyan-50/40"
-                              onClick={() => addFlowNode(node.kind)}
-                              disabled={!selectedBlueprint}
-                            >
-                              <p className="text-sm font-semibold text-slate-900">{node.title}</p>
-                              <p className="mt-1 text-xs text-slate-600">{node.description}</p>
-                              {node.required ? <p className="mt-1 text-[11px] font-medium text-cyan-700">Required</p> : null}
-                            </button>
-                          ))}
+                      <div className="space-y-3">
+                        <div>
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Add New Node</p>
+                          {availableNodeTemplates.length === 0 ? (
+                            <p className="text-xs text-slate-500">All available configuration nodes are already on canvas.</p>
+                          ) : (
+                            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                              {availableNodeTemplates.map((node) => (
+                                <button
+                                  key={node.kind}
+                                  type="button"
+                                  className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-cyan-300 hover:bg-cyan-50/40"
+                                  onClick={() => addFlowNode(node.kind)}
+                                  disabled={!selectedBlueprint}
+                                >
+                                  <p className="text-sm font-semibold text-slate-900">{node.title}</p>
+                                  <p className="mt-1 text-xs text-slate-600">{node.description}</p>
+                                  {node.required ? <p className="mt-1 text-[11px] font-medium text-cyan-700">Required</p> : null}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
+
+                        <div>
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Edit Existing Node</p>
+                          {addedNodeTemplates.length === 0 ? (
+                            <p className="text-xs text-slate-500">No nodes added yet.</p>
+                          ) : (
+                            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                              {addedNodeTemplates.map((node) => (
+                                <div
+                                  key={`edit_${node.kind}`}
+                                  className="rounded-xl border border-slate-200 bg-white p-3"
+                                >
+                                  <p className="text-sm font-semibold text-slate-900">{node.title}</p>
+                                  <p className="mt-1 text-xs text-slate-600">{node.description}</p>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="mt-2 h-7 cursor-pointer"
+                                    onClick={() => {
+                                      setActiveCanvasNodeId(`cfg_${node.kind}`)
+                                      setShowNodeEditor(true)
+                                      setShowNodePicker(false)
+                                    }}
+                                  >
+                                    Edit Node
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -1766,8 +1832,15 @@ export default function TenantAgentCreatePage() {
                     onEdgeMouseLeave={() => {
                       setHoveredEdgeId("")
                     }}
+                    onEdgeClick={(_, edge) => {
+                      removeConnectionById(edge.id)
+                    }}
+                    onEdgeDoubleClick={(_, edge) => {
+                      removeConnectionById(edge.id)
+                    }}
                     onPaneClick={() => {
                       setHoveredEdgeId("")
+                      setSelectedEdgeId("")
                     }}
                   >
                     <Controls />
@@ -1775,8 +1848,8 @@ export default function TenantAgentCreatePage() {
                   </ReactFlow>
 
                   {showNodeEditor && activeNodeKind ? (
-                    <div className="absolute inset-0 z-40 grid place-items-center">
-                      <div className="w-[min(640px,96vw)] rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
+                    <div className="fixed inset-0 z-120 grid place-items-center bg-slate-900/20 p-3">
+                      <div className="flex max-h-[92vh] w-[min(640px,96vw)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
                         <div className="flex items-start justify-between">
                           <div>
                             <h4 className="text-sm font-semibold">Edit: {activeNodeMeta?.title}</h4>
@@ -1790,7 +1863,7 @@ export default function TenantAgentCreatePage() {
                           </div>
                         </div>
 
-                        <div className="mt-3 space-y-3">
+                        <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                           <div className="space-y-2">
                             <Label className="text-xs">Design</Label>
                             <Select
@@ -1899,8 +1972,9 @@ export default function TenantAgentCreatePage() {
                             </div>
                           ) : null}
 
-                          {activeNodeKind === "ai_config" ? (
+                          {activeNodeKind === "runtime" ? (
                             <div className="space-y-2">
+                              <p className="text-[11px] font-medium text-slate-600">AI Configuration</p>
                               <Label className="text-xs">Provider</Label>
                               <Select value={aiProvider || "none"} onValueChange={(v) => onProviderChange(v)}>
                                 <SelectTrigger className="h-8">
@@ -1924,11 +1998,8 @@ export default function TenantAgentCreatePage() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </div>
-                          ) : null}
 
-                          {activeNodeKind === "auth" ? (
-                            <div className="space-y-2">
+                              <p className="pt-1 text-[11px] font-medium text-slate-600">Authentication</p>
                               <Label className="text-xs">Auth Mode</Label>
                               <Select value={authMode || "none"} onValueChange={(v) => setAuthMode(v === "none" ? ("" as AuthMode) : (v as AuthMode))}>
                                 <SelectTrigger className="h-8">
@@ -1940,11 +2011,8 @@ export default function TenantAgentCreatePage() {
                                   <SelectItem value="user_personal_connection">User personal</SelectItem>
                                 </SelectContent>
                               </Select>
-                            </div>
-                          ) : null}
 
-                          {activeNodeKind === "execution" ? (
-                            <div className="space-y-2">
+                              <p className="pt-1 text-[11px] font-medium text-slate-600">Execution</p>
                               <Label className="text-xs">Execution Mode</Label>
                               <Select value={executionMode || ""} onValueChange={(v) => setExecutionMode(v as ExecutionMode)}>
                                 <SelectTrigger className="h-8">
@@ -1973,11 +2041,8 @@ export default function TenantAgentCreatePage() {
                                   </Select>
                                 </>
                               ) : null}
-                            </div>
-                          ) : null}
 
-                          {activeNodeKind === "limits" ? (
-                            <div className="space-y-2">
+                              <p className="pt-1 text-[11px] font-medium text-slate-600">Run Limits</p>
                               <Label className="text-xs">Lookback (hours)</Label>
                               <Input value={lookbackHours} onChange={(e) => setLookbackHours(e.target.value)} />
                               <Label className="text-xs">Max emails per run</Label>
@@ -1996,8 +2061,9 @@ export default function TenantAgentCreatePage() {
                             </div>
                           ) : null}
 
-                          {activeNodeKind === "permissions" ? (
+                          {activeNodeKind === "access" ? (
                             <div className="space-y-2">
+                              <p className="text-[11px] font-medium text-slate-600">Role Permissions</p>
                               <div className="flex items-center justify-between">
                                 <Label className="text-xs">Manager can run</Label>
                                 <Switch checked={managerCanRun} onCheckedChange={(v) => setManagerCanRun(Boolean(v))} />
@@ -2025,11 +2091,9 @@ export default function TenantAgentCreatePage() {
                                   </SelectContent>
                                 </Select>
                               </div>
-                            </div>
-                          ) : null}
 
-                          {activeNodeKind === "assignment" ? (
-                            <div className="space-y-2 text-xs text-slate-700">
+                              <p className="pt-1 text-[11px] font-medium text-slate-600">User Assignment</p>
+                              <div className="space-y-2 text-xs text-slate-700">
                               <div className="flex items-center justify-between">
                                 <div>Assigned users: {assignedUserIds.length}</div>
                                 <Button type="button" size="sm" variant="outline" onClick={toggleSelectAllFiltered}>
@@ -2064,105 +2128,74 @@ export default function TenantAgentCreatePage() {
                                     })
                                   : null}
                               </div>
-
-                              <div className="flex items-center justify-between">
-                                <div className="text-[11px] text-slate-500">Save Assignment will persist selected users to database.</div>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={async () => {
-                                    setError(null)
-                                    setSuccess(null)
-                                    setSaving(true)
-                                    try {
-                                      await saveEditedSection("assignment")
-                                      setSuccess("User assignment saved to database.")
-                                    } catch (err: unknown) {
-                                      setError(err instanceof Error ? err.message : "Failed to save user assignment.")
-                                    } finally {
-                                      setSaving(false)
-                                    }
-                                  }}
-                                  disabled={saving}
-                                >
-                                  {saving ? "Saving..." : "Save Assignment"}
-                                </Button>
+                              <div className="text-[11px] text-slate-500">
+                                User assignment is saved when you click Save.
                               </div>
+                            </div>
                             </div>
                           ) : null}
 
-                          <div className="flex gap-2 pt-2 justify-end">
-                            <Button
-                              variant="outline"
-                              className="cursor-pointer" 
-                              onClick={() => {
+                        </div>
+
+                        <div className="mt-3 flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white pt-3">
+                          <Button
+                            variant="outline"
+                            className="cursor-pointer" 
+                            onClick={() => {
+                              setShowNodeEditor(false)
+                              setActiveCanvasNodeId("")
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            className="cursor-pointer" 
+                            onClick={async () => {
+                                setError(null)
+                                setSuccess(null)
+                                if (activeNodeKind) {
+                                  setSaving(true)
+                                  try {
+                                    await saveEditedSection(activeNodeKind)
+                                    setSuccess(`${activeNodeMeta?.title || "Section"} saved to database.`)
+                                  } catch (err: unknown) {
+                                    setError(err instanceof Error ? err.message : "Failed to save section.")
+                                    return
+                                  } finally {
+                                    setSaving(false)
+                                  }
+                                }
+
                                 if (activeCanvasNodeId) {
                                   setNodeOverrides((prev) => ({
                                     ...prev,
                                     [activeCanvasNodeId]: {
                                       ...(prev[activeCanvasNodeId] || {}),
-                                      designPreset: "card",
-                                      shape: "rounded",
-                                      tone: "slate",
-                                      style: styleFromDesignPreset("card"),
+                                      designPreset: designDraft,
+                                      shape: shapeDraft,
+                                      tone: toneDraft,
+                                      style: styleFromDesignPreset(designDraft),
                                     },
                                   }))
                                 }
                                 setShowNodeEditor(false)
                                 setActiveCanvasNodeId("")
                               }}
-                            >
-                              Cancel
-                            </Button>
-                            <Button
-                              className="cursor-pointer" 
-                              onClick={async () => {
-                                  setError(null)
-                                  setSuccess(null)
-                                  if (activeNodeKind) {
-                                    setSaving(true)
-                                    try {
-                                      await saveEditedSection(activeNodeKind)
-                                      setSuccess(`${activeNodeMeta?.title || "Section"} saved to database.`)
-                                    } catch (err: unknown) {
-                                      setError(err instanceof Error ? err.message : "Failed to save section.")
-                                      return
-                                    } finally {
-                                      setSaving(false)
-                                    }
-                                  }
-
-                                  if (activeCanvasNodeId) {
-                                    setNodeOverrides((prev) => ({
-                                      ...prev,
-                                      [activeCanvasNodeId]: {
-                                        ...(prev[activeCanvasNodeId] || {}),
-                                        designPreset: designDraft,
-                                        shape: shapeDraft,
-                                        tone: toneDraft,
-                                        style: styleFromDesignPreset(designDraft),
-                                      },
-                                    }))
-                                  }
-                                  setShowNodeEditor(false)
-                                  setActiveCanvasNodeId("")
-                                }}
-                              disabled={saving || loadingEditData}
-                            >
-                              Save
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              className="cursor-pointer"
-                              type="button"
-                              onClick={() => {
-                                removeSelectedNodeFromCanvas()
-                              }}
-                              disabled={saving || loadingEditData}
-                            >
-                              Remove Node
-                            </Button>
-                          </div>
+                            disabled={saving || loadingEditData}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            className="cursor-pointer"
+                            type="button"
+                            onClick={() => {
+                              removeSelectedNodeFromCanvas()
+                            }}
+                            disabled={saving || loadingEditData}
+                          >
+                            Remove Node
+                          </Button>
                         </div>
                       </div>
                     </div>
