@@ -58,6 +58,7 @@ import ReactFlow, {
   type EdgeProps,
   type Node as FlowNode,
   type NodeProps,
+  MiniMap,
 } from "reactflow"
 import "reactflow/dist/style.css"
 import { Cpu, MessageSquare, Play, Plus, Settings, Shield, Trash, Trash2, User, X } from "lucide-react"
@@ -1879,7 +1880,7 @@ export default function TenantAgentCreatePage() {
                           )}
                         </div>
 
-                        <div>
+                        {/* <div>
                           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Edit Existing Node</p>
                           {addedNodeTemplates.length === 0 ? (
                             <p className="text-xs text-slate-500">No nodes added yet.</p>
@@ -1909,7 +1910,7 @@ export default function TenantAgentCreatePage() {
                               ))}
                             </div>
                           )}
-                        </div>
+                        </div> */}
                       </div>
                     </div>
                   ) : null}
@@ -1963,6 +1964,7 @@ export default function TenantAgentCreatePage() {
                     }}
                   >
                     <Controls />
+                    <MiniMap />
                     <Background gap={20} size={1.1} color="#cbd5e1" />
                   </ReactFlow>
 
