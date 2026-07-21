@@ -42,6 +42,7 @@ import { Textarea } from "@/components/ui/textarea"
 import ReactFlow, {
   BaseEdge,
   Background,
+  type ConnectionLineComponentProps,
   Controls,
   EdgeLabelRenderer,
   NodeResizer,
@@ -59,7 +60,7 @@ import ReactFlow, {
   type NodeProps,
 } from "reactflow"
 import "reactflow/dist/style.css"
-import { Plus, Trash, Trash2, X } from "lucide-react"
+import { Cpu, MessageSquare, Play, Plus, Settings, Shield, Trash, Trash2, User, X } from "lucide-react"
 
 type TenantUser = {
   id: string
@@ -215,6 +216,50 @@ const EDGE_COLOR_BY_TONE: Record<NodeTone, string> = {
   lime: "#84cc16",
 }
 
+const ColoredConnectionLine = ({
+  fromX,
+  fromY,
+  toX,
+  toY,
+  fromNode,
+}: ConnectionLineComponentProps) => {
+  const sourceTone = (fromNode?.data?.tone as NodeTone | undefined) || "slate"
+  const sourceColor = EDGE_COLOR_BY_TONE[sourceTone]
+  const targetColor = sourceColor
+  const [path] = getStraightPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    targetX: toX,
+    targetY: toY,
+  })
+  const gradientId = `connection-preview-${String(sourceTone)}`
+
+  return (
+    <g>
+      <defs>
+        <linearGradient
+          id={gradientId}
+          gradientUnits="userSpaceOnUse"
+          x1={fromX}
+          y1={fromY}
+          x2={toX}
+          y2={toY}
+        >
+          <stop offset="0%" stopColor={sourceColor} />
+          <stop offset="100%" stopColor={targetColor} />
+        </linearGradient>
+      </defs>
+      <path
+        d={path}
+        fill="none"
+        stroke={`url(#${gradientId})`}
+        strokeWidth={3}
+        strokeLinecap="round"
+      />
+    </g>
+  )
+}
+
 const FLOW_NODE_LIBRARY: Array<{
   kind: ConfigNodeType
   title: string
@@ -272,6 +317,22 @@ const USERS_CACHE = new Map<string, TenantUser[]>()
 const USERS_IN_FLIGHT = new Map<string, Promise<TenantUser[]>>()
 
 const tenantCacheKey = (tenantId: string) => String(tenantId || "__default__")
+
+const extractBackendMessage = (payload: unknown): string => {
+  if (!payload || typeof payload !== "object") return ""
+
+  const direct = payload as { message?: unknown }
+  if (typeof direct.message === "string" && direct.message.trim()) {
+    return direct.message.trim()
+  }
+
+  const nested = payload as { data?: { message?: unknown } }
+  if (nested.data && typeof nested.data.message === "string" && nested.data.message.trim()) {
+    return nested.data.message.trim()
+  }
+
+  return ""
+}
 
 const formatUserName = (user: TenantUser): string => {
   const full = [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
@@ -1180,8 +1241,8 @@ export default function TenantAgentCreatePage() {
       ? selectedBlueprint?.defaults.allowedCollections
       : []
 
-  const ensureWorkingAgent = async (): Promise<string> => {
-    if (workingAgentId) return workingAgentId
+  const ensureWorkingAgent = async (): Promise<{ agentId: string; backendMessage: string }> => {
+    if (workingAgentId) return { agentId: workingAgentId, backendMessage: "" }
 
     const safeName = name.trim()
     if (!safeName) {
@@ -1209,16 +1270,19 @@ export default function TenantAgentCreatePage() {
     }
 
     setWorkingAgentId(createdId)
-    return createdId
+    return {
+      agentId: createdId,
+      backendMessage: extractBackendMessage(createResp),
+    }
   }
 
-  const saveCoreAgentConfig = async (agentId: string) => {
+  const saveCoreAgentConfig = async (agentId: string): Promise<string> => {
     const safeName = name.trim()
     if (!safeName) {
       throw new Error("Agent name is required.")
     }
 
-    await (dispatch(
+    const response = await (dispatch(
       updateTenantAgent({
         agentId,
         name: safeName,
@@ -1233,9 +1297,11 @@ export default function TenantAgentCreatePage() {
         allowedCollections: currentAllowedCollections(),
       }),
     ) as Promise<unknown>)
+
+    return extractBackendMessage(response)
   }
 
-  const saveAssignmentConfig = async (agentId: string) => {
+  const saveAssignmentConfig = async (agentId: string): Promise<string> => {
     const provider = aiProvider || "openai"
     const model = aiModel.trim() || AI_MODEL_OPTIONS[provider][0]
     const resolvedAuthMode: AuthMode = authMode || "tenant_shared_connection"
@@ -1258,7 +1324,7 @@ export default function TenantAgentCreatePage() {
       throw new Error("Max emails per run must be between 1 and 100.")
     }
 
-    await (dispatch(
+    const response = await (dispatch(
       upsertTenantAgentAssignment({
         agentId,
         aiProvider: provider,
@@ -1276,19 +1342,21 @@ export default function TenantAgentCreatePage() {
         meetingCreationMode,
       }),
     ) as Promise<unknown>)
+
+    return extractBackendMessage(response)
   }
 
-  const saveEditedSection = async (kind: ConfigNodeType) => {
-    const agentId = await ensureWorkingAgent()
+  const saveEditedSection = async (kind: ConfigNodeType): Promise<string> => {
+    const { agentId, backendMessage } = await ensureWorkingAgent()
 
     if (kind === "agent_details" || kind === "prompt" || kind === "service") {
-      await saveCoreAgentConfig(agentId)
-      return
+      const message = await saveCoreAgentConfig(agentId)
+      return message || backendMessage
     }
 
     if (kind === "runtime" || kind === "access") {
-      await saveAssignmentConfig(agentId)
-      return
+      const message = await saveAssignmentConfig(agentId)
+      return message || backendMessage
     }
 
     throw new Error("Unsupported node type for save.")
@@ -1364,10 +1432,15 @@ export default function TenantAgentCreatePage() {
 
     setSaving(true)
     try {
-      const agentId = await ensureWorkingAgent()
-      await saveCoreAgentConfig(agentId)
-      await saveAssignmentConfig(agentId)
-      setSuccess(workingAgentId ? "Agent updated and saved to database." : `${selectedBlueprint?.title || "Agent"} created and saved to database.`)
+      const ensured = await ensureWorkingAgent()
+      const coreMessage = await saveCoreAgentConfig(ensured.agentId)
+      const assignmentMessage = await saveAssignmentConfig(ensured.agentId)
+
+      const fallbackMessage = workingAgentId
+        ? "Agent updated and saved to database."
+        : `${selectedBlueprint?.title || "Agent"} created and saved to database.`
+
+      setSuccess(assignmentMessage || coreMessage || ensured.backendMessage || fallbackMessage)
     } catch (err: unknown) {
       let message = "Failed to create agent"
 
@@ -1405,6 +1478,19 @@ export default function TenantAgentCreatePage() {
     () => FLOW_NODE_LIBRARY.find((item) => item.kind === activeNodeKind),
     [activeNodeKind],
   )
+
+  const missingRequiredNodeKinds = useMemo(
+    () => REQUIRED_FLOW_NODES.filter((kind) => !flowNodeKinds.includes(kind)),
+    [flowNodeKinds],
+  )
+
+  const createButtonDisabled = useMemo(() => {
+    if (saving || loadingEditData) return true
+    if (!workingAgentId && !selectedBlueprint) return true
+    // For a new agent, enforce required canvas nodes before allowing create.
+    if (!workingAgentId && missingRequiredNodeKinds.length > 0) return true
+    return false
+  }, [saving, loadingEditData, workingAgentId, selectedBlueprint, missingRequiredNodeKinds])
 
   // Custom node renderer so each node has visible handles and can apply nodeOverrides
   const ConfigNode = ({ data, id, selected }: NodeProps<FlowNodeData>) => {
@@ -1445,6 +1531,26 @@ export default function TenantAgentCreatePage() {
     }
 
     const handleColor = EDGE_COLOR_BY_TONE[tone]
+
+    const getNodeIcon = () => {
+      if (data?.isStart) return <Play className="h-5 w-5" aria-hidden="true" />
+      if (data?.kind === "agent_details") return <User className="h-5 w-5" aria-hidden="true" />
+      if (data?.kind === "service") return <Settings className="h-5 w-5" aria-hidden="true" />
+      if (data?.kind === "runtime") return <Cpu className="h-5 w-5" aria-hidden="true" />
+      if (data?.kind === "prompt") return <MessageSquare className="h-5 w-5" aria-hidden="true" />
+      if (data?.kind === "access") return <Shield className="h-5 w-5" aria-hidden="true" />
+      return <Play className="h-5 w-5" aria-hidden="true" />
+    }
+
+    const getNodeIconBadgeClass = () => {
+      if (data?.isStart) return "bg-indigo-600"
+      if (data?.kind === "agent_details") return "bg-cyan-600"
+      if (data?.kind === "service") return "bg-emerald-600"
+      if (data?.kind === "runtime") return "bg-amber-600"
+      if (data?.kind === "prompt") return "bg-sky-600"
+      if (data?.kind === "access") return "bg-rose-600"
+      return "bg-slate-600"
+    }
 
     const requestNodeRemove = (nodeId: string) => {
       const resolvedKind =
@@ -1502,8 +1608,15 @@ export default function TenantAgentCreatePage() {
           />
         ) : null}
         <div className={shape === "diamond" ? "-rotate-45" : ""}>
-          <div className="text-base font-semibold leading-tight">{data?.label}</div>
-          <div className="mt-1 text-xs opacity-80">{data?.hint}</div>
+          <div
+            className={`flex text-base font-semibold leading-tight ${data?.isStart ? "items-center justify-center gap-3 text-center" : "items-center gap-2"}`}
+          >
+            <span className={`inline-flex items-center justify-center rounded-md p-1.5 text-white ${getNodeIconBadgeClass()}`}>
+              {getNodeIcon()}
+            </span>
+            <span>{data?.label}</span>
+          </div>
+          {!data?.isStart ? <div className="mt-1 text-xs opacity-80">{data?.hint}</div> : null}
         </div>
         <Handle
           type="source"
@@ -1657,7 +1770,7 @@ export default function TenantAgentCreatePage() {
               </Link>
               <Button
                 className="cursor-pointer bg-cyan-700 hover:bg-cyan-800"
-                disabled={(workingAgentId ? false : !selectedBlueprint) || saving || loadingEditData}
+                disabled={createButtonDisabled}
                 onClick={createAgent}
               >
                 {saving
@@ -1666,6 +1779,11 @@ export default function TenantAgentCreatePage() {
                     ? "Save Agent"
                     : `Create ${selectedBlueprint?.title || "Agent"}`}
               </Button>
+              {/* {!workingAgentId && selectedBlueprint && missingRequiredNodeKinds.length > 0 ? (
+                <p className="text-xs text-amber-700">
+                  Add required nodes first: {missingRequiredNodeKinds.map((kind) => FLOW_NODE_LIBRARY.find((item) => item.kind === kind)?.title || kind).join(", ")}
+                </p>
+              ) : null} */}
             </div>
           </div>
         </section>
@@ -1805,6 +1923,7 @@ export default function TenantAgentCreatePage() {
                   <ReactFlow
                     nodes={showNodes ? nodes : []}
                     edges={showNodes ? displayEdges : []}
+                    connectionLineComponent={ColoredConnectionLine}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
                     onNodeClick={(_, node) => {
@@ -1863,7 +1982,7 @@ export default function TenantAgentCreatePage() {
                           </div>
                         </div>
 
-                        <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                        <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 [scrollbar-width:auto] [scrollbar-color:#64748b_#e2e8f0] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500 [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-slate-200">
                           <div className="space-y-2">
                             <Label className="text-xs">Design</Label>
                             <Select
@@ -2156,8 +2275,8 @@ export default function TenantAgentCreatePage() {
                                 if (activeNodeKind) {
                                   setSaving(true)
                                   try {
-                                    await saveEditedSection(activeNodeKind)
-                                    setSuccess(`${activeNodeMeta?.title || "Section"} saved to database.`)
+                                    const backendMessage = await saveEditedSection(activeNodeKind)
+                                    setSuccess(backendMessage || `${activeNodeMeta?.title || "Section"} saved to database.`)
                                   } catch (err: unknown) {
                                     setError(err instanceof Error ? err.message : "Failed to save section.")
                                     return
