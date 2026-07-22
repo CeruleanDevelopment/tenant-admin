@@ -19,7 +19,7 @@ import {
 import { useSelector } from "react-redux"
 import type { RootState } from "../../redux/reducers"
 import { useDispatch } from "react-redux"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { signOut } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
 import { canAccessPath, resolveSessionType } from "@/utils/access-control"
@@ -53,7 +53,7 @@ const data: {
   tenantNavMain: NavItem[]
   userNavMain: NavItem[]
   navSecondary: NavItem[]
-  projects: NavItem[]
+  projects: { name: string; url: string; icon: React.ReactNode }[]
 } = {
   user: {
     name: "shadcn",
@@ -69,7 +69,6 @@ const data: {
         <Gauge
         />
       ),
-      isActive: true,
     },
     {
       title: "Users",
@@ -397,7 +396,6 @@ const data: {
         <LayoutGrid
         />
       ),
-      isActive: true,
       items: [
         { title: "Assigned Agents", url: "/users/agents" },
       ],
@@ -506,6 +504,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const dispatch = useDispatch<AppDispatch>()
   const reduxUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
+  // console.log( tenantProfile,"tenantProfile");  
+
   const sessionType = React.useMemo(
     () => resolveSessionType({ authUserId: reduxUser?.id, tenantId: tenantProfile?.id, role: reduxUser?.role }),
     [reduxUser?.id, reduxUser?.role, tenantProfile?.id],
@@ -532,15 +532,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <a href="#">
+              <Link href="/" prefetch={false}>
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                   <PieChart className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">Pulse UI</span>
-                  <span className="truncate text-xs">{tenantProfile?.companyName || "Next.js Admin"}</span>
+                  <span className="truncate text-xs">{tenantProfile?.companyName}</span>
                 </div>
-              </a>
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

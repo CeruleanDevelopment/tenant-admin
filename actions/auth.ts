@@ -44,10 +44,13 @@ type TenantMeUser = {
 }
 
 type TenantMeResponse = {
-  id: string
-  slug: string
-  companyName: string
-  status: string
+  id?: string
+  slug?: string
+  companyName?: string
+  company_name?: string
+  name?: string
+  tenantName?: string
+  status?: string
   apiKey?: string | null
   apiSecretHash?: string | null
   secretKey?: string | null
@@ -239,6 +242,26 @@ type TenantAgentChatHistoryMessage = {
   role: "user" | "assistant"
   content: string
   created_at: string
+}
+
+const unwrapEnvelope = <T>(input: unknown): T => {
+  if (!input || typeof input !== "object") {
+    return {} as T
+  }
+
+  const payload = input as Record<string, unknown>
+  const nested = payload.data
+  if (nested && typeof nested === "object") {
+    return nested as T
+  }
+
+  return payload as T
+}
+
+const resolveTenantCompanyName = (source: Record<string, unknown>): string => {
+  return String(
+    source.companyName || source.company_name || source.tenantName || source.name || "",
+  ).trim()
 }
 
 export type UserChatSessionItem = {
@@ -451,7 +474,16 @@ const persistSession = (session: AuthSession | null): void => {
 }
 
 const storeSession = (dispatch: any, data: AuthResponse): AuthSession => {
-  const session = normalizeSession(data)
+  const normalized = unwrapEnvelope<AuthResponse & { tenant?: Record<string, unknown> | null }>(data)
+  const session = normalizeSession({
+    ...normalized,
+    tenant: normalized?.tenant
+      ? {
+          ...(normalized.tenant as TenantProfile),
+          companyName: resolveTenantCompanyName(normalized.tenant),
+        }
+      : null,
+  })
   persistSession(session)
   dispatch(setAuthSession(session))
   if (session.tenant) {
@@ -816,7 +848,7 @@ export const refreshTenantSession =
 
     try {
       const resp = await axios.post("/tenant/auth/refresh", { refreshToken })
-      return storeSession(dispatch, resp.data as AuthResponse)
+      return storeSession(dispatch, unwrapEnvelope<AuthResponse>(resp.data) as AuthResponse)
     } catch {
       persistSession(null)
       dispatch(clearAuthSession())
@@ -841,16 +873,27 @@ export const hydrateTenantSession =
           "x-tenant-token": token,
         },
       })
-      const tenantProfile = (resp.data?.tenant || resp.data) as TenantMeResponse
+      const payload = unwrapEnvelope<Record<string, unknown>>(resp.data)
+      const tenantProfile = ((payload.tenant && typeof payload.tenant === "object")
+        ? payload.tenant
+        : payload) as TenantMeResponse
 
       const decoded = decodeJwtPayload(token)
       const decodedEmail = String(decoded?.email || "").trim().toLowerCase()
       const decodedUserId = String(decoded?.sub || "").trim()
 
+      const companyName = resolveTenantCompanyName(tenantProfile as Record<string, unknown>)
+      const tenantId = String(tenantProfile.id || "").trim()
+      const tenantSlug = String(tenantProfile.slug || "").trim()
+
+      if (!tenantId) {
+        throw new Error("Tenant profile payload did not include id")
+      }
+
       const profile: TenantProfile = {
-        id: tenantProfile.id,
-        slug: tenantProfile.slug,
-        companyName: tenantProfile.companyName || "",
+        id: tenantId,
+        slug: tenantSlug,
+        companyName,
         status: tenantProfile.status,
         apiKey: tenantProfile.apiKey || null,
         apiSecretHash: tenantProfile.apiSecretHash || null,
@@ -882,7 +925,7 @@ export const hydrateTenantSession =
           email: decodedEmail,
           name: String(decoded?.name || decodedEmail || "Tenant User"),
           role: String(decoded?.role || "member"),
-          tenantId: tenantProfile.id,
+          tenantId,
         },
         tenant: profile,
       }
@@ -891,7 +934,10 @@ export const hydrateTenantSession =
       dispatch(setAuthSession(session))
       dispatch(setTenantProfile(profile))
       return session
-    } catch {
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[auth] hydrateTenantSession failed", error)
+      }
       return null
     }
   }

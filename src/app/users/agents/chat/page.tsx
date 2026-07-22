@@ -751,7 +751,6 @@ export default function ChatPage() {
   const searchParams = useSearchParams()
   const initialAgentId = searchParams.get("agentId")?.trim() || ""
   const initialChatId = searchParams.get("chatId")?.trim() || ""
-
   const [agents, setAgents] = useState<TenantAgentCard[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
 
