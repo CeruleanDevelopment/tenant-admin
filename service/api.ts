@@ -277,6 +277,14 @@ api.interceptors.response.use(
     const isUserAuthCall = /^\/account\/(signin|signup|auth\/otp\/send|auth\/otp\/verify|auth\/refresh|auth\/logout)$/.test(requestUrl)
     const hasRetried = Boolean(error?.config?._tenantRetry)
 
+    const requestHeaders = (error?.config?.headers || {}) as Record<string, unknown>
+    const authHeader = String(requestHeaders.Authorization || requestHeaders.authorization || "").trim()
+    const requestBearerToken = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : ""
+    const cookieUserToken = String(loadUserAuthTokenCookie() || "").trim()
+    const cookieTenantToken = String(loadAuthTokenCookie() || "").trim()
+    const requestUsesUserToken = Boolean(requestBearerToken && cookieUserToken && requestBearerToken === cookieUserToken)
+    const requestUsesTenantToken = Boolean(requestBearerToken && cookieTenantToken && requestBearerToken === cookieTenantToken)
+
     if (status === 401 && !hasRetried) {
       if (isAccountRequest && !isUserAuthCall) {
         userRefreshRequestPromise = userRefreshRequestPromise || tryRefreshUserToken()
@@ -295,6 +303,22 @@ api.interceptors.response.use(
       }
 
       if (!isAccountRequest && !isTenantAuthCall) {
+        if (requestUsesUserToken || (!requestUsesTenantToken && cookieUserToken && !cookieTenantToken)) {
+          userRefreshRequestPromise = userRefreshRequestPromise || tryRefreshUserToken()
+          const refreshedUserToken = await userRefreshRequestPromise
+          userRefreshRequestPromise = null
+
+          if (refreshedUserToken) {
+            const retryConfig = error.config || {}
+            retryConfig._tenantRetry = true
+            retryConfig.headers = retryConfig.headers || {}
+            delete retryConfig.headers["x-tenant-token"]
+            retryConfig.headers.user = refreshedUserToken
+            retryConfig.headers.Authorization = `Bearer ${refreshedUserToken}`
+            return api(retryConfig)
+          }
+        }
+
         refreshRequestPromise = refreshRequestPromise || tryRefreshTenantToken()
         const refreshedToken = await refreshRequestPromise
         refreshRequestPromise = null
