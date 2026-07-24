@@ -517,6 +517,9 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
 }
 
 let fetchAssignedAgentsInFlight: Promise<unknown[]> | null = null
+const ASSIGNMENT_CACHE_TTL_MS = 15000
+const tenantAgentAssignmentInFlight = new Map<string, Promise<TenantAgentAssignmentView | null>>()
+const tenantAgentAssignmentCache = new Map<string, { value: TenantAgentAssignmentView | null; fetchedAt: number }>()
 
 export const fetchAssignedAgents = (): ThunkAction<Promise<unknown[]>, RootState, unknown, AnyAction> => {
   return async (): Promise<unknown[]> => {
@@ -1212,6 +1215,12 @@ export const upsertTenantAgentAssignment =
       { headers },
     )
 
+    const assignmentAgentId = String(input.agentId || "").trim()
+    if (assignmentAgentId) {
+      tenantAgentAssignmentCache.delete(assignmentAgentId)
+      tenantAgentAssignmentInFlight.delete(assignmentAgentId)
+    }
+
     return (resp?.data || {}) as { assignment?: unknown }
   }
 
@@ -1255,14 +1264,47 @@ export const fetchTenantAgents =
   }
 
 export const fetchTenantAgentAssignment =
-  (agentId: string): ThunkAction<Promise<TenantAgentAssignmentView | null>, RootState, unknown, AnyAction> =>
+  (
+    agentId: string,
+    options?: { force?: boolean },
+  ): ThunkAction<Promise<TenantAgentAssignmentView | null>, RootState, unknown, AnyAction> =>
   async () => {
+    const normalizedAgentId = String(agentId || "").trim()
+    if (!normalizedAgentId) return null
+
+    const shouldForce = Boolean(options?.force)
+    if (!shouldForce) {
+      const cached = tenantAgentAssignmentCache.get(normalizedAgentId)
+      if (cached && Date.now() - cached.fetchedAt < ASSIGNMENT_CACHE_TTL_MS) {
+        return cached.value
+      }
+
+      const inFlight = tenantAgentAssignmentInFlight.get(normalizedAgentId)
+      if (inFlight) {
+        return inFlight
+      }
+    }
+
     const token = loadAuthTokenCookie()
     const headers: Record<string, string> = {}
     if (token) headers["x-tenant-token"] = token
 
-    const resp = await axios.get(`/ai/agents/${encodeURIComponent(String(agentId || ""))}/assignments`, { headers })
-    return (resp?.data?.assignment || null) as TenantAgentAssignmentView | null
+    const request = (async (): Promise<TenantAgentAssignmentView | null> => {
+      try {
+        const resp = await axios.get(`/ai/agents/${encodeURIComponent(normalizedAgentId)}/assignments`, { headers })
+        const assignment = (resp?.data?.assignment || null) as TenantAgentAssignmentView | null
+        tenantAgentAssignmentCache.set(normalizedAgentId, {
+          value: assignment,
+          fetchedAt: Date.now(),
+        })
+        return assignment
+      } finally {
+        tenantAgentAssignmentInFlight.delete(normalizedAgentId)
+      }
+    })()
+
+    tenantAgentAssignmentInFlight.set(normalizedAgentId, request)
+    return request
   }
 
 export const startTenantGmailIntegration =

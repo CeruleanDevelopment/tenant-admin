@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useDispatch, useSelector } from "react-redux"
 import {
@@ -93,6 +93,7 @@ const detectAgentCategory = (input: {
 export default function TenantAgentsPage() {
   const dispatch = useDispatch<AppDispatch>()
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
+  const hasLoadedOnOpenRef = useRef(false)
 
   const [agents, setAgents] = useState<TenantAgentCard[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
@@ -104,8 +105,18 @@ export default function TenantAgentsPage() {
     try {
       const rows = await (dispatch(fetchTenantAgents()) as Promise<Record<string, unknown>[]>)
 
+      const uniqueRows = Array.from(
+        rows
+          .reduce((acc, row) => {
+            const id = String(row.id || "")
+            if (id && !acc.has(id)) acc.set(id, row)
+            return acc
+          }, new Map<string, Record<string, unknown>>())
+          .values(),
+      )
+
       const mapped: Array<TenantAgentCard | null> = await Promise.all(
-        rows.map(async (row: Record<string, unknown>) => {
+        uniqueRows.map(async (row: Record<string, unknown>) => {
           const id = String(row.id || "")
           if (!id) return null
 
@@ -171,10 +182,15 @@ export default function TenantAgentsPage() {
     }
   }, [dispatch])
 
-  useEffect(() => {
-    void loadAgents()
-    void loadBlueprints()
+  const loadInitialData = useCallback(async () => {
+    await Promise.all([loadAgents(), loadBlueprints()])
   }, [loadAgents, loadBlueprints])
+
+  useEffect(() => {
+    if (hasLoadedOnOpenRef.current) return
+    hasLoadedOnOpenRef.current = true
+    void loadInitialData()
+  }, [loadInitialData])
 
   const categoryCounts = useMemo(() => {
     return agents.reduce<Record<AgentCategory, number>>(
