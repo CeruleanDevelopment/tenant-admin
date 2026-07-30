@@ -7,9 +7,10 @@ import Step1 from "./steps/Step1"
 import Step2 from "./steps/Step2"
 import Step3 from "./steps/Step3"
 import Step4 from "./steps/Step4"
+import type { WizardForm } from "./WizardContext"
 
 export default function WizardPage() {
- const [form, setForm] = useState({
+ const [form, setForm] = useState<WizardForm>({
   // Step 1
   firstName: "",
   lastName: "",
@@ -42,7 +43,7 @@ export default function WizardPage() {
         <Step1 form={form} setForm={setForm} />
         <Step2 form={form} setForm={setForm} />
         <Step3 form={form} setForm={setForm} />
-        <Step4 form={form} />
+        <Step4 form={form} setForm={setForm} />
       </FormWizard>
     </WizardProvider>
   )
