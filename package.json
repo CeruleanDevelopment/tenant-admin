@@ -61,6 +61,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "typescript": "^7.0.2"
+    "typescript": "^6.0.3"
   }
 }
