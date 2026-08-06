@@ -35,7 +35,6 @@ import {
 
 import {
   deleteTenantAgentConversationUser,
-  ensureTenantChatSession,
   fetchAssignedAgents,
   fetchTenantAgentChatHistory,
   fetchUserChatSessions,
@@ -518,6 +517,40 @@ const formatTimeFromIso = (value?: string, timezone?: string): string => {
   return formatTimeByTimeZone(date, timezone)
 }
 
+const normalizeUserSessions = (rows: UserChatSession[]): UserChatSession[] => {
+  const latestById = new Map<string, UserChatSession>()
+
+  for (const row of rows) {
+    const id = String(row?.id || "").trim()
+    if (!id) continue
+
+    const current: UserChatSession = {
+      id,
+      message_id: row?.message_id ? String(row.message_id) : null,
+      created_at: String(row?.created_at || ""),
+      title: String(row?.title || "New chat"),
+    }
+
+    const existing = latestById.get(id)
+    if (!existing) {
+      latestById.set(id, current)
+      continue
+    }
+
+    const existingTime = parseDateAssumeUtcIfMissing(existing.created_at)?.getTime() ?? 0
+    const currentTime = parseDateAssumeUtcIfMissing(current.created_at)?.getTime() ?? 0
+    if (currentTime >= existingTime) {
+      latestById.set(id, current)
+    }
+  }
+
+  return Array.from(latestById.values()).sort((a, b) => {
+    const aTime = parseDateAssumeUtcIfMissing(a.created_at)?.getTime() ?? 0
+    const bTime = parseDateAssumeUtcIfMissing(b.created_at)?.getTime() ?? 0
+    return bTime - aTime
+  })
+}
+
 const mapHistoryRowsToMessages = (rows: Record<string, unknown>[], timezone?: string): ChatMessage[] =>
   rows.map((row, index) => ({
     id: String(row.id || `history-${Date.now()}-${index}`),
@@ -778,6 +811,7 @@ export default function ChatPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const loadedHistoryRef = useRef<Set<string>>(new Set())
   const activeChatIdRef = useRef("")
+  const selectedAgentIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
@@ -785,52 +819,65 @@ export default function ChatPage() {
   const messageListRef = useRef<HTMLDivElement | null>(null)
   const activeDisplayTimeZoneRef = useRef(DEFAULT_CHAT_TIMEZONE)
   const lastAgentsFetchAtRef = useRef(0)
-  const lastSessionsFetchAtRef = useRef(0)
   const agentsRequestInFlightRef = useRef(false)
-  const sessionsRequestInFlightRef = useRef(false)
-  const pendingSessionsForceRefreshRef = useRef(false)
+  const previousSelectedAgentIdRef = useRef("")
+  const lastSessionsFetchAtByAgentRef = useRef<Record<string, number>>({})
+  const sessionsRequestInFlightByAgentRef = useRef<Record<string, boolean>>({})
+  const pendingSessionsForceRefreshByAgentRef = useRef<Record<string, boolean>>({})
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
   const SESSIONS_REFRESH_COOLDOWN_MS = 30000
 
-  const loadUserSessions = useCallback(async (force = false, options?: { silent?: boolean }) => {
+  const loadUserSessions = useCallback(async (force = false, options?: { silent?: boolean; agentId?: string }) => {
     const silent = Boolean(options?.silent)
+    const agentId = String(options?.agentId || selectedAgentId || "").trim()
+    if (!agentId) {
+      setUserSessions([])
+      if (!silent) setLoadingUserSessions(false)
+      return
+    }
+
+    const agentKey = agentId
     const now = Date.now()
-    if (!force && now - lastSessionsFetchAtRef.current < SESSIONS_REFRESH_COOLDOWN_MS) return
-    if (sessionsRequestInFlightRef.current) {
+    const lastFetchAt = lastSessionsFetchAtByAgentRef.current[agentKey] || 0
+    if (!force && now - lastFetchAt < SESSIONS_REFRESH_COOLDOWN_MS) return
+
+    if (sessionsRequestInFlightByAgentRef.current[agentKey]) {
       // If a refresh is requested while one is in progress, queue one follow-up refresh.
       if (force) {
-        pendingSessionsForceRefreshRef.current = true
+        pendingSessionsForceRefreshByAgentRef.current[agentKey] = true
       }
       return
     }
 
-    sessionsRequestInFlightRef.current = true
-    lastSessionsFetchAtRef.current = now
+    sessionsRequestInFlightByAgentRef.current[agentKey] = true
+    lastSessionsFetchAtByAgentRef.current[agentKey] = now
     if (!silent) {
       setLoadingUserSessions(true)
     }
     try {
-      const rows = (await dispatch(fetchUserChatSessions() as any)) as UserChatSession[]
-      const mapped = Array.isArray(rows) ? rows : []
-      setUserSessions(mapped)
+      const rows = (await dispatch(fetchUserChatSessions({ agentId }) as any)) as UserChatSession[]
+      const mapped = Array.isArray(rows) ? normalizeUserSessions(rows) : []
+      if (selectedAgentIdRef.current === agentId) {
+        setUserSessions(mapped)
+      }
     } catch {
-      if (!silent) {
+      if (!silent && selectedAgentIdRef.current === agentId) {
         setUserSessions([])
       }
     } finally {
-      sessionsRequestInFlightRef.current = false
+      sessionsRequestInFlightByAgentRef.current[agentKey] = false
       if (!silent) {
         setLoadingUserSessions(false)
       }
 
-      if (pendingSessionsForceRefreshRef.current) {
-        pendingSessionsForceRefreshRef.current = false
-        void loadUserSessions(true, { silent: true })
+      if (pendingSessionsForceRefreshByAgentRef.current[agentKey]) {
+        pendingSessionsForceRefreshByAgentRef.current[agentKey] = false
+        void loadUserSessions(true, { silent: true, agentId })
       }
     }
-  }, [dispatch])
+  }, [dispatch, selectedAgentId])
 
   const loadAgents = useCallback(async (force = false) => {
     const now = Date.now()
@@ -910,14 +957,23 @@ export default function ChatPage() {
   }, [loadAgents])
 
   useEffect(() => {
-    void loadUserSessions()
-  }, [loadUserSessions])
+    if (!selectedAgentId) {
+      setUserSessions([])
+      return
+    }
+
+    void loadUserSessions(true, { agentId: selectedAgentId })
+  }, [loadUserSessions, selectedAgentId])
 
   useEffect(() => {
     if (initialAgentId && initialAgentId !== selectedAgentId) {
       setSelectedAgentId(initialAgentId)
     }
   }, [initialAgentId, selectedAgentId])
+
+  useEffect(() => {
+    selectedAgentIdRef.current = selectedAgentId
+  }, [selectedAgentId])
 
   useEffect(() => {
     if (selectedAgentId || agents.length === 0) {
@@ -928,10 +984,16 @@ export default function ChatPage() {
     router.replace(buildChatUrl(agents[0].id, chatIdByAgent[agents[0].id]))
   }, [agents, router, selectedAgentId])
 
-  const firstUserSessionId = String(userSessions[0]?.id || "").trim()
-
   useEffect(() => {
     if (!selectedAgentId) return
+
+    const hasAgentChanged = previousSelectedAgentIdRef.current !== selectedAgentId
+    previousSelectedAgentIdRef.current = selectedAgentId
+
+    // Reset visible sessions only when switching agents, not when chatId query param changes.
+    if (hasAgentChanged) {
+      setUserSessions([])
+    }
 
     setChatIdByAgent((prev) => {
       if (Object.prototype.hasOwnProperty.call(prev, selectedAgentId)) {
@@ -941,13 +1003,48 @@ export default function ChatPage() {
       const nextChatId =
         initialAgentId === selectedAgentId && initialChatId
           ? initialChatId
-          : firstUserSessionId
+          : ""
       return {
         ...prev,
         [selectedAgentId]: nextChatId,
       }
     })
-  }, [firstUserSessionId, initialAgentId, initialChatId, selectedAgentId])
+  }, [initialAgentId, initialChatId, selectedAgentId])
+
+  useEffect(() => {
+    if (!selectedAgentId) return
+    if (loadingUserSessions) return
+    if (String(chatIdByAgent[selectedAgentId] || "").trim()) return
+    if (userSessions.length === 0) return
+
+    const nextChatId = String(userSessions[0]?.id || "").trim()
+    if (!nextChatId) return
+
+    setChatIdByAgent((prev) => ({
+      ...prev,
+      [selectedAgentId]: nextChatId,
+    }))
+    router.replace(buildChatUrl(selectedAgentId, nextChatId))
+  }, [chatIdByAgent, loadingUserSessions, router, selectedAgentId, userSessions])
+
+  useEffect(() => {
+    if (!selectedAgentId) return
+    if (loadingUserSessions) return
+    if (userSessions.length > 0) return
+    if (String(chatIdByAgent[selectedAgentId] || "").trim()) return
+
+    const nextChatId = createChatId()
+    const nextBucketKey = buildMessageBucketKey(selectedAgentId, nextChatId)
+    setChatIdByAgent((prev) => ({
+      ...prev,
+      [selectedAgentId]: nextChatId,
+    }))
+    router.replace(buildChatUrl(selectedAgentId, nextChatId))
+    setMessagesByBucket((prev) => ({
+      ...prev,
+      [nextBucketKey]: prev[nextBucketKey] || getInitialMessages(),
+    }))
+  }, [chatIdByAgent, loadingUserSessions, router, selectedAgentId, userSessions.length])
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -988,22 +1085,6 @@ export default function ChatPage() {
     void (async () => {
       try {
         const bucketKey = buildMessageBucketKey(selectedAgentId, activeChatId)
-        // Ensure a server-side conversation exists for this chatId (best-effort)
-        try {
-          // import thunk dynamically to avoid top-level import cycles
-          const ensured = await dispatch((ensureTenantChatSession as any)({ agentId: selectedAgentId, chatId: activeChatId }))
-          const serverChatId = String(ensured?.chatId || "").trim()
-          if (serverChatId && serverChatId !== activeChatId) {
-            setChatIdByAgent((prev) => ({
-              ...prev,
-              [selectedAgentId]: serverChatId,
-            }))
-            router.replace(buildChatUrl(selectedAgentId, serverChatId))
-          }
-        } catch {
-          // ignore ensure errors and continue to fetch history
-        }
-
         const payload = await dispatch(
           fetchTenantAgentChatHistory({
             agentId: selectedAgentId,

@@ -1328,7 +1328,9 @@ export const disconnectTenantGmailIntegration =
     const resp = await axios.delete("/integrations/gmail", { headers })
     return (resp?.data || {}) as { disconnected?: boolean }
   }
-export const fetchUserChatSessions = (): ThunkAction<Promise<UserChatSessionItem[]>, RootState, unknown, AnyAction> => {
+export const fetchUserChatSessions = (
+  input?: { agentId?: string },
+): ThunkAction<Promise<UserChatSessionItem[]>, RootState, unknown, AnyAction> => {
   return async (): Promise<UserChatSessionItem[]> => {
     const headers: Record<string, string> = {}
     const userToken = String(loadUserAuthTokenCookie() || "").trim()
@@ -1337,7 +1339,11 @@ export const fetchUserChatSessions = (): ThunkAction<Promise<UserChatSessionItem
       headers.Authorization = `Bearer ${userToken}`
     }
 
-    const response = await axios.get("/api/chat/sessions", { headers })
+    const agentId = String(input?.agentId || "").trim()
+    const response = await axios.get("/api/chat/sessions", {
+      headers,
+      params: agentId ? { agentId } : undefined,
+    })
     const rows = Array.isArray(response?.data?.sessions) ? response.data.sessions : []
 
     return rows

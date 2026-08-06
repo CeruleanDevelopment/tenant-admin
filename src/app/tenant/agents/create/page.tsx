@@ -196,6 +196,45 @@ const CATEGORY_LABEL: Record<AgentCategory, string> = {
   general: "General",
 }
 
+const DEFAULT_INSTRUCTION_PROMPTS: Record<AgentCategory, string> = {
+  gmail:
+    "You are a tenant Gmail assistant. Analyze incoming emails, classify intent, and return clear next actions in strict JSON. Do not send, delete, or modify mailbox data unless explicitly requested.",
+  crm:
+    "You are a tenant CRM assistant. Extract customer updates, opportunities, and risks from inputs, then return structured CRM-ready summaries and action items.",
+  support:
+    "You are a tenant support assistant. Identify issue type, urgency, and recommended response steps. Return concise, structured outputs suitable for support workflows.",
+  calendar:
+    "You are a tenant calendar assistant. Propose meeting actions, schedule suggestions, and conflict notes with clear timezone-aware details.",
+  knowledge:
+    "You are a tenant knowledge assistant. Retrieve and summarize relevant internal knowledge, cite key facts, and highlight confidence or missing information.",
+  automation:
+    "You are a tenant automation assistant. Convert requests into safe, step-by-step automation actions with validations, assumptions, and expected outputs.",
+  general:
+    "You are a tenant AI assistant. Follow tenant policy, provide accurate structured responses, and ask for clarification when key inputs are missing.",
+}
+
+const resolveInstructionPrompt = (input: {
+  tenantPrompt: string
+  serviceType: AgentCategory
+  workflowType: WorkflowType
+}): { prompt: string; isDefault: boolean } => {
+  const tenantPrompt = String(input.tenantPrompt || "").trim()
+  if (tenantPrompt) {
+    return { prompt: tenantPrompt, isDefault: false }
+  }
+
+  const baseDefault =
+    DEFAULT_INSTRUCTION_PROMPTS[input.serviceType] || DEFAULT_INSTRUCTION_PROMPTS.general
+
+  return {
+    prompt: [
+      baseDefault,
+      `Workflow engine: ${input.workflowType}. Keep responses compatible with this execution path.`,
+    ].join("\n"),
+    isDefault: true,
+  }
+}
+
 const NODE_TONE_BY_KIND: Record<ConfigNodeType, NodeTone> = {
   agent_details: "cyan",
   service: "emerald",
@@ -403,9 +442,12 @@ const nodeLabelForKind = (
     }
   }
   if (kind === "prompt") {
+    const hasTenantPrompt = Boolean(values.systemPrompt.trim())
     return {
-      label: values.systemPrompt.trim() ? "Instruction prompt" : "Instruction prompt",
-      hint: values.systemPrompt.trim() ? "Prompt configured" : "Optional behavior instructions",
+      label: "Instruction prompt",
+      hint: hasTenantPrompt
+        ? "Tenant instruction prompt configured"
+        : `Using default ${CATEGORY_LABEL[values.serviceType]} instruction prompt`,
     }
   }
   if (kind === "access") {
@@ -1223,12 +1265,21 @@ export default function TenantAgentCreatePage() {
   )
 
   const buildFinalPrompt = () => {
+    const resolvedInstruction = resolveInstructionPrompt({
+      tenantPrompt: systemPrompt,
+      serviceType,
+      workflowType,
+    })
+
     const flowSummary = flowSummaryText(nodes, edges)
     return [
-      systemPrompt.trim() || "You are a read-only Gmail analysis assistant. Return strict JSON.",
+      resolvedInstruction.prompt,
       agentSkill.trim() ? `Agent Skill:\n${agentSkill.trim()}` : "",
       agentInstruction.trim() ? `User Instruction:\n${agentInstruction.trim()}` : "",
       "",
+      resolvedInstruction.isDefault
+        ? `Prompt Source: default (${CATEGORY_LABEL[serviceType]})`
+        : "Prompt Source: tenant",
       `Tenant scope: ${tenantId}`,
       `Execution: ${executionMode}${executionMode === "scheduled" ? ` at ${executionTime} ${timezone}` : ""}`,
       `Flow: ${flowSummary}`,
@@ -1985,66 +2036,6 @@ export default function TenantAgentCreatePage() {
                         </div>
 
                         <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 [scrollbar-width:auto] [scrollbar-color:#64748b_#e2e8f0] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500 [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-slate-200">
-                          <div className="space-y-2">
-                            <Label className="text-xs">Design</Label>
-                            <Select
-                              value={designDraft}
-                              onValueChange={(v) => setDesignDraft(v as NodeDesignPreset)}
-                            >
-                              <SelectTrigger className="h-8 w-36">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="card">Card</SelectItem>
-                                <SelectItem value="compact">Compact</SelectItem>
-                                <SelectItem value="outlined">Outlined</SelectItem>
-                                <SelectItem value="custom">Custom</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div className="space-y-1">
-                                <Label className="text-xs">Shape</Label>
-                                <Select
-                                  value={shapeDraft}
-                                  onValueChange={(v) => setShapeDraft(v as NodeShape)}
-                                >
-                                  <SelectTrigger className="h-8 w-full">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="rounded">Rounded</SelectItem>
-                                    <SelectItem value="pill">Pill</SelectItem>
-                                    <SelectItem value="square">Square</SelectItem>
-                                    <SelectItem value="diamond">Diamond</SelectItem>
-                                    <SelectItem value="circle">Circle</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Tone</Label>
-                                <Select
-                                  value={toneDraft}
-                                  onValueChange={(v) => setToneDraft(v as NodeTone)}
-                                >
-                                  <SelectTrigger className="h-8 w-full">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="slate">Slate</SelectItem>
-                                    <SelectItem value="cyan">Cyan</SelectItem>
-                                    <SelectItem value="emerald">Emerald</SelectItem>
-                                    <SelectItem value="amber">Amber</SelectItem>
-                                    <SelectItem value="rose">Rose</SelectItem>
-                                    <SelectItem value="indigo">Indigo</SelectItem>
-                                    <SelectItem value="violet">Violet</SelectItem>
-                                    <SelectItem value="teal">Teal</SelectItem>
-                                    <SelectItem value="orange">Orange</SelectItem>
-                                    <SelectItem value="lime">Lime</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                          </div>
                           {activeNodeKind === "agent_details" ? (
                             <div className="space-y-2">
                               <Label className="text-xs">Name</Label>
@@ -2065,7 +2056,7 @@ export default function TenantAgentCreatePage() {
                                 <SelectTrigger className="h-8">
                                   <SelectValue />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-220">
                                   <SelectItem value="gmail">Gmail</SelectItem>
                                   <SelectItem value="crm">CRM</SelectItem>
                                   <SelectItem value="support">Support</SelectItem>
@@ -2084,7 +2075,7 @@ export default function TenantAgentCreatePage() {
                                 <SelectTrigger className="h-8">
                                   <SelectValue />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-220">
                                   <SelectItem value="direct">Direct</SelectItem>
                                   <SelectItem value="mastra">Mastra</SelectItem>
                                   <SelectItem value="langchain">LangChain</SelectItem>
@@ -2101,7 +2092,7 @@ export default function TenantAgentCreatePage() {
                                 <SelectTrigger className="h-8">
                                   <SelectValue placeholder="Select provider" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-220">
                                   <SelectItem value="none">None</SelectItem>
                                   <SelectItem value="openai">OpenAI</SelectItem>
                                   <SelectItem value="openrouter">OpenRouter</SelectItem>
@@ -2113,7 +2104,7 @@ export default function TenantAgentCreatePage() {
                                 <SelectTrigger className="h-8">
                                   <SelectValue placeholder="Select model" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-220">
                                   {(aiProvider ? AI_MODEL_OPTIONS[aiProvider] : []).map((m) => (
                                     <SelectItem key={m} value={m}>{m}</SelectItem>
                                   ))}
@@ -2126,7 +2117,7 @@ export default function TenantAgentCreatePage() {
                                 <SelectTrigger className="h-8">
                                   <SelectValue placeholder="Select auth mode" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-220">
                                   <SelectItem value="none">None</SelectItem>
                                   <SelectItem value="tenant_shared_connection">Tenant shared</SelectItem>
                                   <SelectItem value="user_personal_connection">User personal</SelectItem>
@@ -2139,7 +2130,7 @@ export default function TenantAgentCreatePage() {
                                 <SelectTrigger className="h-8">
                                   <SelectValue placeholder="Select execution" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-220">
                                   <SelectItem value="manual">Manual</SelectItem>
                                   <SelectItem value="scheduled">Scheduled</SelectItem>
                                 </SelectContent>
@@ -2154,7 +2145,7 @@ export default function TenantAgentCreatePage() {
                                     <SelectTrigger className="h-8">
                                       <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent>
+                                    <SelectContent className="z-220">
                                       {TIMEZONE_OPTIONS.map((tz) => (
                                         <SelectItem key={tz} value={tz}>{tz}</SelectItem>
                                       ))}
@@ -2174,6 +2165,11 @@ export default function TenantAgentCreatePage() {
                           {activeNodeKind === "prompt" ? (
                             <div className="space-y-2">
                               <Label className="text-xs">Instruction Prompt</Label>
+                              {!systemPrompt.trim() ? (
+                                <p className="text-[11px] text-amber-700">
+                                  Tenant prompt is empty. A default {CATEGORY_LABEL[serviceType]} prompt will be applied automatically.
+                                </p>
+                              ) : null}
                               <Textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} />
                               <Label className="text-xs">Agent Skill</Label>
                               <Textarea value={agentSkill} onChange={(e) => setAgentSkill(e.target.value)} />
@@ -2206,7 +2202,7 @@ export default function TenantAgentCreatePage() {
                                   <SelectTrigger className="h-8">
                                     <SelectValue />
                                   </SelectTrigger>
-                                  <SelectContent>
+                                  <SelectContent className="z-220">
                                     <SelectItem value="auto">Auto create and send</SelectItem>
                                     <SelectItem value="confirm_first">Confirm first</SelectItem>
                                   </SelectContent>
