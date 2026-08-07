@@ -92,6 +92,18 @@ type UserChatSession = {
   title: string
 }
 
+const sessionRouteChatId = (session: UserChatSession): string => {
+  const messageId = String(session?.message_id || "").trim()
+  if (messageId) return messageId
+  return String(session?.id || "").trim()
+}
+
+const doesSessionMatchChatId = (session: UserChatSession, chatId: string): boolean => {
+  const target = String(chatId || "").trim()
+  if (!target) return false
+  return sessionRouteChatId(session) === target || String(session?.id || "").trim() === target
+}
+
 type ChatAttachment = {
   id: string
   file: File
@@ -824,6 +836,7 @@ export default function ChatPage() {
   const lastSessionsFetchAtByAgentRef = useRef<Record<string, number>>({})
   const sessionsRequestInFlightByAgentRef = useRef<Record<string, boolean>>({})
   const pendingSessionsForceRefreshByAgentRef = useRef<Record<string, boolean>>({})
+  const hasLoadedSessionsOnceByAgentRef = useRef<Record<string, boolean>>({})
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
@@ -868,6 +881,7 @@ export default function ChatPage() {
       }
     } finally {
       sessionsRequestInFlightByAgentRef.current[agentKey] = false
+      hasLoadedSessionsOnceByAgentRef.current[agentKey] = true
       if (!silent) {
         setLoadingUserSessions(false)
       }
@@ -971,6 +985,28 @@ export default function ChatPage() {
     }
   }, [initialAgentId, selectedAgentId])
 
+  // Keep local selected agent/chat in sync with URL so refresh/back-forward never drifts.
+  useEffect(() => {
+    const urlAgentId = String(initialAgentId || "").trim()
+    const urlChatId = String(initialChatId || "").trim()
+    if (!urlAgentId) return
+
+    if (urlAgentId !== selectedAgentId) {
+      setSelectedAgentId(urlAgentId)
+    }
+
+    if (!urlChatId) return
+
+    setChatIdByAgent((prev) => {
+      const current = String(prev[urlAgentId] || "").trim()
+      if (current === urlChatId) return prev
+      return {
+        ...prev,
+        [urlAgentId]: urlChatId,
+      }
+    })
+  }, [initialAgentId, initialChatId, selectedAgentId])
+
   useEffect(() => {
     selectedAgentIdRef.current = selectedAgentId
   }, [selectedAgentId])
@@ -1017,7 +1053,7 @@ export default function ChatPage() {
     if (String(chatIdByAgent[selectedAgentId] || "").trim()) return
     if (userSessions.length === 0) return
 
-    const nextChatId = String(userSessions[0]?.id || "").trim()
+    const nextChatId = sessionRouteChatId(userSessions[0])
     if (!nextChatId) return
 
     setChatIdByAgent((prev) => ({
@@ -1030,6 +1066,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!selectedAgentId) return
     if (loadingUserSessions) return
+    if (!hasLoadedSessionsOnceByAgentRef.current[selectedAgentId]) return
     if (userSessions.length > 0) return
     if (String(chatIdByAgent[selectedAgentId] || "").trim()) return
 
@@ -1139,7 +1176,7 @@ export default function ChatPage() {
       return
     }
 
-    const matched = userSessions.find((session) => session.id === activeChatId)
+    const matched = userSessions.find((session) => doesSessionMatchChatId(session, activeChatId))
     setConversationTitle(matched ? String(matched.title || "") : null)
   }, [activeChatId, userSessions])
 
@@ -1382,8 +1419,8 @@ export default function ChatPage() {
 
       const remainingSessions = userSessions.filter((item) => item.id !== session.id)
 
-      if (activeChatId === session.id) {
-        const nextChatId = String(remainingSessions[0]?.id || "").trim()
+      if (doesSessionMatchChatId(session, activeChatId)) {
+        const nextChatId = remainingSessions.length ? sessionRouteChatId(remainingSessions[0]) : ""
         setChatIdByAgent((prev) => ({
           ...prev,
           [selectedAgentId]: nextChatId,
@@ -1423,13 +1460,15 @@ export default function ChatPage() {
     setSessionToDelete(null)
   }
 
-  const openSession = useCallback((sessionId: string) => {
+  const openSession = useCallback((chatId: string) => {
     if (!selectedAgentId) return
+    const nextChatId = String(chatId || "").trim()
+    if (!nextChatId) return
     setChatIdByAgent((prev) => ({
       ...prev,
-      [selectedAgentId]: sessionId,
+      [selectedAgentId]: nextChatId,
     }))
-    router.replace(buildChatUrl(selectedAgentId, sessionId))
+    router.replace(buildChatUrl(selectedAgentId, nextChatId))
     setOpenSessionMenuId(null)
   }, [router, selectedAgentId])
 
@@ -1711,7 +1750,7 @@ export default function ChatPage() {
 
                 <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-1">
                   {userSessions.map((session) => {
-                    const isActiveSession = activeChatId === session.id
+                    const isActiveSession = doesSessionMatchChatId(session, activeChatId)
                     const canOpenSession = Boolean(selectedAgentId)
                     const isEditingSession = editingSessionId === session.id
                     const sessionTime = formatTimeFromIso(session.created_at, activeDisplayTimeZone)
@@ -1753,7 +1792,7 @@ export default function ChatPage() {
                             className={`min-w-0 flex-1 text-left ${canOpenSession ? "cursor-pointer" : "cursor-not-allowed"}`}
                             onClick={() => {
                               if (!canOpenSession) return
-                              openSession(session.id)
+                              openSession(sessionRouteChatId(session))
                             }}
                           >
                             <p className="truncate text-sm font-medium leading-5">{session.title || "New chat"}</p>
