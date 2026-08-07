@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
 import {
   createTenantAgent,
@@ -172,13 +172,13 @@ const DeletableEdge = ({
 
 const styleFromDesignPreset = (preset: NodeDesignPreset): CSSProperties | undefined => {
   if (preset === "card") {
-    return { borderRadius: 14, border: "1px solid #cbd5e1", background: "#ffffff", width: 220 }
+    return { borderRadius: 14, width: 220 }
   }
   if (preset === "compact") {
-    return { borderRadius: 8, border: "1px solid #cbd5e1", background: "#ffffff", width: 160 }
+    return { borderRadius: 8, width: 160 }
   }
   if (preset === "outlined") {
-    return { borderRadius: 14, border: "2px dashed #94a3b8", background: "#f8fafc", width: 220 }
+    return { borderRadius: 14, width: 220, borderStyle: "dashed", borderWidth: 2 }
   }
   return undefined
 }
@@ -534,6 +534,8 @@ const buildCanvasGraph = (input: {
 
 export default function TenantAgentCreatePage() {
   const dispatch = useDispatch<AppDispatch>()
+  const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
 
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
@@ -542,6 +544,7 @@ export default function TenantAgentCreatePage() {
   const editingAgentId = String(searchParams.get("agentId") || "").trim()
   const isEditMode = Boolean(editingAgentId)
   const [workingAgentId, setWorkingAgentId] = useState<string>(editingAgentId)
+  const workingAgentIdRef = useRef<string>(editingAgentId)
   const [blueprints, setBlueprints] = useState<TenantAgentBlueprint[]>([])
   const [loadingBlueprints, setLoadingBlueprints] = useState(false)
   const [selectedBlueprintId, setSelectedBlueprintId] = useState<string>(initialBlueprintId)
@@ -585,6 +588,7 @@ export default function TenantAgentCreatePage() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const nodesRef = useRef<FlowNode<FlowNodeData>[]>([])
 
   const [selectedEdgeType, setSelectedEdgeType] = useState<string>("straight")
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, NodeOverride>>({})
@@ -660,7 +664,26 @@ export default function TenantAgentCreatePage() {
 
   useEffect(() => {
     setWorkingAgentId(editingAgentId)
+    workingAgentIdRef.current = editingAgentId
   }, [editingAgentId])
+
+  useEffect(() => {
+    workingAgentIdRef.current = workingAgentId
+  }, [workingAgentId])
+
+  const syncAgentIdInUrl = useCallback((agentId: string) => {
+    const normalizedAgentId = String(agentId || "").trim()
+    if (!normalizedAgentId) return
+
+    const currentPath = String(pathname || "/tenant/agents/create")
+    const queryText = searchParams ? searchParams.toString() : ""
+    const params = new URLSearchParams(queryText)
+    params.set("agentId", normalizedAgentId)
+
+    const nextQuery = params.toString()
+    const nextUrl = nextQuery ? `${currentPath}?${nextQuery}` : currentPath
+    router.replace(nextUrl, { scroll: false })
+  }, [pathname, router, searchParams])
 
   useEffect(() => {
     if (isEditMode) return
@@ -1294,7 +1317,10 @@ export default function TenantAgentCreatePage() {
       : []
 
   const ensureWorkingAgent = async (): Promise<{ agentId: string; backendMessage: string }> => {
-    if (workingAgentId) return { agentId: workingAgentId, backendMessage: "" }
+    const existingWorkingAgentId = String(workingAgentIdRef.current || workingAgentId || "").trim()
+    if (existingWorkingAgentId) {
+      return { agentId: existingWorkingAgentId, backendMessage: "" }
+    }
 
     const safeName = name.trim()
     if (!safeName) {
@@ -1322,6 +1348,8 @@ export default function TenantAgentCreatePage() {
     }
 
     setWorkingAgentId(createdId)
+    workingAgentIdRef.current = createdId
+    syncAgentIdInUrl(createdId)
     return {
       agentId: createdId,
       backendMessage: extractBackendMessage(createResp),
@@ -1396,22 +1424,6 @@ export default function TenantAgentCreatePage() {
     ) as Promise<unknown>)
 
     return extractBackendMessage(response)
-  }
-
-  const saveEditedSection = async (kind: ConfigNodeType): Promise<string> => {
-    const { agentId, backendMessage } = await ensureWorkingAgent()
-
-    if (kind === "agent_details" || kind === "prompt" || kind === "service") {
-      const message = await saveCoreAgentConfig(agentId)
-      return message || backendMessage
-    }
-
-    if (kind === "runtime" || kind === "access") {
-      const message = await saveAssignmentConfig(agentId)
-      return message || backendMessage
-    }
-
-    throw new Error("Unsupported node type for save.")
   }
 
   const createAgent = async () => {
@@ -1720,12 +1732,18 @@ export default function TenantAgentCreatePage() {
   const [showNodes, setShowNodes] = useState(false)
 
   useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+
+  useEffect(() => {
     if (!showNodeEditor || !activeCanvasNodeId) return
 
     const override = nodeOverrides[activeCanvasNodeId]
+    const activeNode = nodesRef.current.find((node) => node.id === activeCanvasNodeId)
+    const activeNodeData = activeNode?.data as FlowNodeData | undefined
     setDesignDraft((override?.designPreset || "card") as NodeDesignPreset)
-    setShapeDraft((override?.shape || "rounded") as NodeShape)
-    setToneDraft((override?.tone || "slate") as NodeTone)
+    setShapeDraft((override?.shape || activeNodeData?.shape || "rounded") as NodeShape)
+    setToneDraft((override?.tone || activeNodeData?.tone || "slate") as NodeTone)
   }, [showNodeEditor, activeCanvasNodeId, nodeOverrides])
 
   useEffect(() => {
@@ -1749,7 +1767,7 @@ export default function TenantAgentCreatePage() {
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{workingAgentId ? "Edit Agent Studio" : "Create Agent Studio"}</h1>
                 <p className="mt-1 text-sm text-slate-600">
                   {workingAgentId
-                    ? "Edit section-wise settings and save each section directly to database."
+                    ? "Edit nodes in canvas. Use Save Agent (top-right) to persist all changes to database."
                     : "Build your agent in a canvas-first workflow. Add required nodes, configure settings, then publish."}
                 </p>
               </div>
@@ -2027,7 +2045,7 @@ export default function TenantAgentCreatePage() {
                             <h4 className="text-sm font-semibold">Edit: {activeNodeMeta?.title}</h4>
                             <p className="text-xs text-slate-500">
                               Edit settings for the selected node.
-                              {" Save will persist this node to database."}
+                              {" Save updates this node in canvas only. Use top-right Save Agent to persist to database."}
                             </p>
                           </div>
                           <div>
@@ -2267,21 +2285,9 @@ export default function TenantAgentCreatePage() {
                           </Button>
                           <Button
                             className="cursor-pointer" 
-                            onClick={async () => {
+                            onClick={() => {
                                 setError(null)
                                 setSuccess(null)
-                                if (activeNodeKind) {
-                                  setSaving(true)
-                                  try {
-                                    const backendMessage = await saveEditedSection(activeNodeKind)
-                                    setSuccess(backendMessage || `${activeNodeMeta?.title || "Section"} saved to database.`)
-                                  } catch (err: unknown) {
-                                    setError(err instanceof Error ? err.message : "Failed to save section.")
-                                    return
-                                  } finally {
-                                    setSaving(false)
-                                  }
-                                }
 
                                 if (activeCanvasNodeId) {
                                   setNodeOverrides((prev) => ({
@@ -2295,6 +2301,7 @@ export default function TenantAgentCreatePage() {
                                     },
                                   }))
                                 }
+                                setSuccess(`${activeNodeMeta?.title || "Section"} updated in canvas. Click Save Agent to persist.`)
                                 setShowNodeEditor(false)
                                 setActiveCanvasNodeId("")
                               }}

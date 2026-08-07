@@ -1342,7 +1342,7 @@ export const fetchUserChatSessions = (
     const agentId = String(input?.agentId || "").trim()
     const response = await axios.get("/api/chat/sessions", {
       headers,
-      params: agentId ? { agentId } : undefined,
+      params: agentId ? { agentId, limit: 200 } : { limit: 200 },
     })
     const rows = Array.isArray(response?.data?.sessions) ? response.data.sessions : []
 

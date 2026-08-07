@@ -798,6 +798,11 @@ export default function ChatPage() {
 
   const loadUserSessions = useCallback(async (force = false, options?: { silent?: boolean }) => {
     const silent = Boolean(options?.silent)
+    const normalizedAgentId = String(selectedAgentId || "").trim()
+    if (!normalizedAgentId) {
+      setUserSessions([])
+      return
+    }
     const now = Date.now()
     if (!force && now - lastSessionsFetchAtRef.current < SESSIONS_REFRESH_COOLDOWN_MS) return
     if (sessionsRequestInFlightRef.current) {
@@ -814,7 +819,7 @@ export default function ChatPage() {
       setLoadingUserSessions(true)
     }
     try {
-      const rows = (await dispatch(fetchUserChatSessions() as any)) as UserChatSession[]
+      const rows = (await dispatch(fetchUserChatSessions({ agentId: normalizedAgentId }) as any)) as UserChatSession[]
       const mapped = Array.isArray(rows) ? rows : []
       setUserSessions(mapped)
     } catch {
@@ -832,7 +837,7 @@ export default function ChatPage() {
         void loadUserSessions(true, { silent: true })
       }
     }
-  }, [dispatch])
+  }, [dispatch, selectedAgentId])
 
   const loadAgents = useCallback(async (force = false) => {
     const now = Date.now()
