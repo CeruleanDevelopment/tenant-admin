@@ -2,10 +2,12 @@
 
 import * as React from "react"
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useDispatch } from "react-redux"
 import type { AppDispatch } from "../../../../../redux/store"
 import { fetchTenantUsers, setTenantUserActiveStatus } from "../../../../../actions/auth"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
 	Table,
 	TableBody,
@@ -52,6 +54,7 @@ type UserTableRow = {
 const PAGE_SIZE = 10
 
 export default function ViewUsersPage() {
+	const router = useRouter()
 	const dispatch = useDispatch<AppDispatch>()
 	const [users, setUsers] = useState<Array<UserRow>>([])
 	const [loading, setLoading] = useState(false)
@@ -276,7 +279,16 @@ export default function ViewUsersPage() {
 														</TableCell>
 														<TableCell>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}</TableCell>
 														<TableCell className="w-55 align-middle text-right">
-															<div className="ml-auto flex h-9 min-w-50 items-center justify-end gap-2 whitespace-nowrap">
+															<div className="ml-auto flex h-8 min-w-50 items-center justify-end gap-2 whitespace-nowrap">
+																<Button
+																	type="button"
+																	size="sm"
+																	variant="outline"
+																	className="h-8 w-20 px-0 text-center cursor-pointer"
+																	onClick={() => router.push(`/tenant/users/edit?userId=${encodeURIComponent(String(user.id || ""))}`)}
+																>
+																	<span className="block w-full text-center leading-none">Edit</span>
+																</Button>
 																<Switch
 																	size="default"
 																	checked={Boolean(user.isActive)}

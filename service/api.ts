@@ -31,6 +31,19 @@ const api = axios.create({
   timeout: 30000,
 })
 
+const toLoopbackApiUrl = (value: string): string => {
+  try {
+    const url = new URL(String(value || "").trim())
+    if (url.hostname !== "localhost") return ""
+    url.hostname = "127.0.0.1"
+    return url.toString().replace(/\/$/, "")
+  } catch {
+    return ""
+  }
+}
+
+const LOOPBACK_API_URL = toLoopbackApiUrl(API_URL)
+
 const defaultSuccessMessage = (method?: string): string => {
   const m = String(method || "GET").toUpperCase()
   if (m === "POST") return "Created successfully."
@@ -270,6 +283,21 @@ api.interceptors.response.use(
     return response
   },
   async (error: any) => {
+    const shouldRetryWithLoopback =
+      axios.isAxiosError(error) &&
+      !error.response &&
+      typeof window !== "undefined" &&
+      Boolean(LOOPBACK_API_URL) &&
+      !Boolean(error?.config?._loopbackRetry) &&
+      String(error?.config?.baseURL || API_URL).includes("localhost")
+
+    if (shouldRetryWithLoopback) {
+      const retryConfig = error.config || {}
+      retryConfig._loopbackRetry = true
+      retryConfig.baseURL = LOOPBACK_API_URL
+      return api(retryConfig)
+    }
+
     const status = error?.response?.status
     const requestUrl = error?.config?.url || ""
     const isAccountRequest = String(requestUrl).startsWith("/account/")

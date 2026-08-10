@@ -9,9 +9,7 @@ import {
   createTenantAgent,
   fetchTenantAgent,
   fetchTenantAgentAssignment,
-  fetchTenantAgentBlueprints,
   fetchTenantUsers,
-  type TenantAgentBlueprint,
   updateTenantAgent,
   upsertTenantAgentAssignment,
 } from "../../../../../actions/auth"
@@ -61,7 +59,7 @@ import ReactFlow, {
   MiniMap,
 } from "reactflow"
 import "reactflow/dist/style.css"
-import { Cpu, MessageSquare, Play, Plus, Settings, Shield, Trash, Trash2, User, X } from "lucide-react"
+import { Cpu, MessageSquare, Play, Plus, Settings, Shield, Trash, Trash2, X } from "lucide-react"
 
 type TenantUser = {
   id: string
@@ -75,7 +73,6 @@ type AiProvider = "" | "openai" | "openrouter"
 type AuthMode = "" | "tenant_shared_connection" | "user_personal_connection"
 type ExecutionMode = "" | "manual" | "scheduled"
 type ConfigNodeType =
-  | "agent_details"
   | "service"
   | "runtime"
   | "prompt"
@@ -184,7 +181,7 @@ const styleFromDesignPreset = (preset: NodeDesignPreset): CSSProperties | undefi
 }
 
 type AgentCategory = "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
-type WorkflowType = "direct" | "mastra" | "langchain"
+type WorkflowType = "mastra"
 
 const CATEGORY_LABEL: Record<AgentCategory, string> = {
   gmail: "Gmail",
@@ -216,7 +213,6 @@ const DEFAULT_INSTRUCTION_PROMPTS: Record<AgentCategory, string> = {
 const resolveInstructionPrompt = (input: {
   tenantPrompt: string
   serviceType: AgentCategory
-  workflowType: WorkflowType
 }): { prompt: string; isDefault: boolean } => {
   const tenantPrompt = String(input.tenantPrompt || "").trim()
   if (tenantPrompt) {
@@ -227,16 +223,12 @@ const resolveInstructionPrompt = (input: {
     DEFAULT_INSTRUCTION_PROMPTS[input.serviceType] || DEFAULT_INSTRUCTION_PROMPTS.general
 
   return {
-    prompt: [
-      baseDefault,
-      `Workflow engine: ${input.workflowType}. Keep responses compatible with this execution path.`,
-    ].join("\n"),
+    prompt: baseDefault,
     isDefault: true,
   }
 }
 
 const NODE_TONE_BY_KIND: Record<ConfigNodeType, NodeTone> = {
-  agent_details: "cyan",
   service: "emerald",
   runtime: "amber",
   prompt: "cyan",
@@ -307,20 +299,8 @@ const FLOW_NODE_LIBRARY: Array<{
   required?: boolean
 }> = [
   {
-    kind: "agent_details",
-    title: "Agent Details",
-    description: "Name, short description, and active status.",
-    required: true,
-  },
-  {
-    kind: "service",
-    title: "Service Type",
-    description: "Choose service domain and workflow engine.",
-    required: true,
-  },
-  {
     kind: "runtime",
-    title: "Runtime Config",
+    title: "Agent Config",
     description: "AI model, auth mode, execution schedule, and run limits.",
     required: true,
   },
@@ -338,8 +318,6 @@ const FLOW_NODE_LIBRARY: Array<{
 ]
 
 const REQUIRED_FLOW_NODES: ConfigNodeType[] = [
-  "agent_details",
-  "service",
   "runtime",
   "access",
 ]
@@ -351,8 +329,6 @@ const AI_MODEL_OPTIONS: Record<"openai" | "openrouter", string[]> = {
 
 const TIMEZONE_OPTIONS = ["UTC", "Asia/Kolkata", "America/New_York", "Europe/London"]
 
-const BLUEPRINTS_CACHE = new Map<string, TenantAgentBlueprint[]>()
-const BLUEPRINTS_IN_FLIGHT = new Map<string, Promise<TenantAgentBlueprint[]>>()
 const USERS_CACHE = new Map<string, TenantUser[]>()
 const USERS_IN_FLIGHT = new Map<string, Promise<TenantUser[]>>()
 
@@ -381,7 +357,7 @@ const formatUserName = (user: TenantUser): string => {
 
 const flowSummaryText = (nodes: FlowNode<FlowNodeData>[], edges: Edge[]): string => {
   if (!nodes.length) {
-    return "Canvas is blank. Select an agent blueprint to start building the flow."
+    return "Canvas is blank. Add nodes to start building the flow."
   }
 
   const byId = new Map(
@@ -395,9 +371,7 @@ const nodeLabelForKind = (
   kind: ConfigNodeType,
   values: {
     name: string
-    description: string
     serviceType: AgentCategory
-    workflowType: WorkflowType
     aiProvider: AiProvider
     aiModel: string
     authMode: AuthMode
@@ -409,36 +383,22 @@ const nodeLabelForKind = (
     systemPrompt: string
     managerCanRun: boolean
     memberCanRun: boolean
-    meetingAutomationEnabled: boolean
-    meetingCreationMode: "auto" | "confirm_first"
     isActive: boolean
     assignedCount: number
   },
 ): { label: string; hint: string } => {
-  if (kind === "agent_details") {
-    return {
-      label: values.name.trim() ? `Agent: ${values.name.trim()}` : "Agent details",
-      hint: values.description.trim() ? "Name and description configured" : "Set name, description, and status",
-    }
-  }
   if (kind === "runtime") {
     return {
       label:
         values.aiProvider && values.aiModel
-          ? `Runtime: ${values.aiProvider} / ${values.aiModel}`
-          : "Runtime config",
+          ? `Agent Config: ${values.aiProvider} / ${values.aiModel}`
+          : "Agent config",
       hint:
         values.executionMode === "scheduled"
           ? `Scheduled ${values.executionTime || "--:--"} (${values.timezone})`
           : values.executionMode === "manual"
             ? `Manual run, ${values.lookbackHours || "--"}h / ${values.maxEmails || "--"} max`
             : "Model, auth, execution, and limits",
-    }
-  }
-  if (kind === "service") {
-    return {
-      label: `Service: ${String(values.serviceType || "general")}`,
-      hint: `Workflow: ${String(values.workflowType || "direct")}`,
     }
   }
   if (kind === "prompt") {
@@ -455,8 +415,8 @@ const nodeLabelForKind = (
       label: `Permissions: Mgr ${values.managerCanRun ? "yes" : "no"}, Member ${values.memberCanRun ? "yes" : "no"}`,
       hint:
         values.assignedCount > 0
-          ? `${values.assignedCount} users assigned, meeting ${values.meetingAutomationEnabled ? "enabled" : "disabled"}`
-          : `No users assigned, meeting ${values.meetingAutomationEnabled ? "enabled" : "disabled"}`,
+          ? `${values.assignedCount} users assigned, active ${values.isActive ? "yes" : "no"}`
+          : `No users assigned, active ${values.isActive ? "yes" : "no"}`,
     }
   }
   return { label: "Configuration", hint: "Update node settings" }
@@ -468,9 +428,7 @@ const buildCanvasGraph = (input: {
   kinds: ConfigNodeType[]
   values: {
     name: string
-    description: string
     serviceType: AgentCategory
-    workflowType: WorkflowType
     aiProvider: AiProvider
     aiModel: string
     authMode: AuthMode
@@ -482,8 +440,6 @@ const buildCanvasGraph = (input: {
     systemPrompt: string
     managerCanRun: boolean
     memberCanRun: boolean
-    meetingAutomationEnabled: boolean
-    meetingCreationMode: "auto" | "confirm_first"
     isActive: boolean
     assignedCount: number
   }
@@ -545,21 +501,13 @@ export default function TenantAgentCreatePage() {
   const isEditMode = Boolean(editingAgentId)
   const [workingAgentId, setWorkingAgentId] = useState<string>(editingAgentId)
   const workingAgentIdRef = useRef<string>(editingAgentId)
-  const [blueprints, setBlueprints] = useState<TenantAgentBlueprint[]>([])
-  const [loadingBlueprints, setLoadingBlueprints] = useState(false)
   const [selectedBlueprintId, setSelectedBlueprintId] = useState<string>(initialBlueprintId)
-  const selectedBlueprint = useMemo(
-    () => blueprints.find((item) => String(item.id || "") === selectedBlueprintId),
-    [blueprints, selectedBlueprintId],
-  )
-  const [appliedBlueprintId, setAppliedBlueprintId] = useState<string>("")
 
   const [users, setUsers] = useState<TenantUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [loadingEditData, setLoadingEditData] = useState(false)
 
   const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("")
   const [agentSkill, setAgentSkill] = useState("")
   const [agentInstruction, setAgentInstruction] = useState("")
@@ -573,11 +521,9 @@ export default function TenantAgentCreatePage() {
   const [maxEmails, setMaxEmails] = useState("75")
   const [managerCanRun, setManagerCanRun] = useState(true)
   const [memberCanRun, setMemberCanRun] = useState(false)
-  const [meetingAutomationEnabled, setMeetingAutomationEnabled] = useState(true)
-  const [meetingCreationMode, setMeetingCreationMode] = useState<"auto" | "confirm_first">("auto")
   const [isActive, setIsActive] = useState(true)
   const [serviceType, setServiceType] = useState<AgentCategory>("general")
-  const [workflowType, setWorkflowType] = useState<WorkflowType>("direct")
+  const [workflowType, setWorkflowType] = useState<WorkflowType>("mastra")
   const [assignedUserIds, setAssignedUserIds] = useState<string[]>([])
   const [userSearch, setUserSearch] = useState("")
 
@@ -627,40 +573,9 @@ export default function TenantAgentCreatePage() {
     return "general"
   }
 
-  const loadBlueprints = useCallback(async () => {
-    const key = tenantCacheKey(tenantId)
-    const cached = BLUEPRINTS_CACHE.get(key)
-    if (cached) {
-      setBlueprints(cached)
-      return
-    }
-
-    setLoadingBlueprints(true)
-    const pending = BLUEPRINTS_IN_FLIGHT.get(key)
-
-    try {
-      const rows = pending
-        ? await pending
-        : await (() => {
-            const request = (dispatch(fetchTenantAgentBlueprints()) as Promise<TenantAgentBlueprint[]>)
-              .then((result) => (Array.isArray(result) ? result : []))
-            BLUEPRINTS_IN_FLIGHT.set(key, request)
-            return request
-          })()
-
-      BLUEPRINTS_CACHE.set(key, rows)
-      setBlueprints(rows)
-    } catch {
-      setBlueprints([])
-    } finally {
-      setLoadingBlueprints(false)
-      BLUEPRINTS_IN_FLIGHT.delete(key)
-    }
-  }, [dispatch, tenantId])
-
   useEffect(() => {
-    void loadBlueprints()
-  }, [loadBlueprints])
+    setSelectedBlueprintId("")
+  }, [])
 
   useEffect(() => {
     setWorkingAgentId(editingAgentId)
@@ -686,62 +601,15 @@ export default function TenantAgentCreatePage() {
   }, [pathname, router, searchParams])
 
   useEffect(() => {
-    if (isEditMode) return
-    if (!selectedBlueprint) return
-    if (appliedBlueprintId === String(selectedBlueprint.id)) return
-
-    const defaults = selectedBlueprint.defaults || {}
-    setName(String(defaults.name || ""))
-    setDescription(String(defaults.description || ""))
-    setSystemPrompt(String(defaults.systemPrompt || ""))
-    setAgentSkill(String((defaults as { agentSkill?: string }).agentSkill || ""))
-    setAgentInstruction(String((defaults as { agentInstruction?: string }).agentInstruction || ""))
-    setAiProvider(defaults.aiProvider === "openrouter" ? "openrouter" : defaults.aiProvider === "openai" ? "openai" : "")
-    setAiModel(String(defaults.aiModel || ""))
-    setAuthMode(
-      defaults.authMode === "user_personal_connection"
-        ? "user_personal_connection"
-        : defaults.authMode === "tenant_shared_connection"
-          ? "tenant_shared_connection"
-          : "",
-    )
-    setExecutionMode(defaults.executionMode === "scheduled" ? "scheduled" : defaults.executionMode === "manual" ? "manual" : "")
-    setExecutionTime(String(defaults.executionTime || "09:00"))
-    setTimezone(String(defaults.timezone || "UTC"))
-    setLookbackHours(String(defaults.lookbackHours ?? 24))
-    setMaxEmails(String(defaults.maxEmails ?? 75))
-    setManagerCanRun(Boolean(defaults.managerCanRun ?? true))
-    setMemberCanRun(Boolean(defaults.memberCanRun ?? false))
-    setMeetingAutomationEnabled(Boolean((defaults as { meetingAutomationEnabled?: boolean }).meetingAutomationEnabled ?? true))
-    setMeetingCreationMode(
-      String((defaults as { meetingCreationMode?: string }).meetingCreationMode || "") === "confirm_first"
-        ? "confirm_first"
-        : "auto",
-    )
-    setIsActive(Boolean(defaults.isActive ?? true))
-    setServiceType(normalizeCategory(String((defaults as { serviceType?: string }).serviceType || selectedBlueprint.category || "general")))
-    setWorkflowType(
-      String((defaults as { workflowType?: string }).workflowType || "direct") === "mastra"
-        ? "mastra"
-        : String((defaults as { workflowType?: string }).workflowType || "direct") === "langchain"
-          ? "langchain"
-          : "direct",
-    )
-    setFlowNodeKinds([])
-    setActiveCanvasNodeId("")
-    setAppliedBlueprintId(String(selectedBlueprint.id))
-  }, [selectedBlueprint, appliedBlueprintId, isEditMode])
-
-  // Show nodes when a blueprint is selected so Start node is always visible.
-  useEffect(() => {
-    if (selectedBlueprint) {
-      setShowNodes(true)
-    } else {
-      setShowNodes(false)
-      setShowNodeEditor(false)
+    if (!isEditMode) {
+      setFlowNodeKinds([])
       setActiveCanvasNodeId("")
     }
-  }, [selectedBlueprint])
+  }, [isEditMode])
+
+  useEffect(() => {
+    setShowNodes(true)
+  }, [])
 
   const loadUsers = useCallback(async () => {
     const key = tenantCacheKey(tenantId)
@@ -791,7 +659,6 @@ export default function TenantAgentCreatePage() {
         const assignmentRow = assignment || {}
 
         setName(String(agent?.name || assignmentRow.agentName || ""))
-        setDescription(String(agent?.description || ""))
         setSystemPrompt(String(agent?.systemPrompt || ""))
         setAgentSkill(String(agent?.agentSkill || ""))
         setAgentInstruction(String(agent?.agentInstruction || ""))
@@ -822,22 +689,8 @@ export default function TenantAgentCreatePage() {
         setMaxEmails(String(assignmentRow.maxEmails ?? 75))
         setManagerCanRun(Boolean(assignmentRow.managerCanRun ?? true))
         setMemberCanRun(Boolean(assignmentRow.memberCanRun ?? false))
-        setMeetingAutomationEnabled(Boolean(assignmentRow.meetingAutomationEnabled ?? true))
-        setMeetingCreationMode(
-          String(assignmentRow.meetingCreationMode || "") === "confirm_first"
-            ? "confirm_first"
-            : "auto",
-        )
-        setServiceType(
-          normalizeCategory(String(agent?.serviceType || selectedBlueprint?.category || "general")),
-        )
-        setWorkflowType(
-          String(agent?.workflowType || "direct") === "mastra"
-            ? "mastra"
-            : String(agent?.workflowType || "direct") === "langchain"
-              ? "langchain"
-              : "direct",
-        )
+        setServiceType(normalizeCategory(String(agent?.serviceType || "general")))
+        setWorkflowType("mastra")
         setAssignedUserIds(
           Array.isArray(assignmentRow.assignedUserIds)
             ? assignmentRow.assignedUserIds.map((value: unknown) => String(value || "")).filter(Boolean)
@@ -845,8 +698,6 @@ export default function TenantAgentCreatePage() {
         )
 
         const initialKinds: ConfigNodeType[] = [
-          "agent_details",
-          "service",
           "runtime",
           "access",
         ]
@@ -878,18 +729,23 @@ export default function TenantAgentCreatePage() {
     })
   }, [activeUsers, userSearch])
 
+  const isActiveToggleDisabled = useMemo(() => {
+    if (!tenantId) return true
+    if (loadingEditData) return true
+    if (loadingUsers) return true
+    return false
+  }, [tenantId, loadingEditData, loadingUsers])
+
   const generatedGraph = useMemo(
     () =>
       buildCanvasGraph({
         // show Start node as soon as a blueprint is selected
-        hasBlueprint: Boolean(selectedBlueprint),
-        blueprintTitle: selectedBlueprint?.title || "Choose blueprint",
+        hasBlueprint: true,
+        blueprintTitle: "Agent",
         kinds: flowNodeKinds,
         values: {
           name,
-          description,
           serviceType,
-          workflowType,
           aiProvider,
           aiModel,
           authMode,
@@ -901,19 +757,14 @@ export default function TenantAgentCreatePage() {
           systemPrompt,
           managerCanRun,
           memberCanRun,
-          meetingAutomationEnabled,
-          meetingCreationMode,
           isActive,
           assignedCount: assignedUserIds.length,
         },
       }),
     [
-      selectedBlueprint?.title,
       flowNodeKinds,
       name,
-      description,
       serviceType,
-      workflowType,
       aiProvider,
       aiModel,
       authMode,
@@ -925,8 +776,6 @@ export default function TenantAgentCreatePage() {
       systemPrompt,
       managerCanRun,
       memberCanRun,
-      meetingAutomationEnabled,
-      meetingCreationMode,
       isActive,
       assignedUserIds.length,
     ],
@@ -1291,7 +1140,6 @@ export default function TenantAgentCreatePage() {
     const resolvedInstruction = resolveInstructionPrompt({
       tenantPrompt: systemPrompt,
       serviceType,
-      workflowType,
     })
 
     const flowSummary = flowSummaryText(nodes, edges)
@@ -1312,9 +1160,7 @@ export default function TenantAgentCreatePage() {
   }
 
   const currentAllowedCollections = () =>
-    Array.isArray(selectedBlueprint?.defaults.allowedCollections)
-      ? selectedBlueprint?.defaults.allowedCollections
-      : []
+    []
 
   const ensureWorkingAgent = async (): Promise<{ agentId: string; backendMessage: string }> => {
     const existingWorkingAgentId = String(workingAgentIdRef.current || workingAgentId || "").trim()
@@ -1330,14 +1176,11 @@ export default function TenantAgentCreatePage() {
     const createResp = await (dispatch(
       createTenantAgent({
         name: safeName,
-        description: description.trim(),
         systemPrompt: buildFinalPrompt(),
         agentSkill: agentSkill.trim(),
         agentInstruction: agentInstruction.trim(),
-        topK: selectedBlueprint?.defaults.topK || 6,
+        topK: 6,
         isActive: isActive ? 1 : 0,
-        workflowType,
-        serviceType,
         allowedCollections: currentAllowedCollections(),
       }),
     ) as Promise<{ agent?: { id?: string } }>)
@@ -1366,14 +1209,11 @@ export default function TenantAgentCreatePage() {
       updateTenantAgent({
         agentId,
         name: safeName,
-        description: description.trim(),
         systemPrompt: buildFinalPrompt(),
         agentSkill: agentSkill.trim(),
         agentInstruction: agentInstruction.trim(),
         isActive: isActive ? 1 : 0,
-        topK: selectedBlueprint?.defaults.topK || 6,
-        workflowType,
-        serviceType,
+        topK: 6,
         allowedCollections: currentAllowedCollections(),
       }),
     ) as Promise<unknown>)
@@ -1418,8 +1258,8 @@ export default function TenantAgentCreatePage() {
         managerCanRun,
         memberCanRun,
         assignedUserIds,
-        meetingAutomationEnabled,
-        meetingCreationMode,
+        meetingAutomationEnabled: true,
+        meetingCreationMode: "auto",
       }),
     ) as Promise<unknown>)
 
@@ -1429,11 +1269,6 @@ export default function TenantAgentCreatePage() {
   const createAgent = async () => {
     setError(null)
     setSuccess(null)
-
-    if (!workingAgentId && !selectedBlueprint) {
-      setError("Select a blueprint before creating an agent.")
-      return
-    }
 
     if (!workingAgentId) {
       const missingRequired = REQUIRED_FLOW_NODES.filter((kind) => !flowNodeKinds.includes(kind))
@@ -1502,7 +1337,7 @@ export default function TenantAgentCreatePage() {
 
       const fallbackMessage = workingAgentId
         ? "Agent updated and saved to database."
-        : `${selectedBlueprint?.title || "Agent"} created and saved to database.`
+        : "Agent created and saved to database."
 
       setSuccess(assignmentMessage || coreMessage || ensured.backendMessage || fallbackMessage)
     } catch (err: unknown) {
@@ -1550,11 +1385,10 @@ export default function TenantAgentCreatePage() {
 
   const createButtonDisabled = useMemo(() => {
     if (saving || loadingEditData) return true
-    if (!workingAgentId && !selectedBlueprint) return true
     // For a new agent, enforce required canvas nodes before allowing create.
     if (!workingAgentId && missingRequiredNodeKinds.length > 0) return true
     return false
-  }, [saving, loadingEditData, workingAgentId, selectedBlueprint, missingRequiredNodeKinds])
+  }, [saving, loadingEditData, workingAgentId, missingRequiredNodeKinds])
 
   // Custom node renderer so each node has visible handles and can apply nodeOverrides
   const ConfigNode = ({ data, id, selected }: NodeProps<FlowNodeData>) => {
@@ -1598,8 +1432,6 @@ export default function TenantAgentCreatePage() {
 
     const getNodeIcon = () => {
       if (data?.isStart) return <Play className="h-5 w-5" aria-hidden="true" />
-      if (data?.kind === "agent_details") return <User className="h-5 w-5" aria-hidden="true" />
-      if (data?.kind === "service") return <Settings className="h-5 w-5" aria-hidden="true" />
       if (data?.kind === "runtime") return <Cpu className="h-5 w-5" aria-hidden="true" />
       if (data?.kind === "prompt") return <MessageSquare className="h-5 w-5" aria-hidden="true" />
       if (data?.kind === "access") return <Shield className="h-5 w-5" aria-hidden="true" />
@@ -1608,8 +1440,6 @@ export default function TenantAgentCreatePage() {
 
     const getNodeIconBadgeClass = () => {
       if (data?.isStart) return "bg-indigo-600"
-      if (data?.kind === "agent_details") return "bg-cyan-600"
-      if (data?.kind === "service") return "bg-emerald-600"
       if (data?.kind === "runtime") return "bg-amber-600"
       if (data?.kind === "prompt") return "bg-sky-600"
       if (data?.kind === "access") return "bg-rose-600"
@@ -1729,7 +1559,7 @@ export default function TenantAgentCreatePage() {
   )
 
   const [showNodeEditor, setShowNodeEditor] = useState(false)
-  const [showNodes, setShowNodes] = useState(false)
+  const [showNodes, setShowNodes] = useState(true)
 
   useEffect(() => {
     nodesRef.current = nodes
@@ -1772,49 +1602,16 @@ export default function TenantAgentCreatePage() {
                 </p>
               </div>
 
-              <div className="grid w-full gap-2 sm:grid-cols-[minmax(260px,1fr)_auto_auto] sm:items-end">
+              <div className="grid w-full gap-2 sm:grid-cols-[minmax(260px,1fr)_auto] sm:items-end">
                 <div className="space-y-1">
-                  <Label className="text-xs text-slate-600">Select Agent</Label>
-                  <Select
-                    value={selectedBlueprintId || "none"}
-                    onValueChange={(value) => {
-                      const nextId = value === "none" ? "" : value
-                      setSelectedBlueprintId(nextId)
-                      setAppliedBlueprintId("")
-                      setFlowNodeKinds([])
-                      setShowNodePicker(false)
-                      setActiveCanvasNodeId("")
-                    }}
-                  >
-                    <SelectTrigger className="h-10 w-full">
-                      <SelectValue placeholder="Select agent" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No agent selected</SelectItem>
-                      {blueprints.map((item) => (
-                        <SelectItem key={item.id} value={String(item.id)}>
-                          {item.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-xs text-slate-600">Agent Name</Label>
+                  <Input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    className="h-10 w-full"
+                    placeholder="Enter agent name"
+                  />
                 </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-8 cursor-pointer"
-                  disabled={!selectedBlueprintId}
-                  onClick={() => {
-                    setSelectedBlueprintId("")
-                    setAppliedBlueprintId("")
-                    setFlowNodeKinds([])
-                    setShowNodePicker(false)
-                    setActiveCanvasNodeId("")
-                  }}
-                >
-                  Clear
-                </Button>
 
                 {/* {selectedBlueprint ? (
                   <Badge variant="outline" className="h-10 justify-center px-3 text-xs font-medium">
@@ -1847,7 +1644,7 @@ export default function TenantAgentCreatePage() {
                   ? "Saving..."
                   : workingAgentId
                     ? "Save Agent"
-                    : `Create ${selectedBlueprint?.title || "Agent"}`}
+                    : "Create Agent"}
               </Button>
               {/* {!workingAgentId && selectedBlueprint && missingRequiredNodeKinds.length > 0 ? (
                 <p className="text-xs text-amber-700">
@@ -1871,7 +1668,6 @@ export default function TenantAgentCreatePage() {
                     type="button"
                     variant="outline"
                     className="cursor-pointer"
-                    disabled={!selectedBlueprint}
                     onClick={() => {
                       setShowNodeEditor(false)
                       setShowNodePicker((prev) => !prev)
@@ -1938,7 +1734,6 @@ export default function TenantAgentCreatePage() {
                                   type="button"
                                   className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-cyan-300 hover:bg-cyan-50/40"
                                   onClick={() => addFlowNode(node.kind)}
-                                  disabled={!selectedBlueprint}
                                 >
                                   <p className="text-sm font-semibold text-slate-900">{node.title}</p>
                                   <p className="mt-1 text-xs text-slate-600">{node.description}</p>
@@ -2054,54 +1849,6 @@ export default function TenantAgentCreatePage() {
                         </div>
 
                         <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 [scrollbar-width:auto] [scrollbar-color:#64748b_#e2e8f0] [&::-webkit-scrollbar]:w-4 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-500 [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-slate-200">
-                          {activeNodeKind === "agent_details" ? (
-                            <div className="space-y-2">
-                              <Label className="text-xs">Name</Label>
-                              <Input value={name} onChange={(e) => setName(e.target.value)} />
-                              <Label className="text-xs">Description</Label>
-                              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
-                              <div className="flex items-center justify-between">
-                                <Label className="text-xs">Active</Label>
-                                <Switch checked={isActive} onCheckedChange={(v) => setIsActive(Boolean(v))} />
-                              </div>
-                            </div>
-                          ) : null}
-
-                          {activeNodeKind === "service" ? (
-                            <div className="space-y-2">
-                              <Label className="text-xs">Service Type</Label>
-                              <Select value={serviceType} onValueChange={(v) => setServiceType(normalizeCategory(v))}>
-                                <SelectTrigger className="h-8">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className="z-220">
-                                  <SelectItem value="gmail">Gmail</SelectItem>
-                                  <SelectItem value="crm">CRM</SelectItem>
-                                  <SelectItem value="support">Support</SelectItem>
-                                  <SelectItem value="calendar">Calendar</SelectItem>
-                                  <SelectItem value="knowledge">Knowledge</SelectItem>
-                                  <SelectItem value="automation">Automation</SelectItem>
-                                  <SelectItem value="general">General</SelectItem>
-                                </SelectContent>
-                              </Select>
-
-                              <Label className="text-xs">Workflow Engine</Label>
-                              <Select
-                                value={workflowType}
-                                onValueChange={(v) => setWorkflowType(v === "mastra" ? "mastra" : v === "langchain" ? "langchain" : "direct")}
-                              >
-                                <SelectTrigger className="h-8">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent className="z-220">
-                                  <SelectItem value="direct">Direct</SelectItem>
-                                  <SelectItem value="mastra">Mastra</SelectItem>
-                                  <SelectItem value="langchain">LangChain</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ) : null}
-
                           {activeNodeKind === "runtime" ? (
                             <div className="space-y-2">
                               <p className="text-[11px] font-medium text-slate-600">AI Configuration</p>
@@ -2183,11 +1930,11 @@ export default function TenantAgentCreatePage() {
                           {activeNodeKind === "prompt" ? (
                             <div className="space-y-2">
                               <Label className="text-xs">Instruction Prompt</Label>
-                              {!systemPrompt.trim() ? (
+                              {/* {!systemPrompt.trim() ? (
                                 <p className="text-[11px] text-amber-700">
                                   Tenant prompt is empty. A default {CATEGORY_LABEL[serviceType]} prompt will be applied automatically.
                                 </p>
-                              ) : null}
+                              ) : null} */}
                               <Textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} />
                               <Label className="text-xs">Agent Skill</Label>
                               <Textarea value={agentSkill} onChange={(e) => setAgentSkill(e.target.value)} />
@@ -2198,6 +1945,19 @@ export default function TenantAgentCreatePage() {
 
                           {activeNodeKind === "access" ? (
                             <div className="space-y-2">
+                              <p className="text-[11px] font-medium text-slate-600">Status</p>
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">Active</Label>
+                                <Switch
+                                  checked={isActive}
+                                  disabled={isActiveToggleDisabled}
+                                  onCheckedChange={(v) => setIsActive(Boolean(v))}
+                                />
+                              </div>
+                              {isActiveToggleDisabled ? (
+                                <p className="text-[11px] text-slate-500">Active status is disabled until tenant details finish loading.</p>
+                              ) : null}
+
                               <p className="text-[11px] font-medium text-slate-600">Role Permissions</p>
                               <div className="flex items-center justify-between">
                                 <Label className="text-xs">Manager can run</Label>
@@ -2206,25 +1966,6 @@ export default function TenantAgentCreatePage() {
                               <div className="flex items-center justify-between">
                                 <Label className="text-xs">Member can run</Label>
                                 <Switch checked={memberCanRun} onCheckedChange={(v) => setMemberCanRun(Boolean(v))} />
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <Label className="text-xs">Enable meeting automation</Label>
-                                <Switch checked={meetingAutomationEnabled} onCheckedChange={(v) => setMeetingAutomationEnabled(Boolean(v))} />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Meeting creation mode (tenant-wide)</Label>
-                                <Select
-                                  value={meetingCreationMode}
-                                  onValueChange={(v) => setMeetingCreationMode(v === "confirm_first" ? "confirm_first" : "auto")}
-                                >
-                                  <SelectTrigger className="h-8">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent className="z-220">
-                                    <SelectItem value="auto">Auto create and send</SelectItem>
-                                    <SelectItem value="confirm_first">Confirm first</SelectItem>
-                                  </SelectContent>
-                                </Select>
                               </div>
 
                               <p className="pt-1 text-[11px] font-medium text-slate-600">User Assignment</p>
@@ -2325,14 +2066,6 @@ export default function TenantAgentCreatePage() {
                     </div>
                   ) : null}
 
-                  {!selectedBlueprint ? (
-                    <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white/95 px-5 py-4 text-center shadow-sm">
-                        <p className="text-sm font-semibold text-slate-800">Canvas is waiting for a blueprint</p>
-                        <p className="mt-1 text-xs text-slate-500">Select a blueprint from top bar, then add nodes.</p>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>               
               </div>
 

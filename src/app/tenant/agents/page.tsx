@@ -1,15 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useDispatch, useSelector } from "react-redux"
+import { useDispatch } from "react-redux"
 import {
-  fetchTenantAgentBlueprints,
   fetchTenantAgentAssignment,
   fetchTenantAgents,
-  type TenantAgentBlueprint,
 } from "../../../../actions/auth"
-import type { RootState } from "../../../../redux/reducers"
 import type { AppDispatch } from "../../../../redux/store"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,12 +22,6 @@ const CATEGORY_LABEL: Record<AgentCategory, string> = {
   knowledge: "Knowledge",
   automation: "Automation",
   general: "General",
-}
-
-type GmailStatus = {
-  connected: boolean
-  provider: string
-  updatedAt?: string | null
 }
 
 type TenantAgentCard = {
@@ -92,13 +83,9 @@ const detectAgentCategory = (input: {
 
 export default function TenantAgentsPage() {
   const dispatch = useDispatch<AppDispatch>()
-  const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
-  const hasLoadedOnOpenRef = useRef(false)
 
   const [agents, setAgents] = useState<TenantAgentCard[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
-  const [blueprints, setBlueprints] = useState<TenantAgentBlueprint[]>([])
-  const [loadingBlueprints, setLoadingBlueprints] = useState(false)
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true)
@@ -170,27 +157,9 @@ export default function TenantAgentsPage() {
     }
   }, [dispatch])
 
-  const loadBlueprints = useCallback(async () => {
-    setLoadingBlueprints(true)
-    try {
-      const rows = await (dispatch(fetchTenantAgentBlueprints()) as Promise<TenantAgentBlueprint[]>)
-      setBlueprints(Array.isArray(rows) ? rows : [])
-    } catch {
-      setBlueprints([])
-    } finally {
-      setLoadingBlueprints(false)
-    }
-  }, [dispatch])
-
-  const loadInitialData = useCallback(async () => {
-    await Promise.all([loadAgents(), loadBlueprints()])
-  }, [loadAgents, loadBlueprints])
-
   useEffect(() => {
-    if (hasLoadedOnOpenRef.current) return
-    hasLoadedOnOpenRef.current = true
-    void loadInitialData()
-  }, [loadInitialData])
+    void loadAgents()
+  }, [loadAgents])
 
   const categoryCounts = useMemo(() => {
     return agents.reduce<Record<AgentCategory, number>>(
@@ -210,30 +179,6 @@ export default function TenantAgentsPage() {
     )
   }, [agents])
 
-  const normalizeCategory = (raw: string): AgentCategory => {
-    const value = String(raw || "").toLowerCase()
-    if (value === "gmail") return "gmail"
-    if (value === "crm") return "crm"
-    if (value === "support") return "support"
-    if (value === "calendar") return "calendar"
-    if (value === "knowledge") return "knowledge"
-    if (value === "automation") return "automation"
-    return "general"
-  }
-
-  const blueprintRows = useMemo(
-    () =>
-      blueprints.map((item) => {
-        const category = normalizeCategory(item.category)
-        return {
-          ...item,
-          category,
-          createdCount: categoryCounts[category],
-        }
-      }),
-    [blueprints, categoryCounts],
-  )
-
   return (
     <main className="">
       <div className="mx-auto max-w-7xl space-y-6">
@@ -244,51 +189,62 @@ export default function TenantAgentsPage() {
               <p className="mt-2 text-sm text-slate-600">
                 Create and manage multi-domain agents with tenant-safe permissions.
               </p>
-              {/* <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                <Badge className="border border-slate-300 bg-slate-50 text-slate-700">
-                  Tenant created: {tenantProfile?.createdAt ? new Date(tenantProfile.createdAt).toLocaleDateString() : "-"}
-                </Badge>
-                <Badge className="border border-slate-300 bg-slate-50 text-slate-700">
-                  Tenant: {tenantProfile?.companyName || "Unknown"}
-                </Badge>
-              </div> */}
             </div>
             <div className="flex gap-3">
               <Link href="/tenant/agents/create" prefetch={false}>
-                <Button className="cursor-pointer">Create New Agent</Button>
-              </Link>
-              <Link href="/tenant/agents/created" prefetch={false}>
-                <Button variant="outline" className="cursor-pointer">View Created Agents</Button>
+                <Button className="cursor-pointer">Add New Agent</Button>
               </Link>
             </div>
           </div>
         </section>
 
-        <Card className="rounded-2xl border-dashed">
+        <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle>Agent Catalog</CardTitle>
+            <CardTitle>Created Agents</CardTitle>
             <CardDescription>
-              Click create to open configuration for that exact agent type.
+              All tenant-created agents are listed below.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            {loadingBlueprints ? <p className="text-sm text-muted-foreground">Loading...</p> : null}
-            {!loadingBlueprints && blueprintRows.length === 0 ? <p className="text-sm text-muted-foreground">No blueprint records found.</p> : null}
+          <CardContent className="space-y-3">
+            {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
+            {!loadingAgents && agents.length === 0 ? <p className="text-sm text-muted-foreground">No agents found.</p> : null}
+
+            {!loadingAgents && agents.length > 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-700 space-y-2">
+                <p>
+                  Showing <span className="font-semibold text-slate-900">{agents.length}</span> agents. Configured: <span className="font-semibold text-slate-900">{agents.filter((agent) => agent.configured).length}</span>.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(Object.keys(categoryCounts) as AgentCategory[])
+                    .filter((category) => categoryCounts[category] > 0)
+                    .map((category) => (
+                      <Badge key={category} variant="outline" className={CATEGORY_STYLE[category]}>
+                        {CATEGORY_LABEL[category]}: {categoryCounts[category]}
+                      </Badge>
+                    ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {blueprintRows.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              {agents.map((agent) => (
+                <div key={agent.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                    <Badge variant="outline" className={CATEGORY_STYLE[item.category]}>{CATEGORY_LABEL[item.category]}</Badge>
+                    <p className="text-sm font-semibold text-slate-900">{agent.name}</p>
+                    <Badge variant="outline" className={CATEGORY_STYLE[agent.category]}>{CATEGORY_LABEL[agent.category]}</Badge>
                   </div>
-                  <p className="mt-2 text-xs text-slate-600">{item.summary}</p>
-                  <p className="mt-2 text-xs text-slate-500">Use case: {item.exampleUse}</p>
-                  {/* <div className="mt-2 text-xs text-slate-600">
-                    Existing agents in this category: <span className="font-semibold text-slate-900">{item.createdCount}</span>
-                  </div> */}
+                  <p className="mt-2 text-xs text-slate-500">ID: {agent.id}</p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                    <Badge variant={agent.isActive === 1 ? "outline" : "destructive"}>
+                      {agent.isActive === 1 ? "active" : "inactive"}
+                    </Badge>
+                    <Badge variant="outline">{agent.aiProvider}</Badge>
+                    <Badge variant="outline" className="max-w-full truncate">{agent.aiModel}</Badge>
+                    <Badge variant="outline">{agent.authMode === "user_personal_connection" ? "user google" : "tenant google"}</Badge>
+                  </div>
                   <div className="mt-3">
-                    <Link href={`/tenant/agents/create?blueprint=${encodeURIComponent(String(item.id))}`} prefetch={false}>
-                      <Button size="sm" variant="default" className="cursor-pointer bg-primary">Create {item.title}</Button>
+                    <Link href={`/tenant/agents/create?agentId=${encodeURIComponent(agent.id)}`} prefetch={false}>
+                      <Button size="sm" variant="outline" className="cursor-pointer">Edit Agent</Button>
                     </Link>
                   </div>
                 </div>

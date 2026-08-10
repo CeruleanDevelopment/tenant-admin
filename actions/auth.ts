@@ -140,15 +140,12 @@ type TenantRegisterResponse = {
 
 type TenantAgentCreateInput = {
   name: string
-  description?: string
   systemPrompt?: string
   agentSkill?: string
   agentInstruction?: string
   topK?: number
   isActive?: 0 | 1
   allowedCollections?: string[]
-  workflowType?: "direct" | "mastra" | "langchain"
-  serviceType?: "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
 }
 
 type TenantAgentUpdateInput = TenantAgentCreateInput & {
@@ -1123,6 +1120,34 @@ export const setTenantUserActiveStatus =
     return resp.data
   }
 
+export const updateTenantUser =
+  (input: { userId: string; firstName?: string; lastName?: string; role?: string; isActive?: number | boolean })
+  : ThunkAction<Promise<any>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    const payload: Record<string, any> = {
+      firstName: input.firstName || null,
+      lastName: input.lastName || null,
+      isActive: typeof input.isActive === "boolean" ? (input.isActive ? 1 : 0) : input.isActive,
+    }
+
+    if (typeof input.role !== "undefined" && input.role !== null) {
+      payload.role = input.role
+    }
+
+    console.debug("updateTenantUser: calling PATCH /tenant/users/:userId", {
+      userId: input.userId,
+      headers,
+      payload,
+    })
+
+    const resp = await axios.patch(`/tenant/users/${encodeURIComponent(String(input.userId || ""))}`, payload, { headers })
+    return resp.data
+  }
+
 export const createTenantAgent =
   (input: TenantAgentCreateInput): ThunkAction<Promise<{ agent?: { id?: string } }>, RootState, unknown, AnyAction> =>
   async () => {
@@ -1134,15 +1159,12 @@ export const createTenantAgent =
       "/ai/agents",
       {
         name: input.name,
-        description: input.description || "",
         systemPrompt: input.systemPrompt || "",
         agentSkill: input.agentSkill || "",
         agentInstruction: input.agentInstruction || "",
         topK: input.topK ?? 6,
         isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
         allowedCollections: Array.isArray(input.allowedCollections) ? input.allowedCollections : [],
-        workflowType: input.workflowType || "direct",
-        serviceType: input.serviceType || "general",
       },
       { headers },
     )
@@ -1172,15 +1194,12 @@ export const updateTenantAgent =
       `/ai/agents/${encodeURIComponent(String(input.agentId || ""))}`,
       {
         name: input.name,
-        description: input.description || "",
         systemPrompt: input.systemPrompt || "",
         agentSkill: input.agentSkill || "",
         agentInstruction: input.agentInstruction || "",
         topK: input.topK ?? 6,
         isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
         allowedCollections: Array.isArray(input.allowedCollections) ? input.allowedCollections : [],
-        workflowType: input.workflowType || "direct",
-        serviceType: input.serviceType || "general",
       },
       { headers },
     )

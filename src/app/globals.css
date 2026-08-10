@@ -185,6 +185,22 @@
   align-items: center !important;
 }
 
+/* Role dropdown text vertical spacing fix (only margin/padding). */
+.role-select-centered .rw-dropdown-list-input,
+.role-select-centered .rw-dropdown-list-input > *,
+.role-select-centered .rw-placeholder {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.role-select-centered .rw-dropdown-list-input > *,
+.role-select-centered .rw-placeholder {
+  margin-top: -1px !important;
+  margin-bottom: 1px !important;
+}
+
 .rw-input {
   height: 2rem !important;
 }

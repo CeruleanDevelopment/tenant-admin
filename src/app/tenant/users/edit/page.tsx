@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { DropdownList } from "react-widgets"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useDispatch } from "react-redux"
 import { AppDispatch } from "../../../../../redux/store"
-import { addTenantUser } from "../../../../../actions/auth"
+import { fetchTenantUsers, updateTenantUser } from "../../../../../actions/auth"
 
 const roleOptions: Array<{ value: string; label: string }> = [
   { value: "tenant-admin", label: "Tenant Admin" },
@@ -17,64 +18,143 @@ const roleOptions: Array<{ value: string; label: string }> = [
   { value: "user", label: "User" },
 ]
 
-export default function AddUserPage() {
-  const dispatch = useDispatch<AppDispatch>();
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("");
-  const [isActive, setIsActive] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState("");
-  const roles = roleOptions;
-  const loadingRoles = false;
+const normalizeRoleValue = (value: unknown): string =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+
+export default function EditUserPage() {
+  const searchParams = useSearchParams()
+  const dispatch = useDispatch<AppDispatch>()
+  const editUserId = useMemo(() => String(searchParams.get("userId") || "").trim(), [searchParams])
+
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
+  const [email, setEmail] = useState("")
+  const [role, setRole] = useState("")
+  const [isActive, setIsActive] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [success, setSuccess] = useState("")
+  const [loadingUser, setLoadingUser] = useState(false)
+
+  const roles = useMemo(() => {
+    if (!role || roleOptions.some((option) => option.value === role)) {
+      return roleOptions
+    }
+
+    return [
+      ...roleOptions,
+      { value: role, label: role },
+    ]
+  }, [role])
+
+  useEffect(() => {
+    let mounted = true
+
+    if (!editUserId) {
+      setErrors({ form: "User id is required." })
+      return () => {
+        mounted = false
+      }
+    }
+
+    setLoadingUser(true)
+    setErrors({})
+    setSuccess("")
+
+    const p = dispatch(fetchTenantUsers()) as Promise<unknown>
+    p.then((res: unknown) => {
+      if (!mounted) return
+      const users = Array.isArray(res) ? (res as Array<Record<string, unknown>>) : []
+      const target = users.find((u) => String(u.id || "") === editUserId)
+
+      if (!target) {
+        setErrors({ form: "User not found for editing." })
+        return
+      }
+
+      const firstNameRaw = String(target.firstName || "").trim()
+      const lastNameRaw = String(target.lastName || "").trim()
+      const combinedName = String(target.name || "").trim()
+
+      if (firstNameRaw || lastNameRaw) {
+        setFirstName(firstNameRaw)
+        setLastName(lastNameRaw)
+      } else if (combinedName) {
+        const parts = combinedName.split(/\s+/).filter(Boolean)
+        setFirstName(parts[0] || "")
+        setLastName(parts.slice(1).join(" "))
+      } else {
+        setFirstName("")
+        setLastName("")
+      }
+
+      setEmail(String(target.email || ""))
+      setRole(normalizeRoleValue(target.role))
+
+      const activeRaw = target.isActive
+      const active = typeof activeRaw === "boolean" ? activeRaw : Number(activeRaw) === 1
+      setIsActive(Boolean(active))
+    }).catch((err: unknown) => {
+      if (!mounted) return
+      const em = typeof err === "object" && err !== null ? (err as { message?: string }).message : undefined
+      setErrors({ form: typeof em === "string" ? em : "Failed to load user details" })
+    }).finally(() => {
+      if (!mounted) return
+      setLoadingUser(false)
+    })
+
+    return () => {
+      mounted = false
+    }
+  }, [dispatch, editUserId])
 
   function validate() {
     const e: Record<string, string> = {}
     if (!firstName.trim()) e.firstName = "First name is required"
     if (!lastName.trim()) e.lastName = "Last name is required"
-    if (!email.trim()) e.email = "Email is required"
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "Enter a valid email"
     if (!role.trim()) e.role = "Role is required"
     return e
   }
 
   async function handleSubmit(ev: React.FormEvent) {
     ev.preventDefault()
+
+    if (!editUserId) {
+      setErrors({ form: "User id is required." })
+      return
+    }
+
     const v = validate()
     if (Object.keys(v).length) {
       setErrors(v)
       return
     }
+
     setSubmitting(true)
     setErrors({})
     setSuccess("")
+
     try {
-      const resp = await dispatch(addTenantUser({
-        email: email.trim(),
+      const resp = await dispatch(updateTenantUser({
+        userId: editUserId,
         firstName: firstName.trim() || undefined,
         lastName: lastName.trim() || undefined,
         role: role || "user",
         isActive: isActive ? 1 : 0,
       }))
 
-      let message = "User created."
+      let message = "User updated."
       if (typeof resp === "object" && resp !== null) {
         const r = resp as { message?: string; user?: unknown }
-        message = r.message ?? (r.user ? "User created successfully." : message)
+        message = r.message ?? (r.user ? "User updated successfully." : message)
       } else if (typeof resp === "string") {
         message = resp
       }
       setSuccess(String(message))
-
-      setFirstName("")
-      setLastName("")
-      setEmail("")
-      setRole("")
-      setIsActive(false)
     } catch (err: unknown) {
-      // Normalize backend error responses (ApiError shape: { message, details })
       let formMessage = "Submission failed"
       const detailErrors: Record<string, string> = {}
 
@@ -113,13 +193,14 @@ export default function AddUserPage() {
   return (
     <main className="p-0">
       <div className="mx-auto max-w-5xl">
-        <h1 className="text-2xl font-bold mb-4">Add User</h1>
+        <h1 className="text-2xl font-bold mb-4">Edit User</h1>
 
         <Card className="rounded-2xl">
           <CardHeader>
-            <CardTitle>Add a new user</CardTitle>
+            <CardTitle>Edit user details</CardTitle>
           </CardHeader>
           <CardContent>
+            {loadingUser && <div className="text-sm text-muted-foreground mb-3">Loading user details...</div>}
             <form onSubmit={handleSubmit} className="space-y-6">
               {errors.form && <div className="text-sm text-red-600">{errors.form}</div>}
               {success && <div className="text-sm text-green-600">{success}</div>}
@@ -149,17 +230,15 @@ export default function AddUserPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                
                 <div>
                   <Label htmlFor="email" className="mb-1">Email</Label>
                   <Input
                     id="email"
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
                     placeholder="jane@example.com"
+                    disabled
                   />
-                  {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
                 </div>
 
                 <div>
@@ -170,8 +249,7 @@ export default function AddUserPage() {
                     textField="label"
                     value={roles.find((r) => r.value === role) || null}
                     onChange={(val) => setRole((val as any)?.value || "")}
-                    disabled={loadingRoles}
-                    placeholder={loadingRoles ? "Loading roles..." : "Select role"}
+                    placeholder="Select role"
                     className="w-full role-select-centered"
                     inputProps={{ id: "role", className: "h-8 leading-8" }}
                   />
@@ -187,8 +265,8 @@ export default function AddUserPage() {
               </div>
 
               <div className="flex items-center justify-end gap-3">
-                <Button type="submit" disabled={submitting} className="bg-primary py-4 px-4 cursor-pointer">
-                  {submitting ? "Saving..." : "Add User"}
+                <Button type="submit" disabled={submitting || loadingUser} className="bg-primary py-4 px-4 cursor-pointer">
+                  {submitting ? "Saving..." : "Save Changes"}
                 </Button>
               </div>
             </form>
