@@ -70,8 +70,6 @@ type TenantUser = {
 }
 
 type AiProvider = "" | "openai" | "openrouter"
-type AuthMode = "" | "tenant_shared_connection" | "user_personal_connection"
-type ExecutionMode = "" | "manual" | "scheduled"
 type ConfigNodeType =
   | "service"
   | "runtime"
@@ -301,7 +299,7 @@ const FLOW_NODE_LIBRARY: Array<{
   {
     kind: "runtime",
     title: "Agent Config",
-    description: "AI model, auth mode, execution schedule, and run limits.",
+    description: "AI provider and model settings.",
     required: true,
   },
   {
@@ -326,8 +324,6 @@ const AI_MODEL_OPTIONS: Record<"openai" | "openrouter", string[]> = {
   openai: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
   openrouter: ["openrouter/auto", "anthropic/claude-3.7-sonnet", "google/gemini-2.5-flash"],
 }
-
-const TIMEZONE_OPTIONS = ["UTC", "Asia/Kolkata", "America/New_York", "Europe/London"]
 
 const USERS_CACHE = new Map<string, TenantUser[]>()
 const USERS_IN_FLIGHT = new Map<string, Promise<TenantUser[]>>()
@@ -374,12 +370,6 @@ const nodeLabelForKind = (
     serviceType: AgentCategory
     aiProvider: AiProvider
     aiModel: string
-    authMode: AuthMode
-    executionMode: ExecutionMode
-    executionTime: string
-    timezone: string
-    lookbackHours: string
-    maxEmails: string
     systemPrompt: string
     managerCanRun: boolean
     memberCanRun: boolean
@@ -393,12 +383,7 @@ const nodeLabelForKind = (
         values.aiProvider && values.aiModel
           ? `Agent Config: ${values.aiProvider} / ${values.aiModel}`
           : "Agent config",
-      hint:
-        values.executionMode === "scheduled"
-          ? `Scheduled ${values.executionTime || "--:--"} (${values.timezone})`
-          : values.executionMode === "manual"
-            ? `Manual run, ${values.lookbackHours || "--"}h / ${values.maxEmails || "--"} max`
-            : "Model, auth, execution, and limits",
+      hint: "Provider and model configuration",
     }
   }
   if (kind === "prompt") {
@@ -423,20 +408,12 @@ const nodeLabelForKind = (
 }
 
 const buildCanvasGraph = (input: {
-  hasBlueprint: boolean
-  blueprintTitle: string
   kinds: ConfigNodeType[]
   values: {
     name: string
     serviceType: AgentCategory
     aiProvider: AiProvider
     aiModel: string
-    authMode: AuthMode
-    executionMode: ExecutionMode
-    executionTime: string
-    timezone: string
-    lookbackHours: string
-    maxEmails: string
     systemPrompt: string
     managerCanRun: boolean
     memberCanRun: boolean
@@ -444,10 +421,6 @@ const buildCanvasGraph = (input: {
     assignedCount: number
   }
 }): { nodes: FlowNode<FlowNodeData>[]; edges: Edge[] } => {
-  if (!input.hasBlueprint) {
-    return { nodes: [], edges: [] }
-  }
-
   const nodes: FlowNode<FlowNodeData>[] = []
 
   nodes.push({
@@ -496,12 +469,10 @@ export default function TenantAgentCreatePage() {
 
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const tenantId = String(tenantProfile?.id || "")
-  const initialBlueprintId = String(searchParams.get("blueprint") || "").trim()
   const editingAgentId = String(searchParams.get("agentId") || "").trim()
   const isEditMode = Boolean(editingAgentId)
   const [workingAgentId, setWorkingAgentId] = useState<string>(editingAgentId)
   const workingAgentIdRef = useRef<string>(editingAgentId)
-  const [selectedBlueprintId, setSelectedBlueprintId] = useState<string>(initialBlueprintId)
 
   const [users, setUsers] = useState<TenantUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
@@ -513,12 +484,6 @@ export default function TenantAgentCreatePage() {
   const [agentInstruction, setAgentInstruction] = useState("")
   const [aiProvider, setAiProvider] = useState<AiProvider>("")
   const [aiModel, setAiModel] = useState("")
-  const [authMode, setAuthMode] = useState<AuthMode>("")
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("")
-  const [executionTime, setExecutionTime] = useState("09:00")
-  const [timezone, setTimezone] = useState("UTC")
-  const [lookbackHours, setLookbackHours] = useState("24")
-  const [maxEmails, setMaxEmails] = useState("75")
   const [managerCanRun, setManagerCanRun] = useState(true)
   const [memberCanRun, setMemberCanRun] = useState(false)
   const [isActive, setIsActive] = useState(true)
@@ -572,10 +537,6 @@ export default function TenantAgentCreatePage() {
     if (key === "automation") return "automation"
     return "general"
   }
-
-  useEffect(() => {
-    setSelectedBlueprintId("")
-  }, [])
 
   useEffect(() => {
     setWorkingAgentId(editingAgentId)
@@ -668,25 +629,6 @@ export default function TenantAgentCreatePage() {
           assignmentRow.aiProvider === "openrouter" ? "openrouter" : assignmentRow.aiProvider === "openai" ? "openai" : ""
         setAiProvider(aiProviderValue)
         setAiModel(String(assignmentRow.aiModel || ""))
-
-        setAuthMode(
-          assignmentRow.authMode === "user_personal_connection"
-            ? "user_personal_connection"
-            : assignmentRow.authMode === "tenant_shared_connection"
-              ? "tenant_shared_connection"
-              : "",
-        )
-        setExecutionMode(
-          assignmentRow.executionMode === "scheduled"
-            ? "scheduled"
-            : assignmentRow.executionMode === "manual"
-              ? "manual"
-              : "",
-        )
-        setExecutionTime(String(assignmentRow.executionTime || "09:00"))
-        setTimezone(String(assignmentRow.timezone || "UTC"))
-        setLookbackHours(String(assignmentRow.lookbackHours ?? 24))
-        setMaxEmails(String(assignmentRow.maxEmails ?? 75))
         setManagerCanRun(Boolean(assignmentRow.managerCanRun ?? true))
         setMemberCanRun(Boolean(assignmentRow.memberCanRun ?? false))
         setServiceType(normalizeCategory(String(agent?.serviceType || "general")))
@@ -739,21 +681,12 @@ export default function TenantAgentCreatePage() {
   const generatedGraph = useMemo(
     () =>
       buildCanvasGraph({
-        // show Start node as soon as a blueprint is selected
-        hasBlueprint: true,
-        blueprintTitle: "Agent",
         kinds: flowNodeKinds,
         values: {
           name,
           serviceType,
           aiProvider,
           aiModel,
-          authMode,
-          executionMode,
-          executionTime,
-          timezone,
-          lookbackHours,
-          maxEmails,
           systemPrompt,
           managerCanRun,
           memberCanRun,
@@ -767,12 +700,6 @@ export default function TenantAgentCreatePage() {
       serviceType,
       aiProvider,
       aiModel,
-      authMode,
-      executionMode,
-      executionTime,
-      timezone,
-      lookbackHours,
-      maxEmails,
       systemPrompt,
       managerCanRun,
       memberCanRun,
@@ -1152,7 +1079,6 @@ export default function TenantAgentCreatePage() {
         ? `Prompt Source: default (${CATEGORY_LABEL[serviceType]})`
         : "Prompt Source: tenant",
       `Tenant scope: ${tenantId}`,
-      `Execution: ${executionMode}${executionMode === "scheduled" ? ` at ${executionTime} ${timezone}` : ""}`,
       `Flow: ${flowSummary}`,
     ]
       .filter(Boolean)
@@ -1161,110 +1087,6 @@ export default function TenantAgentCreatePage() {
 
   const currentAllowedCollections = () =>
     []
-
-  const ensureWorkingAgent = async (): Promise<{ agentId: string; backendMessage: string }> => {
-    const existingWorkingAgentId = String(workingAgentIdRef.current || workingAgentId || "").trim()
-    if (existingWorkingAgentId) {
-      return { agentId: existingWorkingAgentId, backendMessage: "" }
-    }
-
-    const safeName = name.trim()
-    if (!safeName) {
-      throw new Error("Agent name is required before saving node settings.")
-    }
-
-    const createResp = await (dispatch(
-      createTenantAgent({
-        name: safeName,
-        systemPrompt: buildFinalPrompt(),
-        agentSkill: agentSkill.trim(),
-        agentInstruction: agentInstruction.trim(),
-        topK: 6,
-        isActive: isActive ? 1 : 0,
-        allowedCollections: currentAllowedCollections(),
-      }),
-    ) as Promise<{ agent?: { id?: string } }>)
-
-    const createdId = String(createResp?.agent?.id || "")
-    if (!createdId) {
-      throw new Error("Agent id missing from create response.")
-    }
-
-    setWorkingAgentId(createdId)
-    workingAgentIdRef.current = createdId
-    syncAgentIdInUrl(createdId)
-    return {
-      agentId: createdId,
-      backendMessage: extractBackendMessage(createResp),
-    }
-  }
-
-  const saveCoreAgentConfig = async (agentId: string): Promise<string> => {
-    const safeName = name.trim()
-    if (!safeName) {
-      throw new Error("Agent name is required.")
-    }
-
-    const response = await (dispatch(
-      updateTenantAgent({
-        agentId,
-        name: safeName,
-        systemPrompt: buildFinalPrompt(),
-        agentSkill: agentSkill.trim(),
-        agentInstruction: agentInstruction.trim(),
-        isActive: isActive ? 1 : 0,
-        topK: 6,
-        allowedCollections: currentAllowedCollections(),
-      }),
-    ) as Promise<unknown>)
-
-    return extractBackendMessage(response)
-  }
-
-  const saveAssignmentConfig = async (agentId: string): Promise<string> => {
-    const provider = aiProvider || "openai"
-    const model = aiModel.trim() || AI_MODEL_OPTIONS[provider][0]
-    const resolvedAuthMode: AuthMode = authMode || "tenant_shared_connection"
-    const resolvedExecutionMode: ExecutionMode = executionMode || "manual"
-
-    if (!aiProvider) setAiProvider(provider)
-    if (!aiModel.trim()) setAiModel(model)
-    if (!authMode) setAuthMode(resolvedAuthMode)
-    if (!executionMode) setExecutionMode(resolvedExecutionMode)
-
-    const parsedLookback = Number(lookbackHours)
-    const parsedMax = Number(maxEmails)
-    if (resolvedExecutionMode === "scheduled" && !executionTime.trim()) {
-      throw new Error("Execution time is required for scheduled mode.")
-    }
-    if (!Number.isFinite(parsedLookback) || parsedLookback < 1 || parsedLookback > 168) {
-      throw new Error("Lookback window must be between 1 and 168 hours.")
-    }
-    if (!Number.isFinite(parsedMax) || parsedMax < 1 || parsedMax > 100) {
-      throw new Error("Max emails per run must be between 1 and 100.")
-    }
-
-    const response = await (dispatch(
-      upsertTenantAgentAssignment({
-        agentId,
-        aiProvider: provider,
-        aiModel: model,
-        authMode: resolvedAuthMode,
-        executionMode: resolvedExecutionMode,
-        executionTime,
-        timezone,
-        lookbackHours: parsedLookback,
-        maxEmails: parsedMax,
-        managerCanRun,
-        memberCanRun,
-        assignedUserIds,
-        meetingAutomationEnabled: true,
-        meetingCreationMode: "auto",
-      }),
-    ) as Promise<unknown>)
-
-    return extractBackendMessage(response)
-  }
 
   const createAgent = async () => {
     setError(null)
@@ -1302,44 +1124,75 @@ export default function TenantAgentCreatePage() {
       return
     }
 
-    if (!authMode) {
-      setError("Google auth mode is required.")
-      return
-    }
-
-    if (!executionMode) {
-      setError("Execution mode is required.")
-      return
-    }
-
-    if (executionMode === "scheduled" && !executionTime.trim()) {
-      setError("Execution time is required for scheduled mode.")
-      return
-    }
-
-    const parsedLookback = Number(lookbackHours)
-    const parsedMax = Number(maxEmails)
-    if (!Number.isFinite(parsedLookback) || parsedLookback < 1 || parsedLookback > 168) {
-      setError("Lookback window must be between 1 and 168 hours.")
-      return
-    }
-    if (!Number.isFinite(parsedMax) || parsedMax < 1 || parsedMax > 100) {
-      setError("Max emails per run must be between 1 and 100.")
-      return
-    }
-
 
     setSaving(true)
     try {
-      const ensured = await ensureWorkingAgent()
-      const coreMessage = await saveCoreAgentConfig(ensured.agentId)
-      const assignmentMessage = await saveAssignmentConfig(ensured.agentId)
+      const provider = aiProvider || "openai"
+      const model = aiModel.trim() || AI_MODEL_OPTIONS[provider][0]
+      if (!aiProvider) setAiProvider(provider)
+      if (!aiModel.trim()) setAiModel(model)
 
-      const fallbackMessage = workingAgentId
+      const existingWorkingAgentId = String(workingAgentIdRef.current || workingAgentId || "").trim()
+      let agentId = existingWorkingAgentId
+      let backendMessage = ""
+
+      if (!agentId) {
+        const createResp = await (dispatch(
+          createTenantAgent({
+            name: safeName,
+            systemPrompt: buildFinalPrompt(),
+            agentSkill: agentSkill.trim(),
+            agentInstruction: agentInstruction.trim(),
+            topK: 6,
+            isActive: isActive ? 1 : 0,
+            allowedCollections: currentAllowedCollections(),
+          }),
+        ) as Promise<{ agent?: { id?: string } }>)
+
+        agentId = String(createResp?.agent?.id || "").trim()
+        if (!agentId) {
+          throw new Error("Agent id missing from create response.")
+        }
+
+        setWorkingAgentId(agentId)
+        workingAgentIdRef.current = agentId
+        syncAgentIdInUrl(agentId)
+        backendMessage = extractBackendMessage(createResp)
+      }
+
+      const coreResp = await (dispatch(
+        updateTenantAgent({
+          agentId,
+          name: safeName,
+          systemPrompt: buildFinalPrompt(),
+          agentSkill: agentSkill.trim(),
+          agentInstruction: agentInstruction.trim(),
+          isActive: isActive ? 1 : 0,
+          topK: 6,
+          allowedCollections: currentAllowedCollections(),
+        }),
+      ) as Promise<unknown>)
+      const coreMessage = extractBackendMessage(coreResp)
+
+      const assignmentResp = await (dispatch(
+        upsertTenantAgentAssignment({
+          agentId,
+          aiProvider: provider,
+          aiModel: model,
+          managerCanRun: true,
+          memberCanRun: true,
+          assignedUserIds,
+          meetingAutomationEnabled: true,
+          meetingCreationMode: "auto",
+        }),
+      ) as Promise<unknown>)
+      const assignmentMessage = extractBackendMessage(assignmentResp)
+
+      const fallbackMessage = existingWorkingAgentId
         ? "Agent updated and saved to database."
         : "Agent created and saved to database."
 
-      setSuccess(assignmentMessage || coreMessage || ensured.backendMessage || fallbackMessage)
+      setSuccess(assignmentMessage || coreMessage || backendMessage || fallbackMessage)
     } catch (err: unknown) {
       let message = "Failed to create agent"
 
@@ -1385,10 +1238,13 @@ export default function TenantAgentCreatePage() {
 
   const createButtonDisabled = useMemo(() => {
     if (saving || loadingEditData) return true
+    if (!name.trim()) return true
+    if (!aiProvider) return true
+    if (!aiModel.trim()) return true
     // For a new agent, enforce required canvas nodes before allowing create.
     if (!workingAgentId && missingRequiredNodeKinds.length > 0) return true
     return false
-  }, [saving, loadingEditData, workingAgentId, missingRequiredNodeKinds])
+  }, [saving, loadingEditData, name, aiProvider, aiModel, workingAgentId, missingRequiredNodeKinds])
 
   // Custom node renderer so each node has visible handles and can apply nodeOverrides
   const ConfigNode = ({ data, id, selected }: NodeProps<FlowNodeData>) => {
@@ -1613,11 +1469,6 @@ export default function TenantAgentCreatePage() {
                   />
                 </div>
 
-                {/* {selectedBlueprint ? (
-                  <Badge variant="outline" className="h-10 justify-center px-3 text-xs font-medium">
-                    {CATEGORY_LABEL[normalizeCategory(selectedBlueprint.category)]}
-                  </Badge>
-                ) : null} */}
               </div>
 
               {/* <div className="flex flex-wrap gap-2">
@@ -1626,7 +1477,6 @@ export default function TenantAgentCreatePage() {
                 {activeNodeMeta ? (
                   <Badge className="bg-violet-50 text-violet-700 hover:bg-violet-50">Active: {activeNodeMeta.title}</Badge>
                 ) : null}
-                {loadingBlueprints ? <Badge variant="outline">Loading...</Badge> : null}
                 {loadingEditData ? <Badge variant="outline">Loading agent...</Badge> : null}
               </div> */}
             </div>
@@ -1646,7 +1496,7 @@ export default function TenantAgentCreatePage() {
                     ? "Save Agent"
                     : "Create Agent"}
               </Button>
-              {/* {!workingAgentId && selectedBlueprint && missingRequiredNodeKinds.length > 0 ? (
+              {/* {!workingAgentId && missingRequiredNodeKinds.length > 0 ? (
                 <p className="text-xs text-amber-700">
                   Add required nodes first: {missingRequiredNodeKinds.map((kind) => FLOW_NODE_LIBRARY.find((item) => item.kind === kind)?.title || kind).join(", ")}
                 </p>
@@ -1875,55 +1725,6 @@ export default function TenantAgentCreatePage() {
                                   ))}
                                 </SelectContent>
                               </Select>
-
-                              <p className="pt-1 text-[11px] font-medium text-slate-600">Authentication</p>
-                              <Label className="text-xs">Auth Mode</Label>
-                              <Select value={authMode || "none"} onValueChange={(v) => setAuthMode(v === "none" ? ("" as AuthMode) : (v as AuthMode))}>
-                                <SelectTrigger className="h-8">
-                                  <SelectValue placeholder="Select auth mode" />
-                                </SelectTrigger>
-                                <SelectContent className="z-220">
-                                  <SelectItem value="none">None</SelectItem>
-                                  <SelectItem value="tenant_shared_connection">Tenant shared</SelectItem>
-                                  <SelectItem value="user_personal_connection">User personal</SelectItem>
-                                </SelectContent>
-                              </Select>
-
-                              <p className="pt-1 text-[11px] font-medium text-slate-600">Execution</p>
-                              <Label className="text-xs">Execution Mode</Label>
-                              <Select value={executionMode || ""} onValueChange={(v) => setExecutionMode(v as ExecutionMode)}>
-                                <SelectTrigger className="h-8">
-                                  <SelectValue placeholder="Select execution" />
-                                </SelectTrigger>
-                                <SelectContent className="z-220">
-                                  <SelectItem value="manual">Manual</SelectItem>
-                                  <SelectItem value="scheduled">Scheduled</SelectItem>
-                                </SelectContent>
-                              </Select>
-
-                              {executionMode === "scheduled" ? (
-                                <>
-                                  <Label className="text-xs">Time</Label>
-                                  <Input type="time" value={executionTime} onChange={(e) => setExecutionTime(e.target.value)} />
-                                  <Label className="text-xs">Timezone</Label>
-                                  <Select value={timezone} onValueChange={(v) => setTimezone(v)}>
-                                    <SelectTrigger className="h-8">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent className="z-220">
-                                      {TIMEZONE_OPTIONS.map((tz) => (
-                                        <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </>
-                              ) : null}
-
-                              <p className="pt-1 text-[11px] font-medium text-slate-600">Run Limits</p>
-                              <Label className="text-xs">Lookback (hours)</Label>
-                              <Input value={lookbackHours} onChange={(e) => setLookbackHours(e.target.value)} />
-                              <Label className="text-xs">Max emails per run</Label>
-                              <Input value={maxEmails} onChange={(e) => setMaxEmails(e.target.value)} />
                             </div>
                           ) : null}
 

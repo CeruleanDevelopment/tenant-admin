@@ -36,7 +36,6 @@ import { resolveSessionType } from "@/utils/access-control"
 type TenantMeUser = {
   id: string
   email: string
-  name: string
   role: string
   isActive?: boolean | null
   firstName?: string | null
@@ -156,12 +155,6 @@ type TenantAgentAssignmentInput = {
   agentId: string
   aiProvider: "openai" | "openrouter"
   aiModel: string
-  authMode: "tenant_shared_connection" | "user_personal_connection"
-  executionMode: "manual" | "scheduled"
-  executionTime?: string
-  timezone?: string
-  lookbackHours: number
-  maxEmails: number
   managerCanRun: boolean
   memberCanRun: boolean
   assignedUserIds: string[]
@@ -178,43 +171,6 @@ type TenantGmailStatus = {
 type TenantAgentListItem = Record<string, unknown>
 
 type TenantAgentDetail = Record<string, unknown>
-
-export type TenantAgentBlueprintDefaults = {
-  name?: string
-  description?: string
-  systemPrompt?: string
-  agentSkill?: string
-  agentInstruction?: string
-  aiProvider?: "openai" | "openrouter"
-  aiModel?: string
-  authMode?: "tenant_shared_connection" | "user_personal_connection"
-  executionMode?: "manual" | "scheduled"
-  executionTime?: string
-  timezone?: string
-  lookbackHours?: number
-  maxEmails?: number
-  managerCanRun?: boolean
-  memberCanRun?: boolean
-  meetingAutomationEnabled?: boolean
-  meetingCreationMode?: "auto" | "confirm_first"
-  isActive?: boolean
-  topK?: number
-  allowedCollections?: string[]
-}
-
-export type TenantAgentBlueprint = {
-  id: number
-  blueprintKey?: string | null
-  title: string
-  category: string
-  summary: string
-  exampleUse: string
-  defaults: TenantAgentBlueprintDefaults
-  isActive?: boolean
-  sortOrder?: number
-  createdAt?: string | null
-  updatedAt?: string | null
-}
 
 type TenantAgentAssignmentView = {
   configured?: boolean
@@ -1055,8 +1011,9 @@ export const fetchTenantUsers =
 
     _fetchTenantUsersPromise = (async () => {
       try {
-        console.debug("fetchTenantUsers: calling /tenant/users with headers:", headers)
-        const response = await axios.get("/tenant/users", { headers })
+        const params = { sortBy: "createdAt", order: "desc" }
+        console.debug("fetchTenantUsers: calling /tenant/users with headers and params:", headers, params)
+        const response = await axios.get("/tenant/users", { headers, params })
         const users = Array.isArray(response?.data?.users) ? response.data.users : []
         return users as TenantMeUser[]
       } catch (error) {
@@ -1219,12 +1176,6 @@ export const upsertTenantAgentAssignment =
       {
         aiProvider: input.aiProvider,
         aiModel: input.aiModel,
-        authMode: input.authMode,
-        executionMode: input.executionMode,
-        executionTime: input.executionTime,
-        timezone: input.timezone,
-        lookbackHours: input.lookbackHours,
-        maxEmails: input.maxEmails,
         managerCanRun: input.managerCanRun,
         memberCanRun: input.memberCanRun,
         assignedUserIds: input.assignedUserIds,
@@ -1430,14 +1381,3 @@ export const deleteTenantAgentConversationUser = (
     return (response?.data || {}) as { deleted?: boolean }
   }
 }
-export const fetchTenantAgentBlueprints =
-  (): ThunkAction<Promise<TenantAgentBlueprint[]>, RootState, unknown, AnyAction> =>
-  async () => {
-    const token = loadAuthTokenCookie()
-    const headers: Record<string, string> = {}
-    if (token) headers["x-tenant-token"] = token
-
-    const resp = await axios.get("/ai/agent-blueprints", { headers })
-    const rows = Array.isArray(resp?.data?.blueprints) ? resp.data.blueprints : []
-    return rows as TenantAgentBlueprint[]
-  }

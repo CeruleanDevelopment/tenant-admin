@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useDispatch } from "react-redux"
 import type { AppDispatch } from "../../../../redux/store"
-import { fetchAssignedAgents, startUserGmailIntegration, startTenantGmailIntegration } from "../../../../actions/auth"
+import { fetchAssignedAgents } from "../../../../actions/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,19 +19,13 @@ type AssignedAgent = {
   type: string
   aiProvider: string
   aiModel: string
-  authMode: "tenant_shared_connection" | "user_personal_connection"
-  requiresGoogleLogin: boolean
-  oauthReady: boolean
   canRun: boolean
-  lookbackHours: number
-  maxEmails: number
 }
 
 export default function UserAssignedAgentsPage() {
   const [agents, setAgents] = useState<AssignedAgent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [connectingAgentId, setConnectingAgentId] = useState<string | null>(null)
 
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter() as { push: (href: string) => void }
@@ -68,156 +62,6 @@ export default function UserAssignedAgentsPage() {
     }
   }, [dispatch])
 
-  const connectGoogle = async (agentId: string) => {
-    setError(null)
-    setConnectingAgentId(agentId)
-    try {
-      const agent = agents.find((a) => a.id === agentId)
-      const chatHref = `/users/agents/chat?agentId=${encodeURIComponent(agentId)}`
-      const browserWindow = typeof window !== "undefined" ? window : null
-      if (!browserWindow) {
-        setError("Google login is only available in the browser.")
-        setConnectingAgentId(null)
-        return
-      }
-
-      const popup = browserWindow.open("about:blank", "tenant-google", "width=600,height=700")
-      if (!popup) {
-        const startUrl = await dispatch(startUserGmailIntegration(chatHref, agent?.tenantId))
-        if (!startUrl) {
-          setError("Failed to start Google login.")
-          setConnectingAgentId(null)
-          return
-        }
-        window.location.assign(startUrl)
-        setConnectingAgentId(null)
-        return
-      }
-
-      popup.document.write('<p style="font-family:sans-serif;padding:24px">Opening Google login...</p>')
-      popup.document.close()
-
-      const startUrl = await dispatch(startUserGmailIntegration(chatHref, agent?.tenantId))
-      if (!startUrl) {
-        setError("Failed to start Google login.")
-        popup.close()
-        setConnectingAgentId(null)
-        return
-      }
-
-      popup.location.href = startUrl
-
-      let poll: ReturnType<typeof setInterval> | null = null
-
-      const cleanup = () => {
-        browserWindow.removeEventListener("message", handleMessage)
-        if (poll) {
-          clearInterval(poll)
-          poll = null
-        }
-      }
-
-      const refreshAgents = async (): Promise<AssignedAgent[]> => {
-        try {
-          const rows = (await dispatch(fetchAssignedAgents() as any)) as unknown[]
-          const nextAgents = Array.isArray(rows) ? (rows as AssignedAgent[]) : []
-          setAgents(nextAgents)
-          return nextAgents
-        } catch (refreshError: unknown) {
-          const message =
-            typeof refreshError === "object" && refreshError !== null && "message" in refreshError
-              ? String((refreshError as { message?: string }).message || "Google login succeeded, but the page could not refresh.")
-              : "Google login succeeded, but the page could not refresh."
-          setError(message)
-          return []
-        }
-      }
-
-      const handleMessage = async (event: MessageEvent) => {
-        if (event.origin !== browserWindow.location.origin) return
-
-        const payload = event.data || {}
-        if (payload?.type === "tenant-agent-auth-complete") {
-          cleanup()
-          popup.close()
-          await refreshAgents()
-          const nextHref = String(payload.next || chatHref || "/users/agents/chat")
-          window.location.assign(nextHref)
-          setConnectingAgentId(null)
-          return
-        }
-
-        if (payload?.type === "tenant-auth-error") {
-          cleanup()
-          popup.close()
-          const refreshed = await refreshAgents()
-          const refreshedAgent = refreshed.find((item) => item.id === agentId)
-          if (refreshedAgent?.oauthReady) {
-            window.location.assign(chatHref)
-            setConnectingAgentId(null)
-            return
-          }
-          setError(String(payload.error || "Google login failed."))
-          setConnectingAgentId(null)
-          return
-        }
-
-        if (payload?.type === "tenant-auth") {
-          cleanup()
-          popup.close()
-          await refreshAgents()
-          window.location.assign(chatHref)
-          setConnectingAgentId(null)
-        }
-      }
-
-      browserWindow.addEventListener("message", handleMessage)
-
-      poll = setInterval(() => {
-        if (popup.closed) {
-          cleanup()
-          setConnectingAgentId(null)
-          if (!error) {
-            setError("Google login popup was closed before completion.")
-          }
-        }
-      }, 500)
-    } catch (err: unknown) {
-      const message =
-        typeof err === "object" && err !== null && "message" in err
-          ? String((err as { message?: string }).message || "Failed to start Google login")
-          : "Failed to start Google login"
-      setError(message)
-      setConnectingAgentId(null)
-    }
-  }
-
-  const reconnectGoogle = async (agent: AssignedAgent) => {
-    if (agent.requiresGoogleLogin) {
-      await connectGoogle(agent.id)
-      return
-    }
-
-    setError(null)
-    setConnectingAgentId(agent.id)
-    try {
-      const response = await dispatch(startTenantGmailIntegration({ next: "/users/agents" }) as any)
-      const startUrl = String(response?.startUrl || "").trim()
-      if (!startUrl) {
-        setError("Unable to start tenant Gmail reconnect. Ask your tenant admin to reconnect Google from tenant settings.")
-        return
-      }
-      window.location.assign(startUrl)
-    } catch (err: unknown) {
-      const message =
-        typeof err === "object" && err !== null && "message" in err
-          ? String((err as { message?: string }).message || "Failed to start tenant Gmail reconnect.")
-          : "Failed to start tenant Gmail reconnect."
-      setError(`${message} Ask your tenant admin if you do not have permission.`)
-    } finally {
-      setConnectingAgentId(null)
-    }
-  }
   return (
     <main className="p-0">
       <div className="mx-auto max-w-6xl space-y-4">
@@ -225,67 +69,9 @@ export default function UserAssignedAgentsPage() {
           <div>
             <h1 className="text-2xl font-bold">My Assigned Agents</h1>
             <p className="text-sm text-muted-foreground">
-              These are tenant-assigned agents. Gmail requirement depends on agent auth mode.
+              These are tenant-assigned agents.
             </p>
           </div>
-          {/* Gmail Health Banner */}
-          {/* <div className="w-full md:w-auto">
-            {healthLoading ? (
-              <p className="text-sm text-muted-foreground">Checking Gmail connectivity...</p>
-            ) : (
-              <div className="text-right">
-                {!gmailHealth.tenantConnected ? (
-                  <div className="rounded-md border p-2 bg-yellow-50 text-sm">
-                    <div>Tenant Gmail: Not connected</div>
-                    <div className="mt-1 flex gap-2 justify-end">
-                      <button
-                        className="rounded bg-primary px-2 py-1 text-white cursor-pointer"
-                        onClick={async () => {
-                          try {
-                            const resp = await dispatch(startTenantGmailIntegration({ next: "/users/agents" }) as any)
-                            const startUrl = String(resp?.startUrl || "")
-                            if (startUrl) window.location.assign(startUrl)
-                          } catch (err: unknown) {
-                            setError(typeof err === "object" && err !== null && "message" in err ? String((err as { message?: string }).message || "") : "Failed to start tenant Google connect")
-                          }
-                        }}
-                      >
-                        Reconnect (Tenant)
-                      </button>
-                      <Link href="/tenant/agents" prefetch={false} className="underline text-sm">Tenant Settings</Link>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-md border p-2 bg-green-50 text-sm">Tenant Gmail: Connected {gmailHealth.tenantExpiresAt ? `— expires ${gmailHealth.tenantExpiresAt}` : null}</div>
-                )}
-
-                {!gmailHealth.userConnected ? (
-                  <div className="mt-2 rounded-md border p-2 bg-yellow-50 text-sm">
-                    <div>Your personal Gmail: Not connected</div>
-                    <div className="mt-1 flex gap-2 justify-end">
-                      <button
-                        className="rounded border px-2 py-1 cursor-pointer"
-                        onClick={async () => {
-                          try {
-                            // open same-tab connect for personal Gmail
-                            const resp = await dispatch(startUserGmailIntegration("/users/agents") as any)
-                            const startUrl = String(resp || "")
-                            if (startUrl) window.location.assign(startUrl)
-                          } catch (err: unknown) {
-                            setError(typeof err === "object" && err !== null && "message" in err ? String((err as { message?: string }).message || "") : "Failed to start Google connect")
-                          }
-                        }}
-                      >
-                        Connect Personal Gmail
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-2 rounded-md border p-2 bg-green-50 text-sm">Your Gmail: Connected {gmailHealth.userExpiresAt ? `— expires ${gmailHealth.userExpiresAt}` : null}</div>
-                )}
-              </div>
-            )}
-          </div> */}
           {/* <Button asChild variant="outline" className="cursor-pointer">
             <Link href="/users/signin" prefetch={false}>Switch User</Link>
           </Button> */}
@@ -297,7 +83,7 @@ export default function UserAssignedAgentsPage() {
         {!loading && !error && agents.length === 0 ? (
           <Card>
             <CardContent className="p-6 text-sm text-muted-foreground">
-              No agents assigned yet. Ask your tenant admin to assign a Gmail agent.
+              No agents assigned yet. Ask your tenant admin to assign an agent.
             </CardContent>
           </Card>
         ) : null}
@@ -316,86 +102,26 @@ export default function UserAssignedAgentsPage() {
                   </Badge>
                   <Badge variant="outline">{agent.aiProvider}</Badge>
                   <Badge variant="outline">{agent.aiModel}</Badge>
-                  <Badge variant="outline">lookback {agent.lookbackHours}h</Badge>
-                  {/* <Badge variant="outline">max {agent.maxEmails}</Badge> */}
                 </div>
 
-                <div className="rounded-md border bg-muted/40 p-3 text-sm">
-                  <p>
-                    Google login: {agent.requiresGoogleLogin ? "Personal Google login required" : "Tenant shared connection"}
-                  </p>
-                  <p>
-                    OAuth ready: {agent.oauthReady ? "Yes" : "No"}
-                  </p>
-                  <p>
-                    Permission: {agent.canRun ? "Run allowed" : "View only"}
-                  </p>
-                </div>
+                <div className="rounded-md border bg-muted/40 p-3 text-sm">Permission: {agent.canRun ? "Run allowed" : "View only"}</div>
 
                 <Button
                   type="button"
                   className="w-full cursor-pointer"
-                  disabled={!agent.canRun || connectingAgentId === agent.id}
+                  disabled={agent.isActive === 0 || !agent.canRun}
                   onClick={() => {
-                    if (agent.isActive === 0) return
                     if (!agent.canRun) return
-
-                    // If OAuth is ready, open the chat. Otherwise, start Google connect if required.
-                    if (agent.oauthReady) {
-                      router.push(`/users/agents/chat?agentId=${encodeURIComponent(agent.id)}`)
-                      return
-                    }
-
-                    if (agent.requiresGoogleLogin) {
-                      void connectGoogle(agent.id)
-                    }
+                    if (agent.isActive === 0) return
+                    router.push(`/users/agents/chat?agentId=${encodeURIComponent(agent.id)}`)
                   }}
                 >
                   {agent.isActive === 0
                     ? "Agent Inactive"
                     : agent.canRun
-                      ? (agent.oauthReady ? "Run Gmail Agent" : "Connect Google to Run")
+                      ? "Run Agent"
                       : "No Run Permission"}
                 </Button>
-
-                {agent.canRun && !agent.oauthReady && agent.requiresGoogleLogin ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full cursor-pointer"
-                    disabled={connectingAgentId === agent.id}
-                    onClick={() => void connectGoogle(agent.id)}
-                  >
-                    {connectingAgentId === agent.id ? "Opening Google Login..." : "Login with Google"}
-                  </Button>
-                ) : null}
-
-                {agent.canRun ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full cursor-pointer"
-                    disabled={connectingAgentId === agent.id}
-                    onClick={() => void reconnectGoogle(agent)}
-                  >
-                    {connectingAgentId === agent.id
-                      ? "Opening Google Login..."
-                      : agent.requiresGoogleLogin
-                        ? "Reconnect Google"
-                        : "Reconnect Tenant Google"}
-                  </Button>
-                ) : null}
-
-                {/* {agent.canRun && agent.oauthReady ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full cursor-pointer"
-                    onClick={() => router.push(`/users/agents/chat?agentId=${encodeURIComponent(agent.id)}`)}
-                  >
-                    Open Gmail Chat
-                  </Button>
-                ) : null} */}
               </CardContent>
             </Card>
           ))}

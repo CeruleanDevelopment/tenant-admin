@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
-import { DropdownList } from "react-widgets"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useDispatch } from "react-redux"
 import { AppDispatch } from "../../../../../redux/store"
 import { addTenantUser } from "../../../../../actions/auth"
@@ -29,6 +29,21 @@ export default function AddUserPage() {
   const [success, setSuccess] = useState("");
   const roles = roleOptions;
   const loadingRoles = false;
+
+  useEffect(() => {
+    if (!success && !errors.form) return
+
+    const timer = setTimeout(() => {
+      setSuccess("")
+      setErrors((prev) => {
+        if (!prev.form) return prev
+        const { form, ...rest } = prev
+        return rest
+      })
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [success, errors.form])
 
   function validate() {
     const e: Record<string, string> = {}
@@ -59,10 +74,10 @@ export default function AddUserPage() {
         isActive: isActive ? 1 : 0,
       }))
 
-      let message = "User created."
+      let message = "User added."
       if (typeof resp === "object" && resp !== null) {
         const r = resp as { message?: string; user?: unknown }
-        message = r.message ?? (r.user ? "User created successfully." : message)
+        message = r.message ?? (r.user ? "User added successfully." : message)
       } else if (typeof resp === "string") {
         message = resp
       }
@@ -74,7 +89,6 @@ export default function AddUserPage() {
       setRole("")
       setIsActive(false)
     } catch (err: unknown) {
-      // Normalize backend error responses (ApiError shape: { message, details })
       let formMessage = "Submission failed"
       const detailErrors: Record<string, string> = {}
 
@@ -131,7 +145,7 @@ export default function AddUserPage() {
                     id="firstName"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    placeholder="Jane"
+                    placeholder="enter first name"
                   />
                   {errors.firstName && <p className="text-sm text-red-600 mt-1">{errors.firstName}</p>}
                 </div>
@@ -142,7 +156,7 @@ export default function AddUserPage() {
                     id="lastName"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    placeholder="Doe"
+                    placeholder="enter last name"
                   />
                   {errors.lastName && <p className="text-sm text-red-600 mt-1">{errors.lastName}</p>}
                 </div>
@@ -157,24 +171,25 @@ export default function AddUserPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="jane@example.com"
+                    placeholder="enter email"
                   />
                   {errors.email && <p className="text-sm text-red-600 mt-1">{errors.email}</p>}
                 </div>
 
                 <div>
                   <Label htmlFor="role" className="mb-1">Role</Label>
-                  <DropdownList
-                    data={roles}
-                    dataKey="value"
-                    textField="label"
-                    value={roles.find((r) => r.value === role) || null}
-                    onChange={(val) => setRole((val as any)?.value || "")}
-                    disabled={loadingRoles}
-                    placeholder={loadingRoles ? "Loading roles..." : "Select role"}
-                    className="w-full role-select-centered"
-                    inputProps={{ id: "role", className: "h-8 leading-8" }}
-                  />
+                  <Select value={role || undefined} onValueChange={setRole} disabled={loadingRoles}>
+                    <SelectTrigger id="role" className="w-full">
+                      <SelectValue placeholder={loadingRoles ? "Loading roles..." : "Select role"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roles.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {errors.role && <p className="text-sm text-red-600 mt-1">{errors.role}</p>}
                 </div>
 

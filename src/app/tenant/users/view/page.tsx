@@ -29,7 +29,6 @@ import {
 type UserRow = {
 	id: string
 	email: string
-	name?: string
 	firstName?: string | null
 	lastName?: string | null
 	role?: string
@@ -123,7 +122,7 @@ export default function ViewUsersPage() {
 
 	const tableData = React.useMemo<UserTableRow[]>(() => {
 		return users.map((u) => {
-			const name = String(u.name || [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "-")
+			const name = String([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "-")
 			const isActive = Boolean(u.isActive)
 
 			return {
@@ -279,15 +278,15 @@ export default function ViewUsersPage() {
 														</TableCell>
 														<TableCell>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}</TableCell>
 														<TableCell className="w-55 align-middle text-right">
-															<div className="ml-auto flex h-8 min-w-50 items-center justify-end gap-2 whitespace-nowrap">
+															<div className="ml-auto flex h-9 min-w-50 items-center justify-end gap-2 whitespace-nowrap">
 																<Button
 																	type="button"
-																	size="sm"
+																	size="default"
 																	variant="outline"
-																	className="h-8 w-20 px-0 text-center cursor-pointer"
+																	className="inline-flex h-9 w-20 items-center justify-center px-0 text-center leading-none cursor-pointer"
 																	onClick={() => router.push(`/tenant/users/edit?userId=${encodeURIComponent(String(user.id || ""))}`)}
 																>
-																	<span className="block w-full text-center leading-none">Edit</span>
+																	Edit
 																</Button>
 																<Switch
 																	size="default"
@@ -308,7 +307,7 @@ export default function ViewUsersPage() {
 								</div>
 
 								<div className="flex items-center justify-between">
-									<span className="text-sm text-muted-foreground">Result {from}–{to} of {total}</span>
+									<span className="text-sm text-muted-foreground flex whitespace-nowrap">Result {from}–{to} of {total}</span>
 
 									<Pagination>
 										<PaginationContent>

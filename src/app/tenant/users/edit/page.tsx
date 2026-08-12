@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { DropdownList } from "react-widgets"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useDispatch } from "react-redux"
 import { AppDispatch } from "../../../../../redux/store"
 import { fetchTenantUsers, updateTenantUser } from "../../../../../actions/auth"
@@ -77,19 +77,8 @@ export default function EditUserPage() {
 
       const firstNameRaw = String(target.firstName || "").trim()
       const lastNameRaw = String(target.lastName || "").trim()
-      const combinedName = String(target.name || "").trim()
-
-      if (firstNameRaw || lastNameRaw) {
-        setFirstName(firstNameRaw)
-        setLastName(lastNameRaw)
-      } else if (combinedName) {
-        const parts = combinedName.split(/\s+/).filter(Boolean)
-        setFirstName(parts[0] || "")
-        setLastName(parts.slice(1).join(" "))
-      } else {
-        setFirstName("")
-        setLastName("")
-      }
+      setFirstName(firstNameRaw)
+      setLastName(lastNameRaw)
 
       setEmail(String(target.email || ""))
       setRole(normalizeRoleValue(target.role))
@@ -110,6 +99,21 @@ export default function EditUserPage() {
       mounted = false
     }
   }, [dispatch, editUserId])
+
+  useEffect(() => {
+    if (!success && !errors.form) return
+
+    const timer = setTimeout(() => {
+      setSuccess("")
+      setErrors((prev) => {
+        if (!prev.form) return prev
+        const { form, ...rest } = prev
+        return rest
+      })
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [success, errors.form])
 
   function validate() {
     const e: Record<string, string> = {}
@@ -212,7 +216,7 @@ export default function EditUserPage() {
                     id="firstName"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    placeholder="Jane"
+                    placeholder="enter first name"
                   />
                   {errors.firstName && <p className="text-sm text-red-600 mt-1">{errors.firstName}</p>}
                 </div>
@@ -223,7 +227,7 @@ export default function EditUserPage() {
                     id="lastName"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    placeholder="Doe"
+                    placeholder="enter last name"
                   />
                   {errors.lastName && <p className="text-sm text-red-600 mt-1">{errors.lastName}</p>}
                 </div>
@@ -236,23 +240,25 @@ export default function EditUserPage() {
                     id="email"
                     type="email"
                     value={email}
-                    placeholder="jane@example.com"
+                    placeholder="enter email"
                     disabled
                   />
                 </div>
 
                 <div>
                   <Label htmlFor="role" className="mb-1">Role</Label>
-                  <DropdownList
-                    data={roles}
-                    dataKey="value"
-                    textField="label"
-                    value={roles.find((r) => r.value === role) || null}
-                    onChange={(val) => setRole((val as any)?.value || "")}
-                    placeholder="Select role"
-                    className="w-full role-select-centered"
-                    inputProps={{ id: "role", className: "h-8 leading-8" }}
-                  />
+                  <Select value={role || undefined} onValueChange={setRole}>
+                    <SelectTrigger id="role" className="w-full">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roles.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {errors.role && <p className="text-sm text-red-600 mt-1">{errors.role}</p>}
                 </div>
 

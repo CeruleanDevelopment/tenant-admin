@@ -41,14 +41,8 @@ type TenantAgentCard = {
   category: AgentCategory
   configured: boolean
   isActive: 0 | 1
-  authMode: "tenant_shared_connection" | "user_personal_connection"
-  executionMode: "manual" | "scheduled"
-  executionTime?: string | null
-  timezone?: string
   aiProvider: "openai" | "openrouter"
   aiModel: string
-  lookbackHours: number
-  maxEmails: number
   managerCanRun: boolean
   memberCanRun: boolean
   assignedUserIds: string[]
@@ -116,17 +110,8 @@ export default function TenantCreatedAgentsPage() {
             }),
             configured: Boolean(assignment?.configured),
             isActive: Number((assignment?.isActive as number | undefined) ?? row.isActive ?? 1) === 0 ? 0 : 1,
-            authMode:
-              assignment?.authMode === "user_personal_connection"
-                ? "user_personal_connection"
-                : "tenant_shared_connection",
-            executionMode: assignment?.executionMode === "scheduled" ? "scheduled" : "manual",
-            executionTime: assignment?.executionTime ? String(assignment.executionTime) : null,
-            timezone: String((assignment?.timezone as string | undefined) || "UTC"),
             aiProvider: assignment?.aiProvider === "openrouter" ? "openrouter" : "openai",
             aiModel: String((assignment?.aiModel as string | undefined) || "gpt-4.1-mini"),
-            lookbackHours: Number((assignment?.lookbackHours as number | undefined) || 24),
-            maxEmails: Number((assignment?.maxEmails as number | undefined) || 75),
             managerCanRun: Boolean((assignment?.managerCanRun as boolean | undefined) ?? true),
             memberCanRun: Boolean((assignment?.memberCanRun as boolean | undefined) ?? false),
             assignedUserIds: Array.isArray(assignment?.assignedUserIds)
@@ -242,14 +227,6 @@ export default function TenantCreatedAgentsPage() {
                     </Badge>
                     <Badge variant="outline">{agent.aiProvider}</Badge>
                     <Badge variant="outline" className="max-w-full truncate">{agent.aiModel}</Badge>
-                    <Badge variant="outline">{agent.authMode === "user_personal_connection" ? "user google" : "tenant google"}</Badge>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-700">
-                    <div className="rounded-md border border-slate-200 bg-white px-2 py-1">{agent.executionMode === "scheduled" ? `Schedule: ${agent.executionTime || "--:--"}` : "Manual run"}</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-2 py-1">TZ: {agent.timezone || "UTC"}</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-2 py-1">Lookback: {agent.lookbackHours}h</div>
-                    <div className="rounded-md border border-slate-200 bg-white px-2 py-1">Max emails: {agent.maxEmails}</div>
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2 text-xs">

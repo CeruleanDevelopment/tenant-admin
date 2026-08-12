@@ -63,14 +63,8 @@ type TenantAgentCard = {
   oauthReady?: boolean
   requiresGoogleLogin?: boolean
   canRun?: boolean
-  authMode: "tenant_shared_connection" | "user_personal_connection"
-  executionMode: "manual" | "scheduled"
-  executionTime?: string | null
-  timezone?: string
   aiProvider: "openai" | "openrouter"
   aiModel: string
-  lookbackHours: number
-  maxEmails: number
   managerCanRun: boolean
   memberCanRun: boolean
   assignedUserIds: string[]
@@ -856,17 +850,8 @@ export default function ChatPage() {
           oauthReady: Boolean(row.oauthReady ?? false),
           requiresGoogleLogin: Boolean(row.requiresGoogleLogin ?? false),
           canRun: Boolean(row.canRun ?? true),
-          authMode:
-            row.authMode === "user_personal_connection"
-              ? "user_personal_connection"
-              : "tenant_shared_connection",
-          executionMode: String(row.executionMode || "manual") === "scheduled" ? "scheduled" : "manual",
-          executionTime: row.executionTime ? String(row.executionTime) : null,
-          timezone: String(row.timezone || "UTC"),
           aiProvider: row.aiProvider === "openrouter" ? "openrouter" : "openai",
           aiModel: String(row.aiModel || "gpt-4.1-mini"),
-          lookbackHours: Number(row.lookbackHours || 24),
-          maxEmails: Number(row.maxEmails || 75),
           managerCanRun: Boolean(row.managerCanRun ?? true),
           memberCanRun: Boolean(row.memberCanRun ?? false),
           assignedUserIds: Array.isArray(row.assignedUserIds) ? row.assignedUserIds.map((value: unknown) => String(value)) : [],
@@ -962,7 +947,7 @@ export default function ChatPage() {
   )
   const selectedAgentIsGmail = isGmailAnalysisType(selectedAgent?.type || selectedAgent?.workflowType)
   const selectedWorkflowType = String(selectedAgent?.workflowType || selectedAgent?.type || "direct")
-  const activeDisplayTimeZone = resolveChatTimeZone(selectedAgent?.timezone)
+  const activeDisplayTimeZone = resolveChatTimeZone()
   const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
   const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
   const activeMessageBucketKey = selectedAgentId && activeChatId ? buildMessageBucketKey(selectedAgentId, activeChatId) : ""
@@ -1608,7 +1593,7 @@ export default function ChatPage() {
                         <span>•</span>
                         <span>{agent.aiModel}</span>
                         <span>•</span>
-                        <span>{agent.authMode === "user_personal_connection" ? "personal auth" : "tenant auth"}</span>
+                        <span>configured</span>
                       </div>
                     </button>
                   )
@@ -1756,17 +1741,17 @@ export default function ChatPage() {
                   </CardTitle>
                   {/* <CardDescription>
                     {selectedAgent
-                      ? `${selectedWorkflowType} workflow, ${selectedAgent.executionMode} execution, model ${selectedAgent.aiModel}.`
+                      ? `${selectedWorkflowType} workflow, model ${selectedAgent.aiModel}.`
                       : "Select an agent to start chat."}
                   </CardDescription> */}
                 </div>
 
                 {/* <div className="flex flex-wrap gap-2">
                   <Badge variant="outline">
-                    {selectedAgent?.authMode === "user_personal_connection" ? "personal connection" : "tenant shared"}
+                    Tenant shared connection
                   </Badge>
                   <Badge variant="outline">{selectedAgent?.aiModel || "gpt-4.1-mini"}</Badge>
-                  <Badge variant="outline">{selectedAgent?.executionMode || "manual"}</Badge>
+                  <Badge variant="outline">ready</Badge>
                 </div> */}
               </div>
             </CardHeader>
@@ -1788,7 +1773,7 @@ export default function ChatPage() {
                     Execution window
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedAgent ? `${selectedAgent.lookbackHours} hour lookback, ${selectedAgent.maxEmails} max emails.` : "Waiting for an agent selection."}
+                    {selectedAgent ? "Email analysis ready for the selected agent." : "Waiting for an agent selection."}
                   </p>
                 </div>
                 <div className="rounded-2xl border bg-muted/20 p-3">
