@@ -34,7 +34,7 @@ type TenantAgentCard = {
   aiProvider: "openai" | "openrouter"
   aiModel: string
   managerCanRun: boolean
-  memberCanRun: boolean
+  userCanRun: boolean
   assignedUserIds: string[]
   workflowType?: string
   createdAt?: string | null
@@ -80,9 +80,11 @@ export default function TenantAgentsPage() {
 
   const [agents, setAgents] = useState<TenantAgentCard[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
+  const [pageError, setPageError] = useState<string | null>(null)
 
   const loadAgents = useCallback(async () => {
     setLoadingAgents(true)
+    setPageError(null)
     try {
       const rows = await (dispatch(fetchTenantAgents()) as Promise<Record<string, unknown>[]>)
 
@@ -125,7 +127,7 @@ export default function TenantAgentsPage() {
             aiProvider: assignment?.aiProvider === "openrouter" ? "openrouter" : "openai",
             aiModel: String((assignment?.aiModel as string | undefined) || "gpt-4.1-mini"),
             managerCanRun: Boolean((assignment?.managerCanRun as boolean | undefined) ?? true),
-            memberCanRun: Boolean((assignment?.memberCanRun as boolean | undefined) ?? false),
+            userCanRun: Boolean((assignment?.userCanRun as boolean | undefined) ?? (assignment?.memberCanRun as boolean | undefined) ?? false),
             assignedUserIds: Array.isArray(assignment?.assignedUserIds)
               ? assignment.assignedUserIds.map((value: unknown) => String(value))
               : [],
@@ -137,6 +139,13 @@ export default function TenantAgentsPage() {
       )
 
       setAgents(mapped.filter((value): value is TenantAgentCard => Boolean(value)))
+    } catch (error) {
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: string }).message || "Failed to load agents.")
+          : "Failed to load agents."
+      setAgents([])
+      setPageError(message)
     } finally {
       setLoadingAgents(false)
     }
@@ -191,6 +200,11 @@ export default function TenantAgentsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {pageError ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {pageError}
+              </div>
+            ) : null}
             {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
             {!loadingAgents && agents.length === 0 ? <p className="text-sm text-muted-foreground">No agents found.</p> : null}
 

@@ -5,9 +5,10 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useDispatch } from "react-redux"
 import type { AppDispatch } from "../../../../../redux/store"
-import { fetchTenantUsers, setTenantUserActiveStatus } from "../../../../../actions/auth"
+import { fetchTenantAgents, fetchTenantUsers, setTenantUserActiveStatus } from "../../../../../actions/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
 	Table,
 	TableBody,
@@ -33,8 +34,16 @@ type UserRow = {
 	lastName?: string | null
 	role?: string
 	isActive?: boolean | null
+	assignedAgentIds?: string | null
+	assigned_agent_ids?: string | null
+	agentIds?: string | null
 	createdAt?: string | null
 	updatedAt?: string | null
+}
+
+type AgentOption = {
+	id: string
+	name: string
 }
 
 type UserTableRow = {
@@ -44,6 +53,7 @@ type UserTableRow = {
 	role: string
 	status: string
 	isActive: boolean
+	assignedAgentIds: string
 	firstName?: string | null
 	lastName?: string | null
 	createdAt?: string | null
@@ -63,6 +73,10 @@ export default function ViewUsersPage() {
 	const [page, setPage] = useState(1)
 	const [sortKey, setSortKey] = useState<"name" | "email" | "role" | "status">("name")
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+	const [agentOptions, setAgentOptions] = useState<AgentOption[]>([])
+	const [viewAssignedDialogOpen, setViewAssignedDialogOpen] = useState(false)
+	const [dialogUserName, setDialogUserName] = useState("")
+	const [dialogAssignedNames, setDialogAssignedNames] = useState<string[]>([])
 
 	useEffect(() => {
 		let mounted = true
@@ -120,10 +134,61 @@ export default function ViewUsersPage() {
 		}
 	}, [dispatch])
 
+	useEffect(() => {
+		let mounted = true
+
+		const request = dispatch(fetchTenantAgents()) as Promise<unknown>
+		request
+			.then((rows: unknown) => {
+				if (!mounted) return
+				const list = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : []
+				const mapped = list
+					.map((row) => {
+						const id = String(row.id || "").trim()
+						if (!id) return null
+						const name = String(row.name || row.agentName || "Untitled Agent").trim() || "Untitled Agent"
+						return { id, name }
+					})
+					.filter((row): row is AgentOption => Boolean(row))
+
+				setAgentOptions(Array.from(new Map(mapped.map((item) => [item.id, item])).values()))
+			})
+			.catch(() => {
+				if (!mounted) return
+				setAgentOptions([])
+			})
+
+		return () => {
+			mounted = false
+		}
+	}, [dispatch])
+
+	const agentNameById = React.useMemo(
+		() => new Map(agentOptions.map((agent) => [agent.id, agent.name])),
+		[agentOptions],
+	)
+
+	const parseAssignedAgentIds = React.useCallback((value: string): string[] => {
+		return String(value || "")
+			.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean)
+	}, [])
+
+	const handleViewAssignedAgents = React.useCallback((user: UserTableRow) => {
+		const assignedIds = parseAssignedAgentIds(user.assignedAgentIds)
+		const names = assignedIds.map((id) => agentNameById.get(id) || "Unknown Agent")
+
+		setDialogUserName(user.name || user.email || "User")
+		setDialogAssignedNames(names)
+		setViewAssignedDialogOpen(true)
+	}, [agentNameById, parseAssignedAgentIds])
+
 	const tableData = React.useMemo<UserTableRow[]>(() => {
 		return users.map((u) => {
 			const name = String([u.firstName, u.lastName].filter(Boolean).join(" ").trim() || "-")
 			const isActive = Boolean(u.isActive)
+			const assignedAgentIds = String(u.assignedAgentIds || u.assigned_agent_ids || u.agentIds || "").trim()
 
 			return {
 				id: String(u.id || ""),
@@ -132,6 +197,7 @@ export default function ViewUsersPage() {
 				role: String(u.role || "-"),
 				status: isActive ? "Active" : "Inactive",
 				isActive,
+				assignedAgentIds,
 				firstName: u.firstName ?? null,
 				lastName: u.lastName ?? null,
 				createdAt: u.createdAt ?? null,
@@ -254,6 +320,7 @@ export default function ViewUsersPage() {
 												<TableHead className="cursor-pointer select-none" onClick={() => toggleSort("status")}>
 													Status
 												</TableHead>
+												{/* <TableHead>Assigned Agents</TableHead> */}
 												<TableHead>Created</TableHead>
 												<TableHead className="w-55 text-right">Actions</TableHead>
 											</TableRow>
@@ -276,15 +343,34 @@ export default function ViewUsersPage() {
 																{user.isActive === null || typeof user.isActive === "undefined" ? "-" : user.isActive ? "Active" : "Inactive"}
 															</Badge>
 														</TableCell>
+														{/* <TableCell>
+															<div className="space-y-1">
+																{user.assignedAgentIds ? (
+																	<Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+																		{user.assignedAgentIds.split(",").map((value) => value.trim()).filter(Boolean).length} assigned
+																	</Badge>
+																) : <span className="text-xs text-muted-foreground">No agents</span>}
+															</div>
+														</TableCell> */}
 														<TableCell>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}</TableCell>
 														<TableCell className="w-55 align-middle text-right">
-															<div className="ml-auto flex h-9 min-w-50 items-center justify-end gap-2 whitespace-nowrap">
+															<div className="ml-auto flex items-center justify-end gap-2 whitespace-nowrap">
+																<Button
+																	type="button"
+																	size="default"
+																	variant="outline"
+																	className="inline-flex h-9 items-center justify-center px-3 text-center leading-none cursor-pointer"
+																	disabled={!user.assignedAgentIds}
+																	onClick={() => handleViewAssignedAgents(user)}
+																>
+																	View Assigned Agents
+																</Button>
 																<Button
 																	type="button"
 																	size="default"
 																	variant="outline"
 																	className="inline-flex h-9 w-20 items-center justify-center px-0 text-center leading-none cursor-pointer"
-																	onClick={() => router.push(`/tenant/users/edit?userId=${encodeURIComponent(String(user.id || ""))}`)}
+																	onClick={() => router.push(`/tenant/users/add?userId=${encodeURIComponent(String(user.id || ""))}`)}
 																>
 																	Edit
 																</Button>
@@ -308,6 +394,31 @@ export default function ViewUsersPage() {
 
 								<div className="flex items-center justify-between">
 									<span className="text-sm text-muted-foreground flex whitespace-nowrap">Result {from}–{to} of {total}</span>
+
+									<Dialog open={viewAssignedDialogOpen} onOpenChange={setViewAssignedDialogOpen}>
+										<DialogContent className="sm:max-w-md rounded-2xl border border-slate-200 bg-white">
+											<DialogHeader>
+												<DialogTitle className="text-base font-semibold text-slate-900">Assigned Agents</DialogTitle>
+												<DialogDescription>
+													{dialogUserName ? `Agents assigned to ${dialogUserName}` : "Assigned agent list"}
+												</DialogDescription>
+											</DialogHeader>
+
+											<div className="mt-2 space-y-2">
+												{dialogAssignedNames.length === 0 ? (
+													<p className="text-sm text-muted-foreground">No agents assigned.</p>
+												) : (
+													<div className="flex flex-wrap gap-2">
+														{dialogAssignedNames.map((name, index) => (
+															<Badge key={`${name}-${index}`} variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+																{name}
+															</Badge>
+														))}
+													</div>
+												)}
+											</div>
+										</DialogContent>
+									</Dialog>
 
 									<Pagination>
 										<PaginationContent>

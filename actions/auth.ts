@@ -40,6 +40,7 @@ type TenantMeUser = {
   isActive?: boolean | null
   firstName?: string | null
   lastName?: string | null
+  assignedAgentIds?: string | null
 }
 
 type TenantMeResponse = {
@@ -156,7 +157,7 @@ type TenantAgentAssignmentInput = {
   aiProvider: "openai" | "openrouter"
   aiModel: string
   managerCanRun: boolean
-  memberCanRun: boolean
+  userCanRun: boolean
   assignedUserIds: string[]
   meetingAutomationEnabled?: boolean
   meetingCreationMode?: "auto" | "confirm_first"
@@ -176,6 +177,7 @@ type TenantAgentAssignmentView = {
   configured?: boolean
   [key: string]: unknown
 }
+type TenantAgentAssignmentMap = Record<string, TenantAgentAssignmentView | null>
 
 type TenantAgentChatResponse = {
   response?: string
@@ -471,8 +473,12 @@ const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
 
 let fetchAssignedAgentsInFlight: Promise<unknown[]> | null = null
 const ASSIGNMENT_CACHE_TTL_MS = 15000
+let fetchTenantAgentsInFlight: Promise<TenantAgentListItem[]> | null = null
+let fetchTenantAgentsCache: { value: TenantAgentListItem[]; fetchedAt: number } | null = null
 const tenantAgentAssignmentInFlight = new Map<string, Promise<TenantAgentAssignmentView | null>>()
 const tenantAgentAssignmentCache = new Map<string, { value: TenantAgentAssignmentView | null; fetchedAt: number }>()
+let tenantAgentAssignmentsBatchInFlight: Promise<TenantAgentAssignmentMap> | null = null
+let tenantAgentAssignmentsBatchCache: { value: TenantAgentAssignmentMap; fetchedAt: number } | null = null
 
 export const fetchAssignedAgents = (): ThunkAction<Promise<unknown[]>, RootState, unknown, AnyAction> => {
   return async (): Promise<unknown[]> => {
@@ -1017,7 +1023,7 @@ export const fetchTenantUsers =
         const users = Array.isArray(response?.data?.users) ? response.data.users : []
         return users as TenantMeUser[]
       } catch (error) {
-        console.error("fetchTenantUsers failed:", error)
+        console.warn("fetchTenantUsers failed:", extractApiMessage(error))
         return []
       } finally {
         // clear promise so subsequent calls after completion will re-fetch
@@ -1028,6 +1034,53 @@ export const fetchTenantUsers =
     return _fetchTenantUsersPromise
   }
 
+export const fetchTenantAgentAssignments =
+  (
+    options?: { force?: boolean },
+  ): ThunkAction<Promise<TenantAgentAssignmentMap>, RootState, unknown, AnyAction> =>
+  async () => {
+    const shouldForce = Boolean(options?.force)
+    if (!shouldForce && tenantAgentAssignmentsBatchCache && Date.now() - tenantAgentAssignmentsBatchCache.fetchedAt < ASSIGNMENT_CACHE_TTL_MS) {
+      return tenantAgentAssignmentsBatchCache.value
+    }
+
+    if (!shouldForce && tenantAgentAssignmentsBatchInFlight) {
+      return tenantAgentAssignmentsBatchInFlight
+    }
+
+    const token = loadAuthTokenCookie()
+    const headers: Record<string, string> = {}
+    if (token) headers["x-tenant-token"] = token
+
+    tenantAgentAssignmentsBatchInFlight = (async (): Promise<TenantAgentAssignmentMap> => {
+      try {
+        const resp = await axios.get("/ai/agents/assignments", { headers })
+        const rows = Array.isArray(resp?.data?.assignments) ? resp.data.assignments : []
+        const fetchedAt = Date.now()
+        const next: TenantAgentAssignmentMap = {}
+
+        rows.forEach((row: unknown) => {
+          const assignment = row && typeof row === "object" ? (row as TenantAgentAssignmentView) : null
+          const agentId = String((assignment as Record<string, unknown> | null)?.agentId || "").trim()
+          if (!agentId) return
+
+          next[agentId] = assignment
+          tenantAgentAssignmentCache.set(agentId, { value: assignment, fetchedAt })
+        })
+
+        tenantAgentAssignmentsBatchCache = { value: next, fetchedAt }
+        return next
+      } catch (error) {
+        console.warn("fetchTenantAgentAssignments failed:", extractApiMessage(error))
+        return {}
+      } finally {
+        tenantAgentAssignmentsBatchInFlight = null
+      }
+    })()
+
+    return tenantAgentAssignmentsBatchInFlight
+  }
+
 export const verifyTenantOtp =
   (input: TenantOtpVerifyInput): ThunkAction<Promise<AuthResponse>, RootState, unknown, AnyAction> =>
   async () => {
@@ -1036,7 +1089,7 @@ export const verifyTenantOtp =
   }
 
   export const addTenantUser =
-  (input: { email: string; firstName?: string; lastName?: string; role?: string; isActive?: number | boolean })
+  (input: { email: string; firstName?: string; lastName?: string; role?: string; isActive?: number | boolean; assignedAgentIds?: string })
   : ThunkAction<Promise<any>, RootState, unknown, AnyAction> =>
   async () => {
     const token = loadAuthTokenCookie()
@@ -1052,6 +1105,10 @@ export const verifyTenantOtp =
 
     if (typeof input.role !== "undefined" && input.role !== null) {
       payload.role = input.role
+    }
+
+    if (typeof input.assignedAgentIds === "string") {
+      payload.assignedAgentIds = input.assignedAgentIds
     }
 
     console.debug("addTenantUser: calling /tenant/add_user with headers:", headers, "payload:", payload)
@@ -1078,21 +1135,33 @@ export const setTenantUserActiveStatus =
   }
 
 export const updateTenantUser =
-  (input: { userId: string; firstName?: string; lastName?: string; role?: string; isActive?: number | boolean })
+  (input: { userId: string; firstName?: string; lastName?: string; role?: string; isActive?: number | boolean; assignedAgentIds?: string })
   : ThunkAction<Promise<any>, RootState, unknown, AnyAction> =>
   async () => {
     const token = loadAuthTokenCookie()
     const headers: Record<string, string> = {}
     if (token) headers["x-tenant-token"] = token
 
-    const payload: Record<string, any> = {
-      firstName: input.firstName || null,
-      lastName: input.lastName || null,
-      isActive: typeof input.isActive === "boolean" ? (input.isActive ? 1 : 0) : input.isActive,
+    const payload: Record<string, any> = {}
+
+    if (typeof input.firstName !== "undefined") {
+      payload.firstName = input.firstName || null
+    }
+
+    if (typeof input.lastName !== "undefined") {
+      payload.lastName = input.lastName || null
+    }
+
+    if (typeof input.isActive !== "undefined") {
+      payload.isActive = typeof input.isActive === "boolean" ? (input.isActive ? 1 : 0) : input.isActive
     }
 
     if (typeof input.role !== "undefined" && input.role !== null) {
       payload.role = input.role
+    }
+
+    if (typeof input.assignedAgentIds === "string") {
+      payload.assignedAgentIds = input.assignedAgentIds
     }
 
     console.debug("updateTenantUser: calling PATCH /tenant/users/:userId", {
@@ -1177,7 +1246,7 @@ export const upsertTenantAgentAssignment =
         aiProvider: input.aiProvider,
         aiModel: input.aiModel,
         managerCanRun: input.managerCanRun,
-        memberCanRun: input.memberCanRun,
+        userCanRun: input.userCanRun,
         assignedUserIds: input.assignedUserIds,
         meetingAutomationEnabled: Boolean(input.meetingAutomationEnabled ?? true),
         meetingCreationMode: input.meetingCreationMode || "auto",
@@ -1189,6 +1258,8 @@ export const upsertTenantAgentAssignment =
     if (assignmentAgentId) {
       tenantAgentAssignmentCache.delete(assignmentAgentId)
       tenantAgentAssignmentInFlight.delete(assignmentAgentId)
+      tenantAgentAssignmentsBatchCache = null
+      tenantAgentAssignmentsBatchInFlight = null
     }
 
     return (resp?.data || {}) as { assignment?: unknown }
@@ -1224,13 +1295,37 @@ export const fetchTenantGmailMessages =
 export const fetchTenantAgents =
   (): ThunkAction<Promise<TenantAgentListItem[]>, RootState, unknown, AnyAction> =>
   async () => {
+    if (fetchTenantAgentsCache && Date.now() - fetchTenantAgentsCache.fetchedAt < ASSIGNMENT_CACHE_TTL_MS) {
+      return fetchTenantAgentsCache.value
+    }
+
+    if (fetchTenantAgentsInFlight) {
+      return fetchTenantAgentsInFlight
+    }
+
     const token = loadAuthTokenCookie()
     const headers: Record<string, string> = {}
     if (token) headers["x-tenant-token"] = token
 
-    const resp = await axios.get("/ai/agents", { headers })
-    const rows = Array.isArray(resp?.data?.agents) ? resp.data.agents : []
-    return rows as TenantAgentListItem[]
+    fetchTenantAgentsInFlight = (async () => {
+      try {
+        const resp = await axios.get("/ai/agents", { headers })
+        const rows = Array.isArray(resp?.data?.agents) ? resp.data.agents : []
+        const value = rows as TenantAgentListItem[]
+        fetchTenantAgentsCache = {
+          value,
+          fetchedAt: Date.now(),
+        }
+        return value
+      } catch (error) {
+        console.warn("fetchTenantAgents failed:", extractApiMessage(error))
+        return []
+      } finally {
+        fetchTenantAgentsInFlight = null
+      }
+    })()
+
+    return fetchTenantAgentsInFlight
   }
 
 export const fetchTenantAgentAssignment =

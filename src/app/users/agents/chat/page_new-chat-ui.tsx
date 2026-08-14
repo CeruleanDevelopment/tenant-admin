@@ -66,7 +66,7 @@ type TenantAgentCard = {
   aiProvider: "openai" | "openrouter"
   aiModel: string
   managerCanRun: boolean
-  memberCanRun: boolean
+  userCanRun: boolean
   assignedUserIds: string[]
 }
 
@@ -853,7 +853,7 @@ export default function ChatPage() {
           aiProvider: row.aiProvider === "openrouter" ? "openrouter" : "openai",
           aiModel: String(row.aiModel || "gpt-4.1-mini"),
           managerCanRun: Boolean(row.managerCanRun ?? true),
-          memberCanRun: Boolean(row.memberCanRun ?? false),
+          userCanRun: Boolean(row.userCanRun ?? row.memberCanRun ?? false),
           assignedUserIds: Array.isArray(row.assignedUserIds) ? row.assignedUserIds.map((value: unknown) => String(value)) : [],
         })) as TenantAgentCard[]
 

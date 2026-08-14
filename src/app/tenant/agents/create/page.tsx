@@ -372,7 +372,7 @@ const nodeLabelForKind = (
     aiModel: string
     systemPrompt: string
     managerCanRun: boolean
-    memberCanRun: boolean
+    userCanRun: boolean
     isActive: boolean
     assignedCount: number
   },
@@ -397,7 +397,7 @@ const nodeLabelForKind = (
   }
   if (kind === "access") {
     return {
-      label: `Permissions: Mgr ${values.managerCanRun ? "yes" : "no"}, Member ${values.memberCanRun ? "yes" : "no"}`,
+      label: `Permissions: Mgr ${values.managerCanRun ? "yes" : "no"}, User ${values.userCanRun ? "yes" : "no"}`,
       hint:
         values.assignedCount > 0
           ? `${values.assignedCount} users assigned, active ${values.isActive ? "yes" : "no"}`
@@ -416,7 +416,7 @@ const buildCanvasGraph = (input: {
     aiModel: string
     systemPrompt: string
     managerCanRun: boolean
-    memberCanRun: boolean
+    userCanRun: boolean
     isActive: boolean
     assignedCount: number
   }
@@ -485,7 +485,7 @@ export default function TenantAgentCreatePage() {
   const [aiProvider, setAiProvider] = useState<AiProvider>("")
   const [aiModel, setAiModel] = useState("")
   const [managerCanRun, setManagerCanRun] = useState(true)
-  const [memberCanRun, setMemberCanRun] = useState(false)
+  const [userCanRun, setUserCanRun] = useState(false)
   const [isActive, setIsActive] = useState(true)
   const [serviceType, setServiceType] = useState<AgentCategory>("general")
   const [workflowType, setWorkflowType] = useState<WorkflowType>("mastra")
@@ -630,7 +630,7 @@ export default function TenantAgentCreatePage() {
         setAiProvider(aiProviderValue)
         setAiModel(String(assignmentRow.aiModel || ""))
         setManagerCanRun(Boolean(assignmentRow.managerCanRun ?? true))
-        setMemberCanRun(Boolean(assignmentRow.memberCanRun ?? false))
+        setUserCanRun(Boolean(assignmentRow.userCanRun ?? assignmentRow.memberCanRun ?? false))
         setServiceType(normalizeCategory(String(agent?.serviceType || "general")))
         setWorkflowType("mastra")
         setAssignedUserIds(
@@ -689,7 +689,7 @@ export default function TenantAgentCreatePage() {
           aiModel,
           systemPrompt,
           managerCanRun,
-          memberCanRun,
+          userCanRun,
           isActive,
           assignedCount: assignedUserIds.length,
         },
@@ -702,7 +702,7 @@ export default function TenantAgentCreatePage() {
       aiModel,
       systemPrompt,
       managerCanRun,
-      memberCanRun,
+      userCanRun,
       isActive,
       assignedUserIds.length,
     ],
@@ -1180,7 +1180,7 @@ export default function TenantAgentCreatePage() {
           aiProvider: provider,
           aiModel: model,
           managerCanRun: true,
-          memberCanRun: true,
+          userCanRun: true,
           assignedUserIds,
           meetingAutomationEnabled: true,
           meetingCreationMode: "auto",
@@ -1765,8 +1765,8 @@ export default function TenantAgentCreatePage() {
                                 <Switch checked={managerCanRun} onCheckedChange={(v) => setManagerCanRun(Boolean(v))} />
                               </div>
                               <div className="flex items-center justify-between">
-                                <Label className="text-xs">Member can run</Label>
-                                <Switch checked={memberCanRun} onCheckedChange={(v) => setMemberCanRun(Boolean(v))} />
+                                <Label className="text-xs">User can run</Label>
+                                <Switch checked={userCanRun} onCheckedChange={(v) => setUserCanRun(Boolean(v))} />
                               </div>
 
                               <p className="pt-1 text-[11px] font-medium text-slate-600">User Assignment</p>

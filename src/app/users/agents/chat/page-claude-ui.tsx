@@ -627,7 +627,7 @@ export default function UserAgentChatPage() {
   )
   const selectedAgentIsGmail = isGmailAnalysisType(selectedAgent?.type || selectedAgent?.workflowType)
   const selectedWorkflowType = String(selectedAgent?.workflowType || selectedAgent?.type || "direct")
-  const activeDisplayTimeZone = resolveChatTimeZone(selectedAgent?.timezone)
+  const activeDisplayTimeZone = resolveChatTimeZone(selectedAgent?.type === "gmail_analysis" ? "Asia/Kolkata" : undefined)
   const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
   const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
   const activeMessageBucketKey = selectedAgentId && activeChatId ? buildMessageBucketKey(selectedAgentId, activeChatId) : ""
