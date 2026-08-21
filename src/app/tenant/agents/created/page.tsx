@@ -606,7 +606,7 @@ export default function TenantCreatedAgentsPage() {
                       <TableHead>Model</TableHead>
                       {/* <TableHead>Assigned Users</TableHead> */}
                       <TableHead>Created</TableHead>
-                      <TableHead className="">Actions</TableHead>
+                      <TableHead className="text-center">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -654,7 +654,7 @@ export default function TenantCreatedAgentsPage() {
                         </TableCell> */}
                         <TableCell>{agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : "-"}</TableCell>
                         <TableCell className="text-right align-middle">
-                          <div className="flex items-stretch justify-end gap-2">
+                          <div className="flex items-stretch justify-center gap-2">
                             <Button
                               type="button"
                               variant="outline"
