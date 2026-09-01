@@ -469,7 +469,7 @@ export default function TenantAgentCreatePage() {
 
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const tenantId = String(tenantProfile?.id || "")
-  const editingAgentId = String(searchParams.get("agentId") || "").trim()
+  const editingAgentId = String(searchParams?.get("agentId") || "").trim()
   const isEditMode = Boolean(editingAgentId)
   const [workingAgentId, setWorkingAgentId] = useState<string>(editingAgentId)
   const workingAgentIdRef = useRef<string>(editingAgentId)

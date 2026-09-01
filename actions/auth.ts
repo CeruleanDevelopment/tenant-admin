@@ -29,7 +29,12 @@ import {
   saveRefreshTokenCookie,
 } from "../utils/authCookies"
 import { tenantAdminConfig } from "../config/config"
-import { loadUserAuthTokenCookie } from "../utils/userAuthCookies"
+import {
+  clearUserAuthSessionCookie,
+  clearUserAuthTokenCookie,
+  clearUserRefreshTokenCookie,
+  loadUserAuthTokenCookie,
+} from "../utils/userAuthCookies"
 import { bootstrapUserAuth, signOutUser } from "./userAuth"
 import { resolveSessionType } from "@/utils/access-control"
 
@@ -422,6 +427,11 @@ const persistSession = (session: AuthSession | null): void => {
     clearAuthSessionCookie()
     return
   }
+
+  // Keep tenant and user sessions mutually exclusive in browser cookies.
+  clearUserAuthTokenCookie()
+  clearUserRefreshTokenCookie()
+  clearUserAuthSessionCookie()
 
   saveAuthTokenCookie(session.token)
   saveRefreshTokenCookie(session.refreshToken)
@@ -948,7 +958,7 @@ export const signOutTenant =
         // @ts-ignore
         await dispatch(signOutUser() as any)
         if (options?.redirectToSignIn !== false && typeof window !== "undefined") {
-          window.location.assign("/signin")
+          window.location.assign("/users/signin")
         }
         return
       }
@@ -960,7 +970,7 @@ export const signOutTenant =
       dispatch(setAuthInitialized(true))
 
       if (options?.redirectToSignIn !== false && typeof window !== "undefined") {
-        window.location.assign("/signin")
+        window.location.assign("/users/signin")
       }
     }
 

@@ -12,6 +12,11 @@ import { clearTenantProfile } from "../redux/reducers/Tenant"
 import type { RootState } from "../redux/reducers"
 import { tenantAdminConfig } from "../config/config"
 import {
+  clearAuthSessionCookie,
+  clearAuthTokenCookie,
+  clearRefreshTokenCookie,
+} from "../utils/authCookies"
+import {
   clearUserAuthSessionCookie,
   clearUserAuthTokenCookie,
   clearUserRefreshTokenCookie,
@@ -85,6 +90,11 @@ const applyUserSession = (dispatch: any, payload: UserAuthApiResponse): AuthSess
     user: payload.user,
     tenant: null,
   }
+
+  // Keep user and tenant sessions mutually exclusive in browser cookies.
+  clearAuthTokenCookie()
+  clearRefreshTokenCookie()
+  clearAuthSessionCookie()
 
   persistUserSession(session)
   dispatch(setAuthSession(session))

@@ -27,7 +27,7 @@ const normalizeRoleValue = (value: unknown): string =>
 export default function EditUserPage() {
   const searchParams = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
-  const editUserId = useMemo(() => String(searchParams.get("userId") || "").trim(), [searchParams])
+  const editUserId = useMemo(() => String(searchParams?.get("userId") || "").trim(), [searchParams])
 
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")

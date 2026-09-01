@@ -22,7 +22,7 @@ const roleOptions: Array<{ value: string; label: string }> = [
 export default function AddUserPage() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
-  const editUserId = String(searchParams.get("userId") || "").trim()
+  const editUserId = String(searchParams?.get("userId") || "").trim()
   const isEditMode = Boolean(editUserId)
 
   const [firstName, setFirstName] = useState("")

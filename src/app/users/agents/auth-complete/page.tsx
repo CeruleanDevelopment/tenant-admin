@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 
 const normalizeNext = (value?: string | null): string => {
-  const fallback = "/users/agents"
+  const fallback = "/users/dashboard"
   const candidate = String(value || "").trim()
   if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
     return fallback
@@ -17,9 +17,9 @@ export default function AgentAuthCompletePage() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    const next = normalizeNext(searchParams.get("next"))
-    const agentId = String(searchParams.get("agentId") || "").trim()
-    const error = String(searchParams.get("error") || "").trim()
+    const next = normalizeNext(searchParams?.get("next"))
+    const agentId = String(searchParams?.get("agentId") || "").trim()
+    const error = String(searchParams?.get("error") || "").trim()
     const payload = error
       ? {
           type: "tenant-auth-error",

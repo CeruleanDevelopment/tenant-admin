@@ -788,8 +788,8 @@ export default function ChatPage() {
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter() as { push: (href: string) => void; replace: (href: string) => void }
   const searchParams = useSearchParams()
-  const initialAgentId = searchParams.get("agentId")?.trim() || ""
-  const initialChatId = searchParams.get("chatId")?.trim() || ""
+  const initialAgentId = searchParams?.get("agentId")?.trim() || ""
+  const initialChatId = searchParams?.get("chatId")?.trim() || ""
   const [agents, setAgents] = useState<TenantAgentCard[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
 

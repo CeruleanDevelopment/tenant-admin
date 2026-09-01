@@ -15,7 +15,7 @@ const TENANT_SESSION_COOKIE = "TENANT_ADMIN_SESSION"
 const USER_SESSION_COOKIE = "TENANT_ADMIN_USER_SESSION"
 
 const TENANT_ONLY_PREFIXES = ["/tenant"]
-const USER_ONLY_PREFIXES = ["/users/agents"]
+const USER_ONLY_PREFIXES = ["/users"]
 const PUBLIC_PATHS = ["/users/signin", "/tenant/signin", "/tenant/signup", "/auth/callback", "/signin", "/signup"]
 
 const matchesPrefix = (pathname: string, prefix: string): boolean => {
@@ -76,16 +76,10 @@ const getUnauthorizedRedirect = (pathname: string, sessionType: SessionType): st
   const isUserOnly = USER_ONLY_PREFIXES.some((prefix) => matchesPrefix(pathname, prefix))
 
   if (isUserOnly && sessionType !== "user") {
-    if (sessionType === "tenant") {
-      return "/tenant/agents"
-    }
     return "/users/signin"
   }
 
   if (isTenantOnly && sessionType !== "tenant") {
-    if (sessionType === "user") {
-      return "/users/agents"
-    }
     return "/tenant/signin"
   }
 

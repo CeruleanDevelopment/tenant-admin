@@ -1,33 +1,16 @@
 "use client"
 
 import React from "react"
-import { usePathname, useRouter } from "next/navigation"
-import { useSelector } from "react-redux"
+import { usePathname } from "next/navigation"
 import AdminLayout from "@/components/layout/admin-layout"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { RootState } from "../../redux/reducers"
-import { getUnauthorizedRedirectPath, resolveSessionType } from "@/utils/access-control"
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "/"
-  const router = useRouter() as { replace: (href: string) => void }
-  const authUser = useSelector((state: RootState) => state.auth.user)
-  const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
-  const sessionType = React.useMemo(
-    () => resolveSessionType({ authUserId: authUser?.id, tenantId: tenantProfile?.id, role: authUser?.role }),
-    [authUser?.id, authUser?.role, tenantProfile?.id],
-  )
 
   const PUBLIC_PATHS = new Set(["/signin", "/signup", "/users/signin", "/tenant/signin", "/tenant/signup", "/auth/callback"]) // no header/sidebar
   const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
   const FULL_SCREEN_PATHS = new Set(["/tenant/agents/create"])
-
-  React.useEffect(() => {
-    const redirectPath = getUnauthorizedRedirectPath(pathname, sessionType)
-    if (redirectPath && redirectPath !== pathname) {
-      router.replace(redirectPath)
-    }
-  }, [pathname, router, sessionType])
 
   // Do not wrap pages that already use no-layout-pages or layout-pages (they have their own layouts)
   if (

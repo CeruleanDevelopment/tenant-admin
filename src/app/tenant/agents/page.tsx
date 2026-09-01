@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useDispatch } from "react-redux"
 import {
-  fetchTenantAgentAssignment,
+  fetchTenantAgentAssignments,
   fetchTenantAgents,
 } from "../../../../actions/auth"
 import type { AppDispatch } from "../../../../redux/store"
@@ -87,6 +87,7 @@ export default function TenantAgentsPage() {
     setPageError(null)
     try {
       const rows = await (dispatch(fetchTenantAgents()) as Promise<Record<string, unknown>[]>)
+      const assignmentMap = await (dispatch(fetchTenantAgentAssignments()) as Promise<Record<string, Record<string, unknown> | null>>)
 
       const uniqueRows = Array.from(
         rows
@@ -103,12 +104,7 @@ export default function TenantAgentsPage() {
           const id = String(row.id || "")
           if (!id) return null
 
-          let assignment: Record<string, unknown> | null = null
-          try {
-            assignment = await (dispatch(fetchTenantAgentAssignment(id)) as Promise<Record<string, unknown> | null>)
-          } catch {
-            assignment = null
-          }
+          const assignment = (assignmentMap[id] || null) as Record<string, unknown> | null
 
           return {
             id,

@@ -390,6 +390,14 @@ const data: {
   ],
   userNavMain: [
     {
+      title: "Dashboard",
+      url: "/users/dashboard",
+      icon: (
+        <Gauge
+        />
+      ),
+    },
+    {
       title: "My Agents",
       url: "/users/agents",
       icon: (
@@ -556,9 +564,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <NavSecondary items={data.navSecondary} />
         </div> */}
       </SidebarContent>
-      {/* <SidebarFooter className="border-t border-border p-0">
+      <SidebarFooter className="border-t border-border p-0">
         <NavUser user={userForNav} onLogout={handleLogout} />
-      </SidebarFooter> */}
+      </SidebarFooter>
     </Sidebar>
   )
 }

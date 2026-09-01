@@ -29,13 +29,36 @@ type LoginValues = { email?: string }
 const OTP_LENGTH = 6
 const RESEND_COOLDOWN_SECONDS = 300
 
+const normalizeUserNextPath = (value: string): string => {
+  const candidate = String(value || "").trim()
+  if (!candidate.startsWith("/") || candidate.startsWith("//")) {
+    return "/users/dashboard"
+  }
+
+  if (candidate === "/signin" || candidate.startsWith("/signin?")) {
+    return "/users/dashboard"
+  }
+
+  if (candidate === "/users/signin" || candidate.startsWith("/users/signin?")) {
+    return "/users/dashboard"
+  }
+
+  if (!candidate.startsWith("/users")) {
+    return "/users/dashboard"
+  }
+
+  return candidate
+}
+
 export default function SignInPage() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
-  const errorMessage = String(searchParams.get("error") || "").trim()
+  const getParam = (key: string): string => searchParams?.get(key) || ""
+  const errorMessage = String(getParam("error")).trim()
+  const nextPath = String(getParam("next")).trim()
 
   const [stage, setStage] = useState<"email" | "otp">("email")
-  const [emailValue, setEmailValue] = useState(String(searchParams.get("email") || ""))
+  const [emailValue, setEmailValue] = useState(String(getParam("email")))
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [otpValue, setOtpValue] = useState("")
   const [resendSeconds, setResendSeconds] = useState(0)
@@ -44,7 +67,7 @@ export default function SignInPage() {
   const [formError, setFormError] = useState<string | null>(null)
 
   const { register: registerEmail, handleSubmit: handleEmailSubmit, formState: { isSubmitting: isEmailSubmitting } } = useForm<LoginValues>({
-    defaultValues: { email: String(searchParams.get("email") || "") },
+    defaultValues: { email: String(getParam("email")) },
   })
 
   function getErrorMessage(err: unknown) {
@@ -123,7 +146,8 @@ export default function SignInPage() {
 
       if (response?.token && response?.refreshToken) {
         toast.success("Signed in successfully.")
-        window.location.assign("/")
+        const safeNext = normalizeUserNextPath(nextPath)
+        window.location.assign(safeNext)
         return
       }
 

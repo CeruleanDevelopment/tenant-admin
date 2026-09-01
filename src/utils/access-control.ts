@@ -1,20 +1,5 @@
 export type SessionType = "tenant" | "user" | "guest"
 
-const TENANT_ROLE_KEYWORDS = ["tenant_admin", "tenant-admin", "tenantadmin"]
-
-const isTenantRole = (role?: string | null): boolean => {
-  const normalized = String(role || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-
-  if (!normalized) {
-    return false
-  }
-
-  return TENANT_ROLE_KEYWORDS.includes(normalized)
-}
-
 type RouteAccessConfig = {
   tenantOnlyPrefixes: string[]
   userOnlyPrefixes: string[]
@@ -27,14 +12,14 @@ export const routeAccessConfig: RouteAccessConfig = {
   tenantOnlyPrefixes: ["/tenant"],
 
   // Add new user-only pages here (future-proof)
-  userOnlyPrefixes: ["/users/agents"],
+  userOnlyPrefixes: ["/users"],
 
   // Shared public auth pages (no folder guard)
   publicPaths: ["/signin", "/signup", "/tenant/signin", "/tenant/signup", "/auth/callback", "/users/signin"],
 
   defaultRedirectBySession: {
     tenant: "/tenant/agents",
-    user: "/users/agents",
+    user: "/users/dashboard",
     guest: "/tenant/signin",
   },
 }
@@ -52,7 +37,7 @@ export const resolveSessionType = (input: {
   tenantId?: string | null
   role?: string | null
 }): SessionType => {
-  const isTenantSession = Boolean(String(input.tenantId || "").trim()) || isTenantRole(input.role)
+  const isTenantSession = Boolean(String(input.tenantId || "").trim())
   const isUserSession = Boolean(String(input.authUserId || "").trim()) && !isTenantSession
 
   if (isTenantSession) return "tenant"
@@ -94,6 +79,14 @@ export const getUnauthorizedRedirectPath = (
 
   const isTenantOnly = routeAccessConfig.tenantOnlyPrefixes.some((p) => matchPrefix(normalizedPath, p))
   const isUserOnly = routeAccessConfig.userOnlyPrefixes.some((p) => matchPrefix(normalizedPath, p))
+
+  if (isUserOnly) {
+    return "/users/signin"
+  }
+
+  if (isTenantOnly) {
+    return "/tenant/signin"
+  }
 
   if (sessionType === "guest") {
     if (isUserOnly) {
