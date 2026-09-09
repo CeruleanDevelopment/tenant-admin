@@ -506,7 +506,7 @@ export default function TenantAgentCreatePage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-      <section className="rounded-[2rem] border border-slate-200 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+      <section className="rounded-[2rem] border border-slate-200 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur overflow-hidden">
         <div className="border-b border-slate-100 bg-[linear-gradient(135deg,rgba(8,145,178,0.08),rgba(255,255,255,0))] px-5 py-6 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-2">
