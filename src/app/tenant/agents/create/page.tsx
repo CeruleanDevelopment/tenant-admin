@@ -510,7 +510,7 @@ export default function TenantAgentCreatePage() {
         <div className="border-b border-slate-100 bg-[linear-gradient(135deg,rgba(8,145,178,0.08),rgba(255,255,255,0))] px-5 py-6 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Form Wizard</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Add Agent</p>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-600 text-white shadow-lg shadow-cyan-200">
                   <Bot className="h-5 w-5" />
