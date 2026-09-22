@@ -330,7 +330,7 @@ export default function ClassicChatPage() {
 
 	return (
 		<div className="box-border h-svh overflow-hidden bg-transparent rounded-3xl p-2 sm:p-3 lg:p-2 ">
-			<div className="relative mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/65 shadow-[0_30px_120px_rgba(15,23,42,0.24)] backdrop-blur-3xl">
+			<div className="container mx-auto relative flex h-full w-full flex-col overflow-hidden rounded-[20px] border border-white/40 bg-white/65 shadow-[0_30px_120px_rgba(15,23,42,0.24)] backdrop-blur-3xl">
 
 				<div className="relative grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] overflow-hidden ">
 					<aside className="flex h-full min-h-0 flex-col overflow-hidden border-r-2 border-slate-300/70 bg-white/35 px-0">

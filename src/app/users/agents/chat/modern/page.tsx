@@ -404,7 +404,7 @@ export default function ModernChatWidgetPage() {
 
   return (
     <div className="min-h-screen overflow-hidden bg-linear-to-b from-primary/10 via-white/95 to-white/90 dark:from-primary/12 dark:via-slate-900 dark:to-slate-950 px-4 py-6 text-slate-900 dark:text-slate-100 sm:px-6 lg:px-8 rounded-4xl">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+      <div className="container mx-auto flex w-full flex-col gap-5">
         <div className="flex flex-col gap-3">
           <div className="inline-flex w-fit items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.24em] text-primary">
             <Sparkles className="h-3.5 w-3.5" />

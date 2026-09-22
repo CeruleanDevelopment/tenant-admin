@@ -1630,7 +1630,7 @@ export default function ChatPage() {
 
   return (
     <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-4 lg:p-4 rounded-2xl">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+      <div className="container mx-auto flex w-full flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/80 bg-white/80 px-4 py-4 shadow-sm backdrop-blur md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">

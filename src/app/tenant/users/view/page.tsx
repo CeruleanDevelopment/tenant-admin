@@ -289,7 +289,7 @@ export default function ViewUsersPage() {
 
 	return (
 		<main className="p-0">
-			<div className="mx-auto max-w-5xl space-y-4">
+			<div className="container mx-auto space-y-4">
 				<div>
 					<h1 className="text-2xl font-bold">View Users</h1>
 					<p className="text-sm text-muted-foreground">Advanced table layout with search, sorting, pagination, and active toggle actions.</p>

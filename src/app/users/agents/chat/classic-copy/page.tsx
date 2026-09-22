@@ -201,7 +201,7 @@ export default function ClassicChatPage() {
 
 	return (
 		<div className="box-border h-svh overflow-hidden bg-[#ecf4ff] p-2 sm:p-3 lg:p-4">
-			<div className="relative mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-[30px] border border-white/40 bg-white/65 shadow-[0_30px_120px_rgba(15,23,42,0.24)] backdrop-blur-3xl">
+			<div className="container mx-auto relative flex h-full w-full flex-col overflow-hidden rounded-[30px] border border-white/40 bg-white/65 shadow-[0_30px_120px_rgba(15,23,42,0.24)] backdrop-blur-3xl">
 				<div className="pointer-events-none absolute -left-20 top-12 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(14,165,233,0.32),transparent_65%)]" />
 				<div className="pointer-events-none absolute -right-16 bottom-0 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(245,158,11,0.28),transparent_62%)]" />
 

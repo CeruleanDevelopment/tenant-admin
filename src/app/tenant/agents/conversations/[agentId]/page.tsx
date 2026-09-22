@@ -66,7 +66,7 @@ export default function AgentConversationsPage() {
 
   return (
     <main className="p-0">
-      <div className="mx-auto max-w-4xl">
+      <div className="container mx-auto">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold">Agent Conversations</h1>
           <div>

@@ -356,7 +356,7 @@ export default function AddUserPage() {
 
   return (
     <main className="p-0">
-      <div className="mx-auto max-w-5xl">
+      <div className="container mx-auto">
         <h1 className="text-2xl font-bold mb-4">
           {isEditMode ? "Edit User" : "Add User"}
         </h1>

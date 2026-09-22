@@ -32,7 +32,7 @@ export default function TenantAuditPage() {
 
   return (
     <main className="p-6">
-      <div className="mx-auto max-w-4xl">
+      <div className="container mx-auto">
         <h1 className="text-xl font-semibold mb-4">Tenant Audit Trail</h1>
         {loading ? <p>Loading...</p> : null}
         {error ? <p className="text-rose-600">{error}</p> : null}

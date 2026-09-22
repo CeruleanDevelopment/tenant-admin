@@ -171,7 +171,7 @@ export default function TenantAgentsPage() {
 
   return (
     <main className="">
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="container mx-auto space-y-6">
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>

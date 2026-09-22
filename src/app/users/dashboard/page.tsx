@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 export default function UserDashboardPage() {
   return (
     <main className="p-0">
-      <div className="mx-auto max-w-6xl space-y-6">
+      <div className="container mx-auto space-y-6">
         <section className="rounded-2xl border bg-card p-6 shadow-sm">
           <h1 className="text-2xl font-bold">User Dashboard</h1>
           <p className="mt-2 text-sm text-muted-foreground">

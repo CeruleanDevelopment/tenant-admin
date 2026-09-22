@@ -108,7 +108,7 @@
 //         </header>
 
 //         <div className="flex-1 overflow-y-auto px-6 py-10">
-//           <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
+//           <div className="container mx-auto flex w-full flex-col gap-8">
 
 //             <div className="flex w-full items-start gap-4">
 //               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-200">
@@ -183,7 +183,7 @@
 //         </div>
 
 //         <div className="border-t border-white/30 bg-white/30 px-6 py-5 backdrop-blur-3xl">
-//           <div className="mx-auto flex max-w-6xl items-end gap-3 rounded-[32px] border border-white/40 bg-white/60 p-3 shadow-2xl backdrop-blur-3xl">
+//           <div className="container mx-auto flex items-end gap-3 rounded-[32px] border border-white/40 bg-white/60 p-3 shadow-2xl backdrop-blur-3xl">
 
 //             <button className="flex h-12 w-12 items-center justify-center rounded-2xl transition hover:bg-white/60">
 //               <Paperclip className="h-5 w-5 text-slate-500" />
