@@ -14,8 +14,12 @@ import {
   fetchTenantAgent,
   fetchTenantAgentAssignment,
   fetchTenantUsers,
+  fetchTenantRoleBootstrap,
+  fetchTenantRoleUserActions,
   saveTenantConnectorBundle,
+  saveTenantRole,
   updateTenantAgent,
+  updateTenantRoleActions,
   upsertTenantAgentAssignment,
   type ConnectorAuthSchemeItem,
   type ConnectorCatalogItem,
@@ -24,7 +28,6 @@ import {
 } from "../../../../../actions/auth";
 import type { AppDispatch } from "../../../../../redux/store";
 import type { RootState } from "../../../../../redux/reducers";
-import api from "@/service/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +74,6 @@ type TenantUser = {
 
 type AiProvider = "" | "openrouter";
 type AgentCategory = string;
-type WorkflowType = "mastra";
 
 const AGENT_NAME_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9 ]*[A-Za-z0-9]$|^[A-Za-z0-9]$/;
@@ -89,7 +91,7 @@ type Step1FieldErrors = {
   aiProvider?: string;
   aiModel?: string;
   serviceType?: string;
-  workflowType?: string;
+  tenantConnectorId?: string;
 };
 
 type ConnectorCredentialField = {
@@ -243,13 +245,13 @@ const validateStep1Fields = ({
   aiProvider,
   aiModel,
   serviceType,
-  workflowType,
+  tenantConnectorId,
 }: {
   name: string;
   aiProvider: AiProvider;
   aiModel: string;
   serviceType: AgentCategory | "";
-  workflowType: string;
+  tenantConnectorId: string;
 }): Step1FieldErrors => {
   const errors: Step1FieldErrors = {};
 
@@ -268,8 +270,8 @@ const validateStep1Fields = ({
     errors.serviceType = "Tool is required.";
   }
 
-  // if (!workflowType) {
-  //   errors.workflowType = "Connector is required.";
+  // if (!tenantConnectorId) {
+  //   errors.tenantConnectorId = "Connector is required.";
   // }
 
   return errors;
@@ -339,7 +341,8 @@ export default function TenantAgentCreatePage() {
   const [userCanRun, setUserCanRun] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [serviceType, setServiceType] = useState<AgentCategory>("");
-  const [workflowType, setWorkflowType] = useState("");
+  const [selectedTenantConnectorId, setSelectedTenantConnectorId] =
+    useState("");
   const [connectors, setConnectors] = useState<ConnectorCatalogItem[]>([]);
   const [tenantConnectors, setTenantConnectors] = useState<
     TenantConnectorItem[]
@@ -524,8 +527,9 @@ export default function TenantAgentCreatePage() {
     setRoleBootstrapError(null);
 
     try {
-      const response = await api.get("/tenant/role-management/bootstrap");
-      const payload = (response?.data || {}) as RoleBootstrapPayload;
+      const payload = (await dispatch(
+        fetchTenantRoleBootstrap(),
+      )) as RoleBootstrapPayload;
       const nextRoles = Array.isArray(payload.roles) ? payload.roles : [];
       const nextMembers = Array.isArray(payload.roleMembers) ? payload.roleMembers : [];
       const nextActions = Array.isArray(payload.actions) ? payload.actions : [];
@@ -550,8 +554,10 @@ export default function TenantAgentCreatePage() {
 
     setLoadingUserActions(true);
     try {
-      const response = await api.get(`/tenant/role-management/users/${encodeURIComponent(normalizedUserId)}/actions`);
-      const payload = response?.data as { actions?: Array<Record<string, unknown>> } | undefined;
+      const actions = (await dispatch(
+        fetchTenantRoleUserActions(normalizedUserId),
+      )) as Array<Record<string, unknown>>;
+      const payload = { actions };
       setSelectedUserActions(Array.isArray(payload?.actions) ? payload.actions : []);
     } catch (error: unknown) {
       setRoleBootstrapError(extractErrorMessage(error));
@@ -875,9 +881,7 @@ export default function TenantAgentCreatePage() {
                 (item) => !(item.connectorId === normalizedConnectorId && item.actionId === normalizedActionId),
               );
 
-          await api.put(`/tenant/role-management/roles/${encodeURIComponent(roleId)}/actions`, {
-            actions: nextActions,
-          });
+          await dispatch(updateTenantRoleActions(roleId, nextActions));
         }),
       );
 
@@ -964,11 +968,21 @@ export default function TenantAgentCreatePage() {
         actions,
       };
 
-      const saveResponse = selectedRoleId
-        ? await api.patch(`/tenant/role-management/roles/${encodeURIComponent(selectedRoleId)}`, payload)
-        : await api.post("/tenant/role-management/roles", payload);
+      const saveResponse = await dispatch(
+        saveTenantRole({
+          roleId: selectedRoleId || undefined,
+          name: payload.name,
+          description: payload.description,
+          agentId: payload.agentId,
+          connectorId: payload.connectorId,
+          toolId: payload.toolId,
+          isActive: payload.isActive,
+          userIds: payload.userIds,
+          actions: payload.actions,
+        }),
+      );
 
-      const roleId = String(saveResponse?.data?.role?.id || saveResponse?.data?.role?.role?.id || selectedRoleId || "").trim();
+      const roleId = String(saveResponse?.role?.id || selectedRoleId || "").trim();
 
       if (!roleId) {
         throw new Error("Role save failed.");
@@ -1037,7 +1051,7 @@ export default function TenantAgentCreatePage() {
               "",
           ).trim(),
         );
-        setWorkflowType(
+        setSelectedTenantConnectorId(
           String(
             agent?.connectorKey ||
               agent?.connector_key ||
@@ -1329,7 +1343,7 @@ export default function TenantAgentCreatePage() {
       ).trim();
 
       if (tenantConnectorId) {
-        setWorkflowType(tenantConnectorId);
+        setSelectedTenantConnectorId(tenantConnectorId);
       }
 
       setConnectorModalSuccess("Connector saved for this tenant.");
@@ -1374,13 +1388,13 @@ export default function TenantAgentCreatePage() {
   const onProviderChange = (value: string) => {
     const provider = value === "openrouter" ? "openrouter" : "";
     setAiProvider(provider);
-    setAiModel(provider ? AI_MODEL_OPTIONS[provider][0] : "");
+    setAiModel("");
   };
 
   const buildFinalPrompt = () => {
     const selectedToolLabel =
       selectedToolConnector?.display_name || serviceType || "general";
-    const selectedWorkflow = workflowType || "connector";
+    const selectedConnectorLabel = selectedTenantConnectorId || "connector";
     const providerText = aiProvider || "openrouter";
     const modelText = aiModel.trim() || AI_MODEL_OPTIONS[providerText][0];
 
@@ -1389,7 +1403,7 @@ export default function TenantAgentCreatePage() {
       [
         `You are a tenant AI agent for ${selectedToolLabel}.`,
         `Tenant scope: ${tenantId}`,
-        `Workflow: ${selectedWorkflow}`,
+        `Connector: ${selectedConnectorLabel}`,
         `AI provider: ${providerText}`,
         `AI model: ${modelText}`,
       ].join("\n")
@@ -1410,7 +1424,7 @@ export default function TenantAgentCreatePage() {
       aiProvider,
       aiModel,
       serviceType,
-      workflowType,
+      tenantConnectorId: selectedTenantConnectorId,
     });
 
     if (Object.values(step1FieldValidationErrors).some(Boolean)) {
@@ -1500,7 +1514,11 @@ export default function TenantAgentCreatePage() {
   const CurrentIcon = currentStepMeta.icon;
   const selectedCategory =
     selectedToolConnector?.display_name || serviceType || "General";
-  const selectedWorkflow = workflowType || "Not selected";
+  const selectedTenantConnectorLabel =
+    visibleTenantConnectors.find(
+      ({ tenantConnector }) =>
+        String(tenantConnector.id || "") === String(selectedTenantConnectorId || ""),
+    )?.catalogConnector?.display_name || selectedTenantConnectorId || "Not selected";
 
   return (
     <main className="container mx-auto w-full px-4 py-6 sm:px-6 lg:px-8">
@@ -1637,7 +1655,7 @@ export default function TenantAgentCreatePage() {
                             {step.title}
                           </p>
 
-                          <p
+                          {/* <p
                             className={cn(
                               "mt-1 hidden text-xs leading-5 transition-colors duration-300 sm:block",
                               active && "text-muted-foreground",
@@ -1646,7 +1664,7 @@ export default function TenantAgentCreatePage() {
                             )}
                           >
                             {step.description}
-                          </p>
+                          </p> */}
                         </div>
                       </div>
 
@@ -1794,11 +1812,11 @@ export default function TenantAgentCreatePage() {
                           onValueChange={(value) => {
                             const nextValue = value === "none" ? "" : value;
                             setServiceType(nextValue);
-                            setWorkflowType("");
+                            setSelectedTenantConnectorId("");
                             setStep1FieldErrors((prev) => ({
                               ...prev,
                               serviceType: "",
-                              workflowType: "",
+                              tenantConnectorId: "",
                             }));
                           }}
                         >
@@ -1845,7 +1863,7 @@ export default function TenantAgentCreatePage() {
                               Select connector
                             </Label>
                             <Select
-                              value={workflowType || "none"}
+                              value={selectedTenantConnectorId || "none"}
                               onValueChange={(value) => {
                                 const nextValue = value === "none" ? "" : value;
 
@@ -1856,10 +1874,10 @@ export default function TenantAgentCreatePage() {
                                   return;
                                 }
 
-                                setWorkflowType(nextValue);
+                                setSelectedTenantConnectorId(nextValue);
                                 setStep1FieldErrors((prev) => ({
                                   ...prev,
-                                  workflowType: "",
+                                  tenantConnectorId: "",
                                 }));
                               }}
                               disabled={!selectedToolConnector}
@@ -1909,9 +1927,9 @@ export default function TenantAgentCreatePage() {
                             </Select>
                           </div>
                         </div>
-                      {step1FieldErrors.workflowType ? (
+                      {step1FieldErrors.tenantConnectorId ? (
                         <p className="text-xs text-red-600">
-                          {step1FieldErrors.workflowType}
+                          {step1FieldErrors.tenantConnectorId}
                         </p>
                       ) : null}
                   </div>
@@ -1923,11 +1941,11 @@ export default function TenantAgentCreatePage() {
               <div className="overflow-hidden rounded-xl border border-border bg-background">
                 <div className="grid min-h-162.5 grid-cols-1 lg:grid-cols-[300px_1fr]">
                   <div className="border-b border-border bg-muted/20 lg:border-b-0 lg:border-r">
-                    <div className="border-b border-border">
+                    {/* <div className="border-b border-border">
                       <div
                         role="tablist"
                         aria-label="Role management views"
-                        className="grid grid-cols-2 bg-muted/40 p-1"
+                        className="grid grid-cols-2 gap-1 border border-border bg-background p-1.5 shadow-sm"
                       >
                         <Button
                           type="button"
@@ -1937,10 +1955,10 @@ export default function TenantAgentCreatePage() {
                           size="sm"
                           onClick={() => setRoleViewMode("roles")}
                           className={cn(
-                            "h-9 rounded-xl px-3 text-sm font-medium transition-all cursor-pointer",
+                            "h-10 rounded-xl px-4 text-sm font-semibold transition-all duration-200 cursor-pointer",
                             roleViewMode === "roles"
-                              ? "bg-background text-foreground shadow-sm"
-                              : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                              ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                              : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
                           )}
                         >
                           Roles
@@ -1953,15 +1971,61 @@ export default function TenantAgentCreatePage() {
                           size="sm"
                           onClick={() => setRoleViewMode("users")}
                           className={cn(
-                            "h-9 rounded-xl px-3 text-sm font-medium transition-all cursor-pointer",
+                            "h-10 rounded-xl px-4 text-sm font-semibold transition-all duration-200 cursor-pointer",
                             roleViewMode === "users"
-                              ? "bg-background text-foreground shadow-sm"
-                              : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                              ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                              : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
                           )}
                         >
                           Users
                         </Button>
-                      </div>                     
+                      </div>
+                    </div> */}
+                    <div className="border-b border-border">
+                        <div className="flex w-full rounded-lg bg-muted/40 p-1">
+                          <nav
+                            className="flex w-full gap-x-1 bg-gray-100 rounded-sm"
+                            aria-label="Role management views"
+                            role="tablist"
+                            aria-orientation="horizontal"
+                          >
+                            <Button
+                              type="button"
+                              role="tab"
+                              aria-selected={roleViewMode === "roles"}
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setRoleViewMode("roles")}
+                              className={cn(
+                                "inline-flex h-10 flex-1 items-center justify-center gap-x-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 cursor-pointer",
+                                "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                                roleViewMode === "roles"
+                                  ? "bg-primary text-white shadow-sm"
+                                  : "bg-transparent text-slate-600 hover:text-primary hover:bg-white/90",
+                              )}
+                            >
+                              Roles
+                            </Button>
+
+                            <Button
+                              type="button"
+                              role="tab"
+                              aria-selected={roleViewMode === "users"}
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setRoleViewMode("users")}
+                              className={cn(
+                                "inline-flex h-10 flex-1 items-center justify-center gap-x-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 cursor-pointer",
+                                "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                                roleViewMode === "users"
+                                  ? "bg-primary text-white shadow-sm"
+                                  : "bg-transparent text-slate-600 hover:text-primary hover:bg-white/90",
+                              )}
+                            >
+                              Users
+                            </Button>
+                          </nav>
+                        </div>
                     </div>
 
                     {roleViewMode === "roles" ? (
@@ -2078,8 +2142,8 @@ export default function TenantAgentCreatePage() {
                                 <td className="px-4 py-4">
                                   <div className="flex flex-wrap gap-2">
                                     <Badge variant="outline">Agent: {currentAgentId || "Not saved yet"}</Badge>
-                                    <Badge variant="outline">Connector: {roleConnectorId || "Not selected"}</Badge>
-                                    <Badge variant="outline">Tool: {roleToolId || "Not selected"}</Badge>
+                                    <Badge variant="outline">Tool: {selectedCategory}</Badge>
+                                    <Badge variant="outline">Connector: {selectedTenantConnectorLabel}</Badge>
                                     <Badge variant={roleIsActive ? "outline" : "destructive"}>{roleIsActive ? "Active" : "Inactive"}</Badge>
                                   </div>
                                 </td>
@@ -2089,7 +2153,7 @@ export default function TenantAgentCreatePage() {
                                 <td className="px-4 py-4">
                                   <div className="mb-3 flex items-center justify-between gap-2">
                                     <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users..." className="max-w-sm" />
-                                    <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge>
+                                    {/* <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge> */}
                                   </div>
                                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                                     {loadingUsers ? <span className="text-sm text-muted-foreground">Loading users...</span> : null}
@@ -2133,7 +2197,7 @@ export default function TenantAgentCreatePage() {
                                                 <p className="truncate text-sm font-medium text-foreground">{action.display_name}</p>
                                                 <p className="truncate text-xs text-muted-foreground">{action.action_key}</p>
                                               </div>
-                                              <Switch checked={checked} onCheckedChange={() => toggleRoleAction(action.id)} />
+                                              <Switch checked={checked} size="md" onCheckedChange={() => toggleRoleAction(action.id)} />
                                             </div>
                                           );
                                         })}
@@ -2157,7 +2221,7 @@ export default function TenantAgentCreatePage() {
                             <p className="mt-1 text-sm text-muted-foreground">Switches update the underlying role actions for roles this user belongs to.</p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline">{selectedUserActions.length} effective</Badge>
+                            {/* <Badge variant="outline">{selectedUserActions.length} effective</Badge> */}
                             <Button type="button" variant="outline" onClick={() => selectedUserId ? void loadUserActions(selectedUserId) : null} disabled={!selectedUserId || loadingUserActions || savingUserAction}>Refresh</Button>
                             <Button
                                 type="button"
@@ -2184,7 +2248,7 @@ export default function TenantAgentCreatePage() {
                             <tbody className="divide-y divide-border bg-background">
                               <tr>
                                 <th className="w-40 bg-muted/30 px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">User</th>
-                                <td className="px-4 py-4">
+                                {/* <td className="px-4 py-4">
                                   {selectedUserId ? (
                                     <div>
                                       <p className="font-medium text-foreground">{selectedUserLabel}</p>
@@ -2193,7 +2257,7 @@ export default function TenantAgentCreatePage() {
                                   ) : (
                                     <span className="text-muted-foreground">Choose a user from the left list.</span>
                                   )}
-                                </td>
+                                </td> */}
                               </tr>
                               <tr>
                                 <th className="bg-muted/30 px-4 py-4 align-top text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
@@ -2206,7 +2270,7 @@ export default function TenantAgentCreatePage() {
                                     <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">No actions found for the selected tool.</div>
                                   ) : (
                                     <div className="space-y-3">
-                                      {selectedUserRolesForTool.length > 0 ? (
+                                      {/* {selectedUserRolesForTool.length > 0 ? (
                                         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
                                           Updating a switch will apply the change to all of this user&apos;s active roles for the selected tool.
                                         </div>
@@ -2214,7 +2278,7 @@ export default function TenantAgentCreatePage() {
                                         <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
                                           This user is not assigned to a role for the selected tool. Switches are disabled until a role is assigned.
                                         </div>
-                                      )}
+                                      )} */}
                                       <div className="grid gap-2 md:grid-cols-2">
                                         {selectedToolActions.map((action) => {
                                           const assigned = selectedUserRolesForTool.some((role) =>
@@ -2253,6 +2317,12 @@ export default function TenantAgentCreatePage() {
                         </div>
                       </div>
                     )}
+                    <div className="space-y-1 mt-4 flex gap-4">
+                      <Label className="text-sm font-medium text-muted-foreground">
+                        Active
+                      </Label>
+                      <Switch checked={isActive} size="md" onCheckedChange={setIsActive} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2287,7 +2357,7 @@ export default function TenantAgentCreatePage() {
                       aiProvider,
                       aiModel,
                       serviceType,
-                      workflowType,
+                      tenantConnectorId: selectedTenantConnectorId,
                     });
 
                     if (

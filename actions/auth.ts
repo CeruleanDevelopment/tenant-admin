@@ -187,6 +187,71 @@ type TenantAgentAssignmentMap = Record<
   TenantAgentAssignmentView | null
 >;
 
+export type TenantRoleBootstrapAction = {
+  id: string;
+  connector_id: string;
+  connector_key: string;
+  connector_display_name: string;
+  action_key: string;
+  display_name: string;
+  description?: string | null;
+  status?: string | null;
+  is_active?: number | boolean | null;
+};
+
+export type TenantRoleBootstrapRoleAction = {
+  id: string;
+  tenant_id: string;
+  role_id: string;
+  connector_id: string;
+  action_id: string;
+  is_active?: number | boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type TenantRoleBootstrapRole = {
+  id: string;
+  tenant_id: string;
+  user_id?: string | null;
+  agent_id?: string | null;
+  connector_id?: string | null;
+  tool_id?: string | null;
+  name: string;
+  description?: string | null;
+  is_active?: number | boolean | null;
+};
+
+export type TenantRoleBootstrapMember = {
+  role_id: string;
+  user_id: string;
+  is_active?: number | boolean | null;
+};
+
+export type TenantRoleBootstrapPayload = {
+  roles: TenantRoleBootstrapRole[];
+  roleMembers: TenantRoleBootstrapMember[];
+  roleActions: TenantRoleBootstrapRoleAction[];
+  actions: TenantRoleBootstrapAction[];
+};
+
+type TenantRoleActionAssignment = {
+  connectorId: string;
+  actionId: string;
+};
+
+type TenantRoleUpsertInput = {
+  roleId?: string;
+  name: string;
+  description?: string;
+  agentId: string;
+  connectorId: string;
+  toolId: string;
+  isActive?: number | boolean;
+  userIds: string[];
+  actions: TenantRoleActionAssignment[];
+};
+
 type TenantAgentChatResponse = {
   response?: string;
   reply?: string;
@@ -1315,6 +1380,133 @@ export const fetchTenantUsers =
     })();
 
     return _fetchTenantUsersPromise;
+  };
+
+export const fetchTenantRoleBootstrap =
+  (): ThunkAction<Promise<TenantRoleBootstrapPayload>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    if (!token) {
+      return { roles: [], roleMembers: [], roleActions: [], actions: [] };
+    }
+
+    const headers: Record<string, string> = {};
+    headers["x-tenant-token"] = token;
+
+    try {
+      const response = await axios.get("/tenant/role-management/bootstrap", {
+        headers,
+      });
+      const payload = (response?.data || {}) as TenantRoleBootstrapPayload;
+
+      return {
+        roles: Array.isArray(payload.roles) ? payload.roles : [],
+        roleMembers: Array.isArray(payload.roleMembers)
+          ? payload.roleMembers
+          : [],
+        roleActions: Array.isArray(payload.roleActions)
+          ? payload.roleActions
+          : [],
+        actions: Array.isArray(payload.actions) ? payload.actions : [],
+      };
+    } catch (error) {
+      console.warn(
+        "fetchTenantRoleBootstrap failed:",
+        extractApiMessage(error),
+      );
+      return { roles: [], roleMembers: [], roleActions: [], actions: [] };
+    }
+  };
+
+export const fetchTenantRoleUserActions =
+  (
+    userId: string,
+  ): ThunkAction<Promise<Array<Record<string, unknown>>>, RootState, unknown, AnyAction> =>
+  async () => {
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) return [];
+
+    const token = loadAuthTokenCookie();
+    if (!token) return [];
+
+    const headers: Record<string, string> = {};
+    headers["x-tenant-token"] = token;
+
+    try {
+      const response = await axios.get(
+        `/tenant/role-management/users/${encodeURIComponent(normalizedUserId)}/actions`,
+        { headers },
+      );
+      const payload = response?.data as
+        | { actions?: Array<Record<string, unknown>> }
+        | undefined;
+
+      return Array.isArray(payload?.actions) ? payload.actions : [];
+    } catch (error) {
+      console.warn(
+        "fetchTenantRoleUserActions failed:",
+        extractApiMessage(error),
+      );
+      return [];
+    }
+  };
+
+export const saveTenantRole =
+  (
+    input: TenantRoleUpsertInput,
+  ): ThunkAction<Promise<{ role?: { id?: string } }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const payload = {
+      name: input.name,
+      description: input.description || "",
+      agentId: input.agentId,
+      connectorId: input.connectorId,
+      toolId: input.toolId,
+      isActive: Number(input.isActive ?? 1) === 0 ? 0 : 1,
+      userIds: Array.isArray(input.userIds) ? input.userIds : [],
+      actions: Array.isArray(input.actions) ? input.actions : [],
+    };
+
+    const roleId = String(input.roleId || "").trim();
+    const response = roleId
+      ? await axios.patch(
+          `/tenant/role-management/roles/${encodeURIComponent(roleId)}`,
+          payload,
+          { headers },
+        )
+      : await axios.post("/tenant/role-management/roles", payload, { headers });
+
+    return (response?.data || {}) as { role?: { id?: string } };
+  };
+
+export const updateTenantRoleActions =
+  (
+    roleId: string,
+    actions: TenantRoleActionAssignment[],
+  ): ThunkAction<Promise<{ role?: { id?: string } }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const normalizedRoleId = String(roleId || "").trim();
+    if (!normalizedRoleId) {
+      throw new Error("Role id is required.");
+    }
+
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const response = await axios.put(
+      `/tenant/role-management/roles/${encodeURIComponent(normalizedRoleId)}/actions`,
+      {
+        actions: Array.isArray(actions) ? actions : [],
+      },
+      { headers },
+    );
+
+    return (response?.data || {}) as { role?: { id?: string } };
   };
 
 export const fetchTenantAgentAssignments =
