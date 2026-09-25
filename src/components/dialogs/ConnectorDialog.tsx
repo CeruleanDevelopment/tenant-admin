@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { useDispatch } from "react-redux";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +26,12 @@ import type {
   ConnectorCatalogItem,
   ConnectorVersionItem,
 } from "../../../actions/auth";
+import {
+  fetchConnectorAuthSchemes,
+  fetchConnectorVersions,
+  saveTenantConnectorBundle as saveConnectorBundle,
+} from "../../../actions/auth";
+import type { AppDispatch } from "../../../redux/store";
 
 export type ConnectorCredentialField = {
   name: string;
@@ -38,53 +46,378 @@ type ConnectorDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedCatalogConnector: ConnectorCatalogItem | null;
-  connectorModalLoading: boolean;
-  connectorModalError: string | null;
-  connectorModalSuccess: string | null;
-  connectorModalSaving: boolean;
-  connectorModalTesting: boolean;
-  selectedConnectorVersionId: string;
-  connectorVersions: ConnectorVersionItem[];
-  selectedConnectorAuthSchemeId: string;
-  connectorAuthSchemes: ConnectorAuthSchemeItem[];
-  selectedConnectorFields: ConnectorCredentialField[];
-  connectorCredentialValues: Record<string, string>;
-  closeConnectorModal: () => void;
-  handleConnectorVersionSelection: (versionId: string) => Promise<void>;
-  handleConnectorAuthSchemeSelection: (authSchemeId: string) => void;
-  handleConnectorFieldChange: (fieldName: string, value: string) => void;
-  handleConnectorTest: () => void;
-  handleConnectorSave: () => Promise<void>;
-  formatConnectorAuthSchemeLabel: (scheme: ConnectorAuthSchemeItem) => string;
-  getConnectorAuthMethodHint: (
-    connector: ConnectorCatalogItem | null,
-  ) => string;
+  onConnectorSaved?: (payload: {
+    tenantConnectorId: string;
+    connectorId: string;
+  }) => Promise<void> | void;
 };
 
 export default function ConnectorDialog({
   open,
   onOpenChange,
   selectedCatalogConnector,
-  connectorModalLoading,
-  connectorModalError,
-  connectorModalSuccess,
-  connectorModalSaving,
-  connectorModalTesting,
-  selectedConnectorVersionId,
-  connectorVersions,
-  selectedConnectorAuthSchemeId,
-  connectorAuthSchemes,
-  selectedConnectorFields,
-  connectorCredentialValues,
-  closeConnectorModal,
-  handleConnectorVersionSelection,
-  handleConnectorAuthSchemeSelection,
-  handleConnectorFieldChange,
-  handleConnectorTest,
-  handleConnectorSave,
-  formatConnectorAuthSchemeLabel,
-  getConnectorAuthMethodHint,
+  onConnectorSaved,
 }: ConnectorDialogProps) {
+  const dispatch = useDispatch<AppDispatch>();
+
+  const [connectorModalLoading, setConnectorModalLoading] = useState(false);
+  const [connectorModalError, setConnectorModalError] = useState<string | null>(
+    null,
+  );
+  const [connectorModalSuccess, setConnectorModalSuccess] = useState<
+    string | null
+  >(null);
+  const [connectorModalSaving, setConnectorModalSaving] = useState(false);
+  const [connectorModalTesting, setConnectorModalTesting] = useState(false);
+  const [selectedConnectorVersionId, setSelectedConnectorVersionId] =
+    useState("");
+  const [connectorVersions, setConnectorVersions] = useState<
+    ConnectorVersionItem[]
+  >([]);
+  const [selectedConnectorAuthSchemeId, setSelectedConnectorAuthSchemeId] =
+    useState("");
+  const [connectorAuthSchemes, setConnectorAuthSchemes] = useState<
+    ConnectorAuthSchemeItem[]
+  >([]);
+  const [connectorCredentialValues, setConnectorCredentialValues] = useState<
+    Record<string, string>
+  >({});
+
+  const formatConnectorAuthSchemeLabel = (scheme: ConnectorAuthSchemeItem) => {
+    const authType = String(scheme.auth_type || "")
+      .trim()
+      .toLowerCase();
+    const key = String(selectedCatalogConnector?.key || "")
+      .trim()
+      .toLowerCase();
+
+    if (key === "azure-devops" || key === "azure_devops") {
+      if (authType === "basic") return "Personal Access Token (PAT)";
+    }
+    if (!authType) return "Authentication";
+    return authType
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  };
+
+  const getConnectorAuthMethodHint = () => {
+    const key = String(selectedCatalogConnector?.key || "")
+      .trim()
+      .toLowerCase();
+    if (key === "azure-devops" || key === "azure_devops") {
+      return "Azure DevOps uses Personal Access Token (PAT) with basic auth credentials.";
+    }
+    return "";
+  };
+
+  const buildCredentialFields = (schema: unknown): ConnectorCredentialField[] => {
+    const schemaRecord =
+      schema && typeof schema === "object"
+        ? (schema as Record<string, unknown>)
+        : {};
+    const properties =
+      schemaRecord.properties && typeof schemaRecord.properties === "object"
+        ? (schemaRecord.properties as Record<string, Record<string, unknown>>)
+        : {};
+    const required = new Set(
+      Array.isArray(schemaRecord.required)
+        ? schemaRecord.required
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        : [],
+    );
+
+    return Object.entries(properties).map(([name, definition]) => ({
+      name,
+      label: String(definition.title || name.replace(/_/g, " ")).replace(
+        /^./,
+        (char) => char.toUpperCase(),
+      ),
+      type: String(definition.type || "string"),
+      description: String(definition.description || "").trim(),
+      required: required.has(name),
+      options: Array.isArray(definition.enum)
+        ? definition.enum.map((value) => String(value || ""))
+        : undefined,
+    }));
+  };
+
+  const getDefaultCredentialValues = (fields: ConnectorCredentialField[]) => {
+    const nextValues: Record<string, string> = {};
+    fields.forEach((field) => {
+      nextValues[field.name] = field.type === "boolean" ? "false" : "";
+    });
+    return nextValues;
+  };
+
+  const selectedConnectorFields = useMemo(() => {
+    const selectedScheme =
+      connectorAuthSchemes.find(
+        (scheme) => scheme.id === selectedConnectorAuthSchemeId,
+      ) || null;
+    return buildCredentialFields(selectedScheme?.credential_schema || {});
+  }, [connectorAuthSchemes, selectedConnectorAuthSchemeId]);
+
+  const resetState = () => {
+    setConnectorModalLoading(false);
+    setConnectorModalError(null);
+    setConnectorModalSuccess(null);
+    setConnectorModalSaving(false);
+    setConnectorModalTesting(false);
+    setSelectedConnectorVersionId("");
+    setConnectorVersions([]);
+    setSelectedConnectorAuthSchemeId("");
+    setConnectorAuthSchemes([]);
+    setConnectorCredentialValues({});
+  };
+
+  const loadConnectorMetadata = async () => {
+    const connectorId = String(selectedCatalogConnector?.id || "").trim();
+    if (!connectorId || !open) return;
+
+    setConnectorModalLoading(true);
+    setConnectorModalError(null);
+    try {
+      const versions = (await dispatch(
+        fetchConnectorVersions(connectorId),
+      )) as ConnectorVersionItem[];
+      setConnectorVersions(versions);
+
+      const preferredVersion =
+        versions.find(
+          (version) =>
+            String(version.status || "").toLowerCase() === "published",
+        ) ||
+        versions[0] ||
+        null;
+      const versionId = preferredVersion?.id || "";
+      setSelectedConnectorVersionId(versionId);
+
+      const authSchemes = versionId
+        ? ((await dispatch(
+            fetchConnectorAuthSchemes(versionId),
+          )) as ConnectorAuthSchemeItem[])
+        : [];
+      setConnectorAuthSchemes(authSchemes);
+
+      const preferredAuthScheme =
+        authSchemes.find((scheme) => Boolean(scheme.is_default)) ||
+        authSchemes[0] ||
+        null;
+      const authSchemeId = preferredAuthScheme?.id || "";
+      setSelectedConnectorAuthSchemeId(authSchemeId);
+
+      const fields = buildCredentialFields(
+        preferredAuthScheme?.credential_schema || {},
+      );
+      setConnectorCredentialValues(getDefaultCredentialValues(fields));
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message?: string }).message || "")
+          : "";
+      setConnectorModalError(message || "Failed to load connector metadata.");
+    } finally {
+      setConnectorModalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) {
+      resetState();
+      return;
+    }
+    void loadConnectorMetadata();
+  }, [open, selectedCatalogConnector?.id]);
+
+  const handleConnectorVersionSelection = async (versionId: string) => {
+    const nextVersionId = String(versionId || "").trim();
+    setSelectedConnectorVersionId(nextVersionId);
+    setConnectorModalError(null);
+    setConnectorModalSuccess(null);
+
+    if (!nextVersionId) {
+      setConnectorAuthSchemes([]);
+      setSelectedConnectorAuthSchemeId("");
+      setConnectorCredentialValues({});
+      return;
+    }
+
+    try {
+      const authSchemes = await (dispatch(
+        fetchConnectorAuthSchemes(nextVersionId),
+      ) as Promise<ConnectorAuthSchemeItem[]>);
+      setConnectorAuthSchemes(authSchemes);
+      const preferredAuthScheme =
+        authSchemes.find((scheme) => Boolean(scheme.is_default)) ||
+        authSchemes[0] ||
+        null;
+      const authSchemeId = preferredAuthScheme?.id || "";
+      setSelectedConnectorAuthSchemeId(authSchemeId);
+      const fields = buildCredentialFields(
+        preferredAuthScheme?.credential_schema || {},
+      );
+      setConnectorCredentialValues(getDefaultCredentialValues(fields));
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message?: string }).message || "")
+          : "";
+      setConnectorModalError(message || "Failed to load auth schemes.");
+    }
+  };
+
+  const handleConnectorAuthSchemeSelection = (authSchemeId: string) => {
+    const nextAuthSchemeId = String(authSchemeId || "").trim();
+    setSelectedConnectorAuthSchemeId(nextAuthSchemeId);
+
+    const authScheme =
+      connectorAuthSchemes.find((scheme) => scheme.id === nextAuthSchemeId) ||
+      null;
+    const fields = buildCredentialFields(authScheme?.credential_schema || {});
+    setConnectorCredentialValues(getDefaultCredentialValues(fields));
+  };
+
+  const handleConnectorFieldChange = (fieldName: string, value: string) => {
+    setConnectorCredentialValues((prev) => ({
+      ...prev,
+      [fieldName]: value,
+    }));
+  };
+
+  const buildConnectorDraft = () => {
+    const connector = selectedCatalogConnector;
+    const authScheme =
+      connectorAuthSchemes.find(
+        (scheme) => scheme.id === selectedConnectorAuthSchemeId,
+      ) || null;
+
+    if (!connector) {
+      return { error: "Select a connector first." } as const;
+    }
+
+    if (!selectedConnectorVersionId) {
+      return { error: "Connector version is required." } as const;
+    }
+
+    if (!authScheme) {
+      return { error: "Connector auth scheme is required." } as const;
+    }
+
+    const credentials: Record<string, unknown> = {};
+    for (const field of selectedConnectorFields) {
+      const rawValue = String(
+        connectorCredentialValues[field.name] || "",
+      ).trim();
+      if (field.required && !rawValue) {
+        return { error: `${field.label} is required.` } as const;
+      }
+
+      if (!rawValue) {
+        continue;
+      }
+
+      if (field.type === "number") {
+        const parsed = Number(rawValue);
+        credentials[field.name] = Number.isFinite(parsed) ? parsed : rawValue;
+      } else if (field.type === "boolean") {
+        credentials[field.name] = rawValue === "true" || rawValue === "1";
+      } else {
+        credentials[field.name] = rawValue;
+      }
+    }
+
+    return {
+      connector,
+      authScheme,
+      credentials,
+    } as const;
+  };
+
+  const handleConnectorTest = () => {
+    setConnectorModalTesting(true);
+    const draft = buildConnectorDraft();
+    if ("error" in draft) {
+      setConnectorModalError(draft.error || "Failed to prepare connector.");
+      setConnectorModalSuccess(null);
+      setConnectorModalTesting(false);
+      return;
+    }
+
+    setConnectorModalError(null);
+    setConnectorModalSuccess(
+      `Credentials for ${draft.connector.display_name} look complete. Save to persist this connector for the tenant.`,
+    );
+    setConnectorModalTesting(false);
+  };
+
+  const handleConnectorSave = async () => {
+    const draft = buildConnectorDraft();
+    if ("error" in draft) {
+      setConnectorModalError(draft.error || "Failed to prepare connector.");
+      setConnectorModalSuccess(null);
+      return;
+    }
+
+    setConnectorModalSaving(true);
+    setConnectorModalError(null);
+    try {
+      const result = await dispatch(
+        saveConnectorBundle({
+          connectorId: draft.connector.id,
+          connectorVersionId: selectedConnectorVersionId,
+          connectorAuthSchemeId: draft.authScheme.id,
+          connectorType: draft.connector.key,
+          connectorDisplayName: draft.connector.display_name,
+          authMode: draft.authScheme.auth_type,
+          credentials: draft.credentials,
+          refreshMetadata: {},
+          status: "active",
+        }),
+      );
+
+      const tenantConnectorId = String(
+        (result as { tenantConnector?: { id?: string } })?.tenantConnector
+          ?.id || "",
+      ).trim();
+
+      if (tenantConnectorId && onConnectorSaved) {
+        await onConnectorSaved({
+          tenantConnectorId,
+          connectorId: draft.connector.id,
+        });
+      }
+
+      setConnectorModalSuccess("Connector saved for this tenant.");
+      setTimeout(() => {
+        onOpenChange(false);
+      }, 400);
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message?: string }).message || "")
+          : "";
+      setConnectorModalError(message || "Failed to save connector.");
+    } finally {
+      setConnectorModalSaving(false);
+    }
+  };
+
+  const closeConnectorModal = () => {
+    onOpenChange(false);
+  };
+
   return (
     <Dialog
       open={open}
@@ -96,17 +429,17 @@ export default function ConnectorDialog({
         closeConnectorModal();
       }}
     >
-      <DialogContent className="sm:max-w-4xl rounded-2xl border border-border bg-background p-0">
-        <div className="p-6">
-          <DialogHeader className="space-y-2">
-            <DialogTitle>Create Connector</DialogTitle>
-            <DialogDescription>
-              Choose a connector from the catalog, enter the tenant
-              credentials, then test and save it for future use.
-            </DialogDescription>
-          </DialogHeader>
+      <DialogContent className="sm:max-w-4xl overflow-hidden rounded-2xl border border-border bg-background p-0">
+        <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5 text-left">
+          <DialogTitle className="text-lg">Create Connector</DialogTitle>
+          {/* <DialogDescription className="pt-1">
+            Choose a connector from the catalog, enter the tenant credentials,
+            then test and save it for future use.
+          </DialogDescription> */}
+        </DialogHeader>
 
-          <div className="mt-6 space-y-4">
+        <div className="px-6 py-5">
+          <div className="space-y-4">
             {connectorModalError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {connectorModalError}
@@ -122,7 +455,7 @@ export default function ConnectorDialog({
               <div className="space-y-2 lg:col-span-2 rounded-2xl border border-border bg-muted/30 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <Label className="text-xs font-medium text-muted-foreground">
+                    <Label className="text-sm font-medium text-muted-foreground">
                       Connector
                     </Label>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -148,7 +481,7 @@ export default function ConnectorDialog({
                           {selectedCatalogConnector.key}
                         </p>
                       </div>
-                      {getConnectorAuthMethodHint(selectedCatalogConnector) ? (
+                      {getConnectorAuthMethodHint() ? (
                         <Badge variant="secondary" className="rounded-full">
                           PAT / Basic auth
                         </Badge>
@@ -159,7 +492,7 @@ export default function ConnectorDialog({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-medium text-muted-foreground">
+                <Label className="text-sm font-medium text-muted-foreground">
                   Version
                 </Label>
                 <Select
@@ -189,7 +522,7 @@ export default function ConnectorDialog({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-medium text-muted-foreground">
+                <Label className="text-sm font-medium text-muted-foreground">
                   Auth Scheme
                 </Label>
                 <Select
@@ -216,9 +549,9 @@ export default function ConnectorDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                {getConnectorAuthMethodHint(selectedCatalogConnector) ? (
+                {getConnectorAuthMethodHint() ? (
                   <p className="text-xs text-muted-foreground">
-                    {getConnectorAuthMethodHint(selectedCatalogConnector)}
+                    {getConnectorAuthMethodHint()}
                   </p>
                 ) : null}
               </div>
@@ -306,11 +639,14 @@ export default function ConnectorDialog({
               </div>
             </div>
           </div>
+        </div>
 
-          <DialogFooter className="mt-6 px-0 pb-0">
+        <DialogFooter className="min-h-20 border-t border-border bg-muted/20 px-6 py-0">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2">
             <Button
               type="button"
               variant="outline"
+              className="cursor-pointer"
               onClick={closeConnectorModal}
               disabled={connectorModalSaving || connectorModalTesting}
             >
@@ -319,6 +655,7 @@ export default function ConnectorDialog({
             <Button
               type="button"
               variant="outline"
+              className="cursor-pointer"
               onClick={handleConnectorTest}
               disabled={connectorModalSaving || connectorModalTesting}
             >
@@ -326,14 +663,14 @@ export default function ConnectorDialog({
             </Button>
             <Button
               type="button"
-              className="bg-primary hover:bg-primary/90"
+              className="bg-primary hover:bg-primary/90 cursor-pointer"
               onClick={() => void handleConnectorSave()}
               disabled={connectorModalSaving || connectorModalLoading}
             >
               {connectorModalSaving ? "Saving..." : "Save Connector"}
             </Button>
-          </DialogFooter>
-        </div>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

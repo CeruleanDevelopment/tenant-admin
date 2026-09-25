@@ -161,9 +161,9 @@ type TenantAgentAssignmentInput = {
   agentId: string;
   aiProvider: "openai" | "openrouter";
   aiModel: string;
-  managerCanRun: boolean;
-  userCanRun: boolean;
-  assignedUserIds: string[];
+  managerCanRun?: boolean;
+  userCanRun?: boolean;
+  assignedUserIds?: string[];
   meetingAutomationEnabled?: boolean;
   meetingCreationMode?: "auto" | "confirm_first";
 };
@@ -229,6 +229,7 @@ export type TenantRoleBootstrapMember = {
 };
 
 export type TenantRoleBootstrapPayload = {
+  users: TenantMeUser[];
   roles: TenantRoleBootstrapRole[];
   roleMembers: TenantRoleBootstrapMember[];
   roleActions: TenantRoleBootstrapRoleAction[];
@@ -236,6 +237,11 @@ export type TenantRoleBootstrapPayload = {
 };
 
 type TenantRoleActionAssignment = {
+  connectorId: string;
+  actionId: string;
+};
+
+type TenantUserActionAssignment = {
   connectorId: string;
   actionId: string;
 };
@@ -334,6 +340,10 @@ export type TenantConnectorItem = {
   tenant_id: string;
   connector_id: string;
   connector_version_id: string;
+  connector_type?: string | null;
+  connector_display_name?: string | null;
+  connection_id?: string | null;
+  auth_mode?: string | null;
   status: string;
   upgrade_available_version_id?: string | null;
   provisioned_by?: string | null;
@@ -360,6 +370,16 @@ export type ConnectorAuthSchemeItem = {
   config?: Record<string, unknown> | null;
   credential_schema?: Record<string, unknown> | null;
   is_default?: boolean;
+};
+
+export type ConnectorActionItem = {
+  id: string;
+  connector_version_id: string;
+  action_key: string;
+  display_name: string;
+  description?: string | null;
+  status?: string | null;
+  is_active?: number | boolean | null;
 };
 
 type ConnectorBundleInput = {
@@ -1338,13 +1358,14 @@ export const fetchCountries =
     return countries as ActiveCountry[];
   };
 
-let _fetchTenantUsersPromise: Promise<TenantMeUser[]> | null = null;
+const _fetchTenantUsersPromiseByKey = new Map<string, Promise<TenantMeUser[]>>();
 
 export const fetchTenantUsers =
-  (): ThunkAction<Promise<TenantMeUser[]>, RootState, unknown, AnyAction> =>
+  (input?: { search?: string; limit?: number }): ThunkAction<Promise<TenantMeUser[]>, RootState, unknown, AnyAction> =>
   async () => {
-    // Deduplicate concurrent requests (helps with React StrictMode double-mounts)
-    if (_fetchTenantUsersPromise) return _fetchTenantUsersPromise;
+    const search = String(input?.search || "").trim();
+    const limit = Math.max(1, Math.min(Number(input?.limit || 10) || 10, 10));
+    const requestKey = `${search.toLowerCase()}|${limit}`;
 
     const token = loadAuthTokenCookie();
     if (!token) {
@@ -1357,9 +1378,19 @@ export const fetchTenantUsers =
     const headers: Record<string, string> = {};
     headers["x-tenant-token"] = token;
 
-    _fetchTenantUsersPromise = (async () => {
+    const cachedRequest = _fetchTenantUsersPromiseByKey.get(requestKey);
+    if (cachedRequest) {
+      return cachedRequest;
+    }
+
+    const request = (async () => {
       try {
-        const params = { sortBy: "createdAt", order: "desc" };
+        const params = {
+          sortBy: "createdAt",
+          order: "desc",
+          q: search,
+          limit,
+        };
         console.debug(
           "fetchTenantUsers: calling /tenant/users with headers and params:",
           headers,
@@ -1375,11 +1406,12 @@ export const fetchTenantUsers =
         return [];
       } finally {
         // clear promise so subsequent calls after completion will re-fetch
-        _fetchTenantUsersPromise = null;
+        _fetchTenantUsersPromiseByKey.delete(requestKey);
       }
     })();
 
-    return _fetchTenantUsersPromise;
+    _fetchTenantUsersPromiseByKey.set(requestKey, request);
+    return request;
   };
 
 export const fetchTenantRoleBootstrap =
@@ -1387,7 +1419,7 @@ export const fetchTenantRoleBootstrap =
   async () => {
     const token = loadAuthTokenCookie();
     if (!token) {
-      return { roles: [], roleMembers: [], roleActions: [], actions: [] };
+      return { users: [], roles: [], roleMembers: [], roleActions: [], actions: [] };
     }
 
     const headers: Record<string, string> = {};
@@ -1400,6 +1432,7 @@ export const fetchTenantRoleBootstrap =
       const payload = (response?.data || {}) as TenantRoleBootstrapPayload;
 
       return {
+        users: Array.isArray(payload.users) ? payload.users : [],
         roles: Array.isArray(payload.roles) ? payload.roles : [],
         roleMembers: Array.isArray(payload.roleMembers)
           ? payload.roleMembers
@@ -1414,7 +1447,7 @@ export const fetchTenantRoleBootstrap =
         "fetchTenantRoleBootstrap failed:",
         extractApiMessage(error),
       );
-      return { roles: [], roleMembers: [], roleActions: [], actions: [] };
+      return { users: [], roles: [], roleMembers: [], roleActions: [], actions: [] };
     }
   };
 
@@ -1509,6 +1542,39 @@ export const updateTenantRoleActions =
     return (response?.data || {}) as { role?: { id?: string } };
   };
 
+export const updateTenantUserActions =
+  (
+    userId: string,
+    connectorId: string,
+    actions: TenantUserActionAssignment[],
+  ): ThunkAction<Promise<{ userActions?: Array<Record<string, unknown>> }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const normalizedUserId = String(userId || "").trim();
+    const normalizedConnectorId = String(connectorId || "").trim();
+
+    if (!normalizedUserId) {
+      throw new Error("User id is required.");
+    }
+
+    if (!normalizedConnectorId) {
+      throw new Error("Connector id is required.");
+    }
+
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const response = await axios.put(
+      `/tenant/role-management/users/${encodeURIComponent(normalizedUserId)}/actions`,
+      {
+        connectorId: normalizedConnectorId,
+        actions: Array.isArray(actions) ? actions : [],
+      },
+      { headers },
+    );
+
+    return (response?.data || {}) as { userActions?: Array<Record<string, unknown>> };
+  };
 export const fetchTenantAgentAssignments =
   (options?: {
     force?: boolean;
@@ -1822,9 +1888,6 @@ export const upsertTenantAgentAssignment =
       {
         aiProvider: input.aiProvider,
         aiModel: input.aiModel,
-        managerCanRun: input.managerCanRun,
-        userCanRun: input.userCanRun,
-        assignedUserIds: input.assignedUserIds,
         meetingAutomationEnabled: Boolean(
           input.meetingAutomationEnabled ?? true,
         ),
@@ -2230,6 +2293,32 @@ export const fetchConnectorAuthSchemes =
     }
   };
 
+export const fetchConnectorActions =
+  (
+    connectorVersionId: string,
+  ): ThunkAction<Promise<ConnectorActionItem[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const id = String(connectorVersionId || "").trim();
+    if (!id) return [];
+
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    try {
+      const response = await axios.get(
+        `/api/connector-catalog/versions/${encodeURIComponent(id)}/actions`,
+        { headers },
+      );
+      return Array.isArray(response?.data?.actions)
+        ? (response.data.actions as ConnectorActionItem[])
+        : [];
+    } catch (error) {
+      console.warn("fetchConnectorActions failed:", extractApiMessage(error));
+      return [];
+    }
+  };
+
 export const saveTenantConnectorBundle =
   (
     input: ConnectorBundleInput,
@@ -2332,7 +2421,41 @@ export const fetchConnectorCatalog =
         const connectors = Array.isArray(response?.data?.connectors)
           ? response.data.connectors
           : [];
-        return connectors as ConnectorCatalogItem[];
+
+        return connectors
+          .map((connector: unknown): ConnectorCatalogItem | null => {
+            const row = connector as Record<string, unknown>;
+            const connectorId = String(
+              row.connector_id || row.id || row.connector_type || "",
+            ).trim();
+            const displayName = String(
+              row.connector_display_name || row.display_name || connectorId,
+            ).trim();
+
+            if (!connectorId) {
+              return null;
+            }
+
+            return {
+              id: String(row.id || connectorId),
+              key: connectorId,
+              display_name: displayName,
+              description: "",
+              category: null,
+              vendor: null,
+              logo_url: null,
+              origin: "tenant",
+              tenant_id: String(row.tenant_id || "") || null,
+              lifecycle: String(row.status || "active"),
+              is_active: 1,
+              created_at: String(row.created_at || "") || null,
+              updated_at: String(row.updated_at || "") || null,
+            } satisfies ConnectorCatalogItem;
+          })
+          .filter(
+            (item: ConnectorCatalogItem | null): item is ConnectorCatalogItem =>
+              Boolean(item),
+          );
       } catch (error) {
         console.warn("fetchConnectorCatalog failed:", extractApiMessage(error));
         return [];

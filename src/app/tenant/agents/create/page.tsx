@@ -6,24 +6,18 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import {
   createTenantAgent,
-  addTenantUser,
   fetchConnectorCatalog,
-  fetchConnectorAuthSchemes,
-  fetchConnectorVersions,
+  fetchConnectorActions,
   fetchTenantConnectors,
   fetchTenantAgent,
   fetchTenantAgentAssignment,
   fetchTenantUsers,
-  fetchTenantRoleBootstrap,
   fetchTenantRoleUserActions,
-  saveTenantConnectorBundle,
   saveTenantRole,
   updateTenantAgent,
-  updateTenantRoleActions,
+  updateTenantUserActions,
   upsertTenantAgentAssignment,
-  type ConnectorAuthSchemeItem,
   type ConnectorCatalogItem,
-  type ConnectorVersionItem,
   type TenantConnectorItem,
 } from "../../../../../actions/auth";
 import type { AppDispatch } from "../../../../../redux/store";
@@ -82,7 +76,7 @@ const AI_MODEL_OPTIONS: Record<"openrouter", string[]> = {
   openrouter: [
     "openrouter/auto",
     "anthropic/claude-3.7-sonnet",
-    "google/gemini-2.5-flash",
+    "google/gemini-2.5-flash",    
   ],
 };
 
@@ -92,15 +86,6 @@ type Step1FieldErrors = {
   aiModel?: string;
   serviceType?: string;
   tenantConnectorId?: string;
-};
-
-type ConnectorCredentialField = {
-  name: string;
-  label: string;
-  type: string;
-  description?: string;
-  required: boolean;
-  options?: string[];
 };
 
 type RoleBootstrapAction = {
@@ -310,8 +295,6 @@ export default function TenantAgentCreatePage() {
   const [loadingTenantConnectors, setLoadingTenantConnectors] = useState(false);
   const [loadingEditData, setLoadingEditData] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
-  const [loadingRoleBootstrap, setLoadingRoleBootstrap] = useState(false);
-  const [roleBootstrapError, setRoleBootstrapError] = useState<string | null>(null);
   const [roleBootstrapRoles, setRoleBootstrapRoles] = useState<RoleBootstrapRole[]>([]);
   const [roleBootstrapMembers, setRoleBootstrapMembers] = useState<RoleBootstrapMember[]>([]);
   const [roleBootstrapActions, setRoleBootstrapActions] = useState<RoleBootstrapRoleAction[]>([]);
@@ -319,7 +302,6 @@ export default function TenantAgentCreatePage() {
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [selectedRoleUserIds, setSelectedRoleUserIds] = useState<string[]>([]);
   const [selectedRoleActionIds, setSelectedRoleActionIds] = useState<string[]>([]);
-  const [savingRoleAccess, setSavingRoleAccess] = useState(false);
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [roleViewMode, setRoleViewMode] = useState<"roles" | "users">("roles");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
@@ -337,8 +319,6 @@ export default function TenantAgentCreatePage() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [aiProvider, setAiProvider] = useState<AiProvider>("");
   const [aiModel, setAiModel] = useState("");
-  const [managerCanRun, setManagerCanRun] = useState(true);
-  const [userCanRun, setUserCanRun] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [serviceType, setServiceType] = useState<AgentCategory>("");
   const [selectedTenantConnectorId, setSelectedTenantConnectorId] =
@@ -347,39 +327,9 @@ export default function TenantAgentCreatePage() {
   const [tenantConnectors, setTenantConnectors] = useState<
     TenantConnectorItem[]
   >([]);
-  const [assignedUserIds, setAssignedUserIds] = useState<string[]>([]);
   const [userSearch, setUserSearch] = useState("");
   const [connectorModalOpen, setConnectorModalOpen] = useState(false);
-  const [connectorModalSaving, setConnectorModalSaving] = useState(false);
-  const [connectorModalTesting, setConnectorModalTesting] = useState(false);
-  const [connectorModalLoading, setConnectorModalLoading] = useState(false);
-  const [connectorModalError, setConnectorModalError] = useState<string | null>(
-    null,
-  );
-  const [connectorModalSuccess, setConnectorModalSuccess] = useState<
-    string | null
-  >(null);
-  const [selectedConnectorId, setSelectedConnectorId] = useState<string>("");
-  const [selectedConnectorVersionId, setSelectedConnectorVersionId] =
-    useState<string>("");
-  const [selectedConnectorAuthSchemeId, setSelectedConnectorAuthSchemeId] =
-    useState<string>("");
-  const [connectorVersions, setConnectorVersions] = useState<
-    ConnectorVersionItem[]
-  >([]);
-  const [connectorAuthSchemes, setConnectorAuthSchemes] = useState<
-    ConnectorAuthSchemeItem[]
-  >([]);
-  const [connectorCredentialValues, setConnectorCredentialValues] = useState<
-    Record<string, string>
-  >({});
   const [addUserModalOpen, setAddUserModalOpen] = useState(false);
-  const [newUserFirstName, setNewUserFirstName] = useState("");
-  const [newUserLastName, setNewUserLastName] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserIsActive, setNewUserIsActive] = useState(true);
-  const [addingUser, setAddingUser] = useState(false);
-  const [addUserError, setAddUserError] = useState<string | null>(null);
   const [step1FieldErrors, setStep1FieldErrors] = useState<Step1FieldErrors>(
     {},
   );
@@ -396,92 +346,6 @@ export default function TenantAgentCreatePage() {
     connectors.find((connector) => connector.key === connectorKey) || null;
 
   const selectedToolConnector = getConnectorByKey(serviceType);
-
-  const formatConnectorAuthSchemeLabel = (scheme: ConnectorAuthSchemeItem) => {
-    const authType = String(scheme.auth_type || "")
-      .trim()
-      .toLowerCase();
-    if (
-      selectedToolConnector?.key === "azure-devops" ||
-      selectedToolConnector?.key === "azure_devops"
-    ) {
-      if (authType === "basic") return "Personal Access Token (PAT)";
-    }
-    if (!authType) return "Authentication";
-    return authType
-      .split(/[\s_-]+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  };
-
-  const getConnectorAuthMethodHint = (
-    connector: ConnectorCatalogItem | null,
-  ) => {
-    if (!connector) return "";
-    const key = String(connector.key || "")
-      .trim()
-      .toLowerCase();
-    if (key === "azure-devops" || key === "azure_devops") {
-      return "Azure DevOps uses Personal Access Token (PAT) with basic auth credentials.";
-    }
-    return "";
-  };
-
-  const buildCredentialFields = (
-    schema: unknown,
-  ): ConnectorCredentialField[] => {
-    const schemaRecord =
-      schema && typeof schema === "object"
-        ? (schema as Record<string, unknown>)
-        : {};
-    const properties =
-      schemaRecord.properties && typeof schemaRecord.properties === "object"
-        ? (schemaRecord.properties as Record<string, Record<string, unknown>>)
-        : {};
-    const required = new Set(
-      Array.isArray(schemaRecord.required)
-        ? schemaRecord.required
-            .map((value) => String(value || "").trim())
-            .filter(Boolean)
-        : [],
-    );
-
-    return Object.entries(properties).map(([name, definition]) => ({
-      name,
-      label: String(definition.title || name.replace(/_/g, " ")).replace(
-        /^./,
-        (char) => char.toUpperCase(),
-      ),
-      type: String(definition.type || "string"),
-      description: String(definition.description || "").trim(),
-      required: required.has(name),
-      options: Array.isArray(definition.enum)
-        ? definition.enum.map((value) => String(value || ""))
-        : undefined,
-    }));
-  };
-
-  const getDefaultCredentialValues = (fields: ConnectorCredentialField[]) => {
-    const nextValues: Record<string, string> = {};
-    fields.forEach((field) => {
-      nextValues[field.name] = field.type === "boolean" ? "false" : "";
-    });
-    return nextValues;
-  };
-
-  const resetConnectorModalState = () => {
-    setConnectorModalError(null);
-    setConnectorModalSuccess(null);
-    setConnectorModalSaving(false);
-    setConnectorModalTesting(false);
-    setSelectedConnectorId("");
-    setSelectedConnectorVersionId("");
-    setSelectedConnectorAuthSchemeId("");
-    setConnectorVersions([]);
-    setConnectorAuthSchemes([]);
-    setConnectorCredentialValues({});
-  };
 
   const loadTenantConnectors = async (options?: {
     forceRefresh?: boolean;
@@ -516,32 +380,47 @@ export default function TenantAgentCreatePage() {
     }
   };
 
-  const loadRoleBootstrap = async (options?: { forceRefresh?: boolean }) => {
-    if (!tenantId) return;
-
-    if (!options?.forceRefresh && roleBootstrapRoles.length > 0) {
+  const loadRoleActions = async (tenantConnectorId: string) => {
+    const normalizedTenantConnectorId = String(tenantConnectorId || "").trim();
+    if (!normalizedTenantConnectorId) {
+      setRoleActionCatalog([]);
       return;
     }
 
-    setLoadingRoleBootstrap(true);
-    setRoleBootstrapError(null);
+    const selectedTenantConnector =
+      tenantConnectors.find((item) => String(item.id) === normalizedTenantConnectorId) ||
+      null;
+
+    if (!selectedTenantConnector?.connector_version_id) {
+      setRoleActionCatalog([]);
+      return;
+    }
 
     try {
-      const payload = (await dispatch(
-        fetchTenantRoleBootstrap(),
-      )) as RoleBootstrapPayload;
-      const nextRoles = Array.isArray(payload.roles) ? payload.roles : [];
-      const nextMembers = Array.isArray(payload.roleMembers) ? payload.roleMembers : [];
-      const nextActions = Array.isArray(payload.actions) ? payload.actions : [];
+      const actions = (await dispatch(
+        fetchConnectorActions(selectedTenantConnector.connector_version_id),
+      )) as Array<Record<string, unknown>>;
+      const catalogConnector =
+        connectors.find((item) => item.id === selectedTenantConnector.connector_id) || null;
 
-      setRoleBootstrapRoles(nextRoles);
-      setRoleBootstrapMembers(nextMembers);
-      setRoleBootstrapActions(Array.isArray(payload.roleActions) ? payload.roleActions : []);
-      setRoleActionCatalog(nextActions);
+      setRoleActionCatalog(
+        actions
+          .map((action) => ({
+            id: String(action.id || "").trim(),
+            connector_id: String(selectedTenantConnector.connector_id || "").trim(),
+            connector_key: String(catalogConnector?.key || selectedTenantConnector.connector_id || "").trim(),
+            connector_display_name: String(catalogConnector?.display_name || selectedTenantConnector.connector_display_name || selectedTenantConnector.connector_id || "").trim(),
+            action_key: String(action.action_key || "").trim(),
+            display_name: String(action.display_name || action.action_key || "").trim(),
+            description: String(action.description || "").trim(),
+            status: String(action.status || "").trim() || null,
+            is_active: action.is_active as number | boolean | null,
+          }))
+          .filter((item) => Boolean(item.id && item.action_key)),
+      );
     } catch (error: unknown) {
-      setRoleBootstrapError(extractErrorMessage(error));
-    } finally {
-      setLoadingRoleBootstrap(false);
+      console.error("Failed to load role actions:", extractErrorMessage(error));
+      setRoleActionCatalog([]);
     }
   };
 
@@ -560,72 +439,15 @@ export default function TenantAgentCreatePage() {
       const payload = { actions };
       setSelectedUserActions(Array.isArray(payload?.actions) ? payload.actions : []);
     } catch (error: unknown) {
-      setRoleBootstrapError(extractErrorMessage(error));
+      setUserActionError(extractErrorMessage(error));
       setSelectedUserActions([]);
     } finally {
       setLoadingUserActions(false);
     }
   };
 
-  const loadConnectorMetadata = async (connectorId: string) => {
-    const id = String(connectorId || "").trim();
-    if (!id) return;
-
-    setConnectorModalLoading(true);
-    try {
-      const versions = (await dispatch(
-        fetchConnectorVersions(id),
-      )) as ConnectorVersionItem[];
-      setConnectorVersions(versions);
-
-      const preferredVersion =
-        versions.find(
-          (version) =>
-            String(version.status || "").toLowerCase() === "published",
-        ) ||
-        versions[0] ||
-        null;
-      const versionId = preferredVersion?.id || "";
-      setSelectedConnectorVersionId(versionId);
-
-      const authSchemes = versionId
-        ? ((await dispatch(
-            fetchConnectorAuthSchemes(versionId),
-          )) as ConnectorAuthSchemeItem[])
-        : [];
-      setConnectorAuthSchemes(authSchemes);
-
-      const preferredAuthScheme =
-        authSchemes.find((scheme) => Boolean(scheme.is_default)) ||
-        authSchemes[0] ||
-        null;
-      const authSchemeId = preferredAuthScheme?.id || "";
-      setSelectedConnectorAuthSchemeId(authSchemeId);
-
-      const fields = buildCredentialFields(
-        preferredAuthScheme?.credential_schema || {},
-      );
-      setConnectorCredentialValues(getDefaultCredentialValues(fields));
-    } catch (error: unknown) {
-      setConnectorModalError(extractErrorMessage(error));
-    } finally {
-      setConnectorModalLoading(false);
-    }
-  };
-
   const openConnectorModal = () => {
-    resetConnectorModalState();
     setConnectorModalOpen(true);
-
-    const firstConnector = selectedToolConnector || connectors[0] || null;
-    if (firstConnector) {
-      setSelectedConnectorId(firstConnector.id);
-    }
-  };
-
-  const closeConnectorModal = () => {
-    setConnectorModalOpen(false);
-    resetConnectorModalState();
   };
 
   useEffect(() => {
@@ -655,7 +477,7 @@ export default function TenantAgentCreatePage() {
 
     const nextQuery = params.toString();
     const nextUrl = nextQuery ? `${currentPath}?${nextQuery}` : currentPath;
-    router.replace(nextUrl, { scroll: false });
+    // router.replace(nextUrl, { scroll: false });
   };
 
   const loadUsers = async (options?: { forceRefresh?: boolean }) => {
@@ -737,18 +559,30 @@ export default function TenantAgentCreatePage() {
   }, [selectedToolConnector?.id, tenantId]);
 
   useEffect(() => {
-    if (!connectorModalOpen || !selectedConnectorId) return;
-    void loadConnectorMetadata(selectedConnectorId);
-  }, [connectorModalOpen, selectedConnectorId]);
+    if (!selectedTenantConnectorId) {
+      setRoleActionCatalog([]);
+      return;
+    }
 
-  useEffect(() => {
-    if (currentStep !== 2) return;
-    void loadRoleBootstrap();
-  }, [currentStep, tenantId]);
+    void loadRoleActions(selectedTenantConnectorId);
+  }, [connectors, selectedTenantConnectorId, tenantConnectors]);
 
   const selectedRole = roleBootstrapRoles.find((role) => role.id === selectedRoleId) || null;
 
   const currentAgentId = String(workingAgentId || editingAgentId || "").trim() || null;
+
+  const visibleRoleBootstrapRoles = useMemo(
+    () =>
+      roleBootstrapRoles.filter((role) => {
+        const roleAgentId = String(role.agent_id || "").trim();
+        if (currentAgentId) {
+          return roleAgentId === currentAgentId;
+        }
+
+        return !roleAgentId;
+      }),
+    [currentAgentId, roleBootstrapRoles],
+  );
 
   const selectedUser = useMemo(
     () => users.find((user) => String(user.id) === selectedUserId) || null,
@@ -757,29 +591,13 @@ export default function TenantAgentCreatePage() {
 
   const selectedUserLabel = selectedUser ? formatUserName(selectedUser) : "Select a user";
   const selectedUserEmail = selectedUser?.email || "";
-  const selectedUserActiveRoleIds = useMemo(
+  const selectedRoleUsers = useMemo(
     () =>
-      roleBootstrapMembers
-        .filter(
-          (item) =>
-            String(item.user_id) === String(selectedUserId) &&
-            Number(item.is_active ?? 1) !== 0,
-        )
-        .map((item) => String(item.role_id))
-        .filter(Boolean),
-    [roleBootstrapMembers, selectedUserId],
+      selectedRoleUserIds
+        .map((userId) => users.find((user) => String(user.id) === String(userId)) || null)
+        .filter((user): user is TenantUser => Boolean(user)),
+    [selectedRoleUserIds, users],
   );
-
-  const selectedUserRolesForTool = useMemo(() => {
-    const toolConnectorId = String(selectedToolConnector?.id || "").trim();
-    if (!toolConnectorId) return [];
-
-    return roleBootstrapRoles.filter(
-      (role) =>
-        selectedUserActiveRoleIds.includes(String(role.id)) &&
-        String(role.connector_id || "") === toolConnectorId,
-    );
-  }, [roleBootstrapRoles, selectedToolConnector?.id, selectedUserActiveRoleIds]);
 
   const selectedToolActions = useMemo(() => {
     if (!selectedToolConnector?.id) return [];
@@ -787,8 +605,6 @@ export default function TenantAgentCreatePage() {
       (action) => String(action.connector_id) === String(selectedToolConnector.id),
     );
   }, [roleActionCatalog, selectedToolConnector?.id]);
-
-  const roleActionsForSelectedConnector = selectedToolActions;
 
   const buildRoleAutoName = (connectorId: string, toolId: string) => {
     const connector = connectors.find((item) => item.id === connectorId) || null;
@@ -798,8 +614,6 @@ export default function TenantAgentCreatePage() {
       String(connector?.display_name || connector?.key || "Role")
     );
   };
-
-  const roleFormDisabled = !currentAgentId || savingRoleAccess;
 
   useEffect(() => {
     if (!selectedRoleId) {
@@ -856,8 +670,8 @@ export default function TenantAgentCreatePage() {
       return;
     }
 
-    if (selectedUserRolesForTool.length === 0) {
-      setUserActionError("This user does not have a role for the selected tool.");
+    if (!selectedUserId) {
+      setUserActionError("Select a user first.");
       return;
     }
 
@@ -865,27 +679,27 @@ export default function TenantAgentCreatePage() {
     setUserActionError(null);
 
     try {
-      await Promise.all(
-        selectedUserRolesForTool.map(async (role) => {
-          const roleId = String(role.id || "").trim();
-          const currentActions = roleBootstrapActions
-            .filter((item) => String(item.role_id) === roleId && Number(item.is_active ?? 1) !== 0)
-            .map((item) => ({ connectorId: String(item.connector_id || ""), actionId: String(item.action_id || "") }))
-            .filter((item) => item.connectorId && item.actionId);
+      const currentUserActions = selectedUserActions
+        .filter(
+          (item) =>
+            String(item.connector_id || "") === normalizedConnectorId &&
+            String(item.grant_source || "") === "user",
+        )
+        .map((item) => ({ connectorId: String(item.connector_id || ""), actionId: String(item.action_id || "") }))
+        .filter((item) => item.connectorId && item.actionId);
 
-          const nextActions = checked
-            ? currentActions.some((item) => item.connectorId === normalizedConnectorId && item.actionId === normalizedActionId)
-              ? currentActions
-              : [...currentActions, { connectorId: normalizedConnectorId, actionId: normalizedActionId }]
-            : currentActions.filter(
-                (item) => !(item.connectorId === normalizedConnectorId && item.actionId === normalizedActionId),
-              );
+      const nextActions = checked
+        ? currentUserActions.some(
+            (item) => item.connectorId === normalizedConnectorId && item.actionId === normalizedActionId,
+          )
+          ? currentUserActions
+          : [...currentUserActions, { connectorId: normalizedConnectorId, actionId: normalizedActionId }]
+        : currentUserActions.filter(
+            (item) => !(item.connectorId === normalizedConnectorId && item.actionId === normalizedActionId),
+          );
 
-          await dispatch(updateTenantRoleActions(roleId, nextActions));
-        }),
-      );
+      await dispatch(updateTenantUserActions(selectedUserId, normalizedConnectorId, nextActions));
 
-      await loadRoleBootstrap({ forceRefresh: true });
       if (selectedUserId) {
         await loadUserActions(selectedUserId);
       }
@@ -911,12 +725,7 @@ export default function TenantAgentCreatePage() {
 
   const openRoleModal = () => {
     startNewRole();
-    setRoleBootstrapError(null);
     setRoleModalOpen(true);
-  };
-
-  const closeRoleModal = () => {
-    setRoleModalOpen(false);
   };
 
   const selectRole = (role: RoleBootstrapRole) => {
@@ -928,85 +737,58 @@ export default function TenantAgentCreatePage() {
     setRoleIsActive(toActive(role.is_active));
   };
 
-  const saveSelectedRoleAccess = async () => {
-    if (!currentAgentId) {
-      setRoleBootstrapError("Save the agent before creating or updating roles.");
-      return;
-    }
+  const replaceRoleBootstrapState = ({
+    previousRoleId,
+    roleRecord,
+    userIds,
+    actions,
+  }: {
+    previousRoleId: string;
+    roleRecord: RoleBootstrapRole;
+    userIds: string[];
+    actions: Array<{ connectorId: string; actionId: string }>;
+  }) => {
+    const previousId = String(previousRoleId || "").trim();
+    const nextRoleId = String(roleRecord.id || "").trim();
 
-    const resolvedConnectorId = roleConnectorId || selectedToolConnector?.id || connectors[0]?.id || "";
-    const resolvedToolId = roleToolId || roleActionsForSelectedConnector[0]?.id || roleActionCatalog.find((item) => item.connector_id === resolvedConnectorId)?.id || "";
-    const resolvedRoleName = roleName.trim() || buildRoleAutoName(resolvedConnectorId, resolvedToolId);
-
-    if (!resolvedConnectorId) {
-      setRoleBootstrapError("Unable to determine the connector for this role.");
-      return;
-    }
-
-    if (!resolvedToolId) {
-      setRoleBootstrapError("Unable to determine the tool for this role.");
-      return;
-    }
-
-    setSavingRoleAccess(true);
-    setRoleBootstrapError(null);
-
-    try {
-      const actions = selectedRoleActionIds
-        .map((actionId) => roleActionCatalog.find((item) => item.id === actionId))
-        .filter((item): item is RoleBootstrapAction => Boolean(item))
-        .map((item) => ({ connectorId: item.connector_id, actionId: item.id }));
-
-      const payload = {
-        name: resolvedRoleName,
-        description: roleDescription.trim(),
-        agentId: currentAgentId,
-        connectorId: resolvedConnectorId,
-        toolId: resolvedToolId,
-        isActive: roleIsActive ? 1 : 0,
-        userIds: selectedRoleUserIds,
-        actions,
-      };
-
-      const saveResponse = await dispatch(
-        saveTenantRole({
-          roleId: selectedRoleId || undefined,
-          name: payload.name,
-          description: payload.description,
-          agentId: payload.agentId,
-          connectorId: payload.connectorId,
-          toolId: payload.toolId,
-          isActive: payload.isActive,
-          userIds: payload.userIds,
-          actions: payload.actions,
-        }),
+    setRoleBootstrapRoles((current) => {
+      const filtered = current.filter(
+        (item) => item.id !== previousId && item.id !== nextRoleId,
       );
+      return [...filtered, roleRecord];
+    });
 
-      const roleId = String(saveResponse?.role?.id || selectedRoleId || "").trim();
+    setRoleBootstrapMembers((current) => {
+      const filtered = current.filter(
+        (item) => item.role_id !== previousId && item.role_id !== nextRoleId,
+      );
+      const nextMembers = userIds.map((userId) => ({
+        role_id: nextRoleId,
+        user_id: userId,
+        is_active: 1,
+      }));
+      return [...filtered, ...nextMembers];
+    });
 
-      if (!roleId) {
-        throw new Error("Role save failed.");
-      }
+    setRoleBootstrapActions((current) => {
+      const filtered = current.filter(
+        (item) => item.role_id !== previousId && item.role_id !== nextRoleId,
+      );
+      const nextActions = actions.map((item) => ({
+        id: `${nextRoleId}:${item.actionId}`,
+        tenant_id: tenantId,
+        role_id: nextRoleId,
+        connector_id: item.connectorId,
+        action_id: item.actionId,
+        is_active: 1,
+        created_at: null,
+        updated_at: null,
+      }));
+      return [...filtered, ...nextActions];
+    });
 
-      setRoleName(resolvedRoleName);
-      setRoleConnectorId(resolvedConnectorId);
-      setRoleToolId(resolvedToolId);
-
-      await loadRoleBootstrap({ forceRefresh: true });
-
-      const refreshedRole = roleBootstrapRoles.find((role) => role.id === roleId) || null;
-      if (refreshedRole) {
-        selectRole(refreshedRole);
-      } else {
-        setSelectedRoleId(roleId);
-      }
-
-      setRoleModalOpen(false);
-    } catch (error: unknown) {
-      setRoleBootstrapError(extractErrorMessage(error));
-    } finally {
-      setSavingRoleAccess(false);
-    }
+    setSelectedRoleId(nextRoleId);
+    selectRole(roleRecord);
   };
 
   useEffect(() => {
@@ -1037,12 +819,6 @@ export default function TenantAgentCreatePage() {
           assignmentRow.aiProvider === "openrouter" ? "openrouter" : "";
         setAiProvider(aiProviderValue);
         setAiModel(String(assignmentRow.aiModel || ""));
-        setManagerCanRun(Boolean(assignmentRow.managerCanRun ?? true));
-        setUserCanRun(
-          Boolean(
-            assignmentRow.userCanRun ?? assignmentRow.memberCanRun ?? false,
-          ),
-        );
         setServiceType(
           String(
             agent?.connectorKey ||
@@ -1059,13 +835,6 @@ export default function TenantAgentCreatePage() {
               assignmentRow.connector_key ||
               "",
           ),
-        );
-        setAssignedUserIds(
-          Array.isArray(assignmentRow.assignedUserIds)
-            ? assignmentRow.assignedUserIds
-                .map((value: unknown) => String(value || ""))
-                .filter(Boolean)
-            : [],
         );
       } catch {
         console.error("Failed to load agent details for editing.");
@@ -1092,274 +861,35 @@ export default function TenantAgentCreatePage() {
 
   const isActiveToggleDisabled = !tenantId || loadingEditData || loadingUsers;
 
-  const toggleAssigned = (userId: string) => {
-    setAssignedUserIds((prev) =>
-      prev.includes(userId)
-        ? prev.filter((id) => id !== userId)
-        : [...prev, userId],
-    );
+  const handleConnectorSaved = async (payload: {
+    tenantConnectorId: string;
+    connectorId: string;
+  }) => {
+    if (payload.tenantConnectorId) {
+      setSelectedTenantConnectorId(payload.tenantConnectorId);
+    }
+
+    await loadTenantConnectors({
+      forceRefresh: true,
+      connectorId: payload.connectorId,
+    });
   };
 
-  const toggleSelectAllFiltered = () => {
-    const ids = filteredUsers.map((user) => String(user.id));
-    const allSelected =
-      ids.length > 0 && ids.every((id) => assignedUserIds.includes(id));
+  const handleRoleSaved = (payload: {
+    previousRoleId: string;
+    roleRecord: RoleBootstrapRole;
+    userIds: string[];
+    actions: Array<{ connectorId: string; actionId: string }>;
+  }) => {
+    setRoleName(payload.roleRecord.name || "");
+    setRoleDescription(String(payload.roleRecord.description || ""));
+    setRoleConnectorId(String(payload.roleRecord.connector_id || ""));
+    setRoleToolId(String(payload.roleRecord.tool_id || ""));
+    setRoleIsActive(toActive(payload.roleRecord.is_active));
 
-    if (allSelected) {
-      setAssignedUserIds((prev) => prev.filter((id) => !ids.includes(id)));
-      return;
-    }
-
-    setAssignedUserIds((prev) => Array.from(new Set([...prev, ...ids])));
+    replaceRoleBootstrapState(payload);
   };
 
-  const resetAddUserForm = () => {
-    setNewUserFirstName("");
-    setNewUserLastName("");
-    setNewUserEmail("");
-    setNewUserIsActive(true);
-    setAddUserError(null);
-  };
-
-  const handleAddUserDialogChange = (open: boolean) => {
-    setAddUserModalOpen(open);
-    if (!open) {
-      resetAddUserForm();
-      void loadUsers({ forceRefresh: true });
-    }
-  };
-
-  const handleAddUserSubmit = async () => {
-    const email = newUserEmail.trim();
-    const firstName = newUserFirstName.trim();
-    const lastName = newUserLastName.trim();
-
-    if (!firstName) {
-      setAddUserError("First name is required.");
-      return;
-    }
-
-    if (!lastName) {
-      setAddUserError("Last name is required.");
-      return;
-    }
-
-    if (!email) {
-      setAddUserError("Email is required.");
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setAddUserError("Enter a valid email address.");
-      return;
-    }
-
-    setAddingUser(true);
-    setAddUserError(null);
-
-    try {
-      await dispatch(
-        addTenantUser({
-          email,
-          firstName,
-          lastName,
-          isActive: newUserIsActive ? 1 : 0,
-        }),
-      );
-
-      handleAddUserDialogChange(false);
-    } catch (err: unknown) {
-      const message =
-        typeof err === "object" && err !== null && "message" in err
-          ? String((err as { message?: string }).message || "")
-          : "";
-      setAddUserError(message || "Failed to add user.");
-    } finally {
-      setAddingUser(false);
-    }
-  };
-
-  const handleConnectorSelection = (connectorId: string) => {
-    const nextConnectorId = String(connectorId || "").trim();
-    setSelectedConnectorId(nextConnectorId);
-    setConnectorModalError(null);
-    setConnectorModalSuccess(null);
-    setSelectedConnectorVersionId("");
-    setSelectedConnectorAuthSchemeId("");
-    setConnectorVersions([]);
-    setConnectorAuthSchemes([]);
-    setConnectorCredentialValues({});
-  };
-
-  const handleConnectorVersionSelection = async (versionId: string) => {
-    const nextVersionId = String(versionId || "").trim();
-    setSelectedConnectorVersionId(nextVersionId);
-    setConnectorModalError(null);
-    setConnectorModalSuccess(null);
-
-    if (!nextVersionId) {
-      setConnectorAuthSchemes([]);
-      setSelectedConnectorAuthSchemeId("");
-      setConnectorCredentialValues({});
-      return;
-    }
-
-    try {
-      const authSchemes = await (dispatch(
-        fetchConnectorAuthSchemes(nextVersionId),
-      ) as Promise<ConnectorAuthSchemeItem[]>);
-      setConnectorAuthSchemes(authSchemes);
-      const preferredAuthScheme =
-        authSchemes.find((scheme) => Boolean(scheme.is_default)) ||
-        authSchemes[0] ||
-        null;
-      const authSchemeId = preferredAuthScheme?.id || "";
-      setSelectedConnectorAuthSchemeId(authSchemeId);
-      const fields = buildCredentialFields(
-        preferredAuthScheme?.credential_schema || {},
-      );
-      setConnectorCredentialValues(getDefaultCredentialValues(fields));
-    } catch (error: unknown) {
-      setConnectorModalError(extractErrorMessage(error));
-    }
-  };
-
-  const handleConnectorAuthSchemeSelection = (authSchemeId: string) => {
-    const nextAuthSchemeId = String(authSchemeId || "").trim();
-    setSelectedConnectorAuthSchemeId(nextAuthSchemeId);
-
-    const authScheme =
-      connectorAuthSchemes.find((scheme) => scheme.id === nextAuthSchemeId) ||
-      null;
-    const fields = buildCredentialFields(authScheme?.credential_schema || {});
-    setConnectorCredentialValues(getDefaultCredentialValues(fields));
-  };
-
-  const handleConnectorFieldChange = (fieldName: string, value: string) => {
-    setConnectorCredentialValues((prev) => ({
-      ...prev,
-      [fieldName]: value,
-    }));
-  };
-
-  const buildConnectorDraft = () => {
-    const selectedCatalogConnector = getConnectorById(selectedConnectorId);
-    const selectedAuthScheme =
-      connectorAuthSchemes.find(
-        (scheme) => scheme.id === selectedConnectorAuthSchemeId,
-      ) || null;
-    const schemaFields = buildCredentialFields(
-      selectedAuthScheme?.credential_schema || {},
-    );
-
-    if (!selectedCatalogConnector) {
-      return { error: "Select a connector first." } as const;
-    }
-
-    if (!selectedConnectorVersionId) {
-      return { error: "Connector version is required." } as const;
-    }
-
-    if (!selectedAuthScheme) {
-      return { error: "Connector auth scheme is required." } as const;
-    }
-
-    const credentials: Record<string, unknown> = {};
-    for (const field of schemaFields) {
-      const rawValue = String(
-        connectorCredentialValues[field.name] || "",
-      ).trim();
-      if (field.required && !rawValue) {
-        return { error: `${field.label} is required.` } as const;
-      }
-
-      if (!rawValue) {
-        continue;
-      }
-
-      if (field.type === "number") {
-        const parsed = Number(rawValue);
-        credentials[field.name] = Number.isFinite(parsed) ? parsed : rawValue;
-      } else if (field.type === "boolean") {
-        credentials[field.name] = rawValue === "true" || rawValue === "1";
-      } else {
-        credentials[field.name] = rawValue;
-      }
-    }
-
-    return {
-      connector: selectedCatalogConnector,
-      authScheme: selectedAuthScheme,
-      fields: schemaFields,
-      credentials,
-    } as const;
-  };
-
-  const handleConnectorTest = () => {
-    setConnectorModalTesting(true);
-    const draft = buildConnectorDraft();
-    if ("error" in draft) {
-      setConnectorModalError(draft.error || "Failed to prepare connector.");
-      setConnectorModalSuccess(null);
-      setConnectorModalTesting(false);
-      return;
-    }
-
-    setConnectorModalError(null);
-    setConnectorModalSuccess(
-      `Credentials for ${draft.connector.display_name} look complete. Save to persist this connector for the tenant.`,
-    );
-    setConnectorModalTesting(false);
-  };
-
-  const handleConnectorSave = async () => {
-    const draft = buildConnectorDraft();
-    if ("error" in draft) {
-      setConnectorModalError(draft.error || "Failed to prepare connector.");
-      setConnectorModalSuccess(null);
-      return;
-    }
-
-    setConnectorModalSaving(true);
-    setConnectorModalError(null);
-    try {
-      const result = await dispatch(
-        saveTenantConnectorBundle({
-          connectorId: draft.connector.id,
-          connectorVersionId: selectedConnectorVersionId,
-          connectorAuthSchemeId: draft.authScheme.id,
-          connectorType: draft.connector.key,
-          connectorDisplayName: draft.connector.display_name,
-          authMode: draft.authScheme.auth_type,
-          credentials: draft.credentials,
-          refreshMetadata: {},
-          status: "active",
-        }),
-      );
-
-      const tenantConnectorId = String(
-        (result as { tenantConnector?: { id?: string } })?.tenantConnector
-          ?.id || "",
-      ).trim();
-
-      if (tenantConnectorId) {
-        setSelectedTenantConnectorId(tenantConnectorId);
-      }
-
-      setConnectorModalSuccess("Connector saved for this tenant.");
-      await loadTenantConnectors({
-        forceRefresh: true,
-        connectorId: draft.connector.id,
-      });
-      setTimeout(() => {
-        closeConnectorModal();
-      }, 400);
-    } catch (error: unknown) {
-      setConnectorModalError(extractErrorMessage(error));
-    } finally {
-      setConnectorModalSaving(false);
-    }
-  };
 
   const visibleCatalogConnectors = connectors;
   const visibleTenantConnectors = tenantConnectors
@@ -1378,12 +908,40 @@ export default function TenantAgentCreatePage() {
       );
     });
 
-  const selectedCatalogConnector = getConnectorById(selectedConnectorId);
-  const selectedConnectorFields = buildCredentialFields(
-    connectorAuthSchemes.find(
-      (scheme) => scheme.id === selectedConnectorAuthSchemeId,
-    )?.credential_schema || {},
+  const saveValidationErrors = validateStep1Fields({
+    name,
+    aiProvider,
+    aiModel,
+    serviceType,
+    tenantConnectorId: selectedTenantConnectorId,
+  });
+
+  const hasStep1ValidationError = Object.values(saveValidationErrors).some(
+    Boolean,
   );
+
+  const selectedTenantConnectorRow =
+    tenantConnectors.find(
+      (item) =>
+        String(item.id || "").trim() ===
+        String(selectedTenantConnectorId || "").trim(),
+    ) || null;
+
+  const isSelectedConnectorMatchedToTool = Boolean(
+    selectedToolConnector?.id &&
+      selectedTenantConnectorRow &&
+      String(selectedTenantConnectorRow.connector_id || "").trim() ===
+        String(selectedToolConnector.id || "").trim(),
+  );
+
+  const canEnableSaveAgent =
+    !saving &&
+    !loadingEditData &&
+    !loadingConnectors &&
+    !loadingTenantConnectors &&
+    Boolean(tenantId) &&
+    !hasStep1ValidationError &&
+    isSelectedConnectorMatchedToTool;
 
   const onProviderChange = (value: string) => {
     const provider = value === "openrouter" ? "openrouter" : "";
@@ -1429,6 +987,26 @@ export default function TenantAgentCreatePage() {
 
     if (Object.values(step1FieldValidationErrors).some(Boolean)) {
       setStep1FieldErrors(step1FieldValidationErrors);
+      return;
+    }
+
+    if (!selectedToolConnector?.id) {
+      setSaveError("Select a tool before saving the agent.");
+      return;
+    }
+
+    if (!selectedTenantConnectorRow?.id) {
+      setSaveError("Select a tenant connector before saving the agent.");
+      return;
+    }
+
+    if (!isSelectedConnectorMatchedToTool) {
+      setSaveError("Selected connector does not match the selected tool.");
+      return;
+    }
+
+    if (loadingConnectors || loadingTenantConnectors) {
+      setSaveError("Please wait until tenant connector details are loaded.");
       return;
     }
 
@@ -1483,14 +1061,73 @@ export default function TenantAgentCreatePage() {
           agentId,
           aiProvider: provider,
           aiModel: model,
-          managerCanRun,
-          userCanRun,
-          assignedUserIds,
           meetingAutomationEnabled: true,
           meetingCreationMode: "auto",
         }),
       ) as Promise<unknown>);
       const assignmentMessage = extractBackendMessage(assignmentResp);
+
+      const pendingRoles = roleBootstrapRoles.filter(
+        (role) => !String(role.agent_id || "").trim(),
+      );
+
+      for (const pendingRole of pendingRoles) {
+        const pendingRoleUsers = roleBootstrapMembers
+          .filter((item) => item.role_id === pendingRole.id && Number(item.is_active ?? 1) !== 0)
+          .map((item) => String(item.user_id || "").trim())
+          .filter(Boolean);
+
+        const pendingRoleActions = roleBootstrapActions
+          .filter((item) => item.role_id === pendingRole.id && Number(item.is_active ?? 1) !== 0)
+          .map((item) => ({
+            connectorId: String(item.connector_id || "").trim(),
+            actionId: String(item.action_id || "").trim(),
+          }))
+          .filter((item) => item.connectorId && item.actionId);
+
+        const savedRole = await (dispatch(
+          saveTenantRole({
+            name: pendingRole.name,
+            description: String(pendingRole.description || "").trim(),
+            agentId,
+            connectorId: String(pendingRole.connector_id || "").trim(),
+            toolId: String(pendingRole.tool_id || "").trim(),
+            isActive: Number(pendingRole.is_active ?? 1) === 0 ? 0 : 1,
+            userIds: pendingRoleUsers,
+            actions: pendingRoleActions,
+          }),
+        ) as Promise<{ role?: { id?: string } }>);
+
+        const savedRoleId = String(savedRole?.role?.id || pendingRole.id || "").trim();
+
+        if (!savedRoleId) {
+          throw new Error("Role save failed.");
+        }
+
+        if (savedRoleId !== pendingRole.id) {
+          replaceRoleBootstrapState({
+            previousRoleId: pendingRole.id,
+            roleRecord: {
+              ...pendingRole,
+              id: savedRoleId,
+              agent_id: agentId,
+            },
+            userIds: pendingRoleUsers,
+            actions: pendingRoleActions,
+          });
+        } else {
+          setRoleBootstrapRoles((current) =>
+            current.map((item) =>
+              item.id === savedRoleId
+                ? {
+                    ...item,
+                    agent_id: agentId,
+                  }
+                : item,
+            ),
+          );
+        }
+      }
 
       const fallbackMessage = existingWorkingAgentId
         ? "Agent updated and saved to database."
@@ -2040,13 +1677,12 @@ export default function TenantAgentCreatePage() {
                                 Create or update roles after the agent is saved.
                               </div>
                             ) : null}
-                            {roleBootstrapRoles.filter((role) => String(role.agent_id || "") === currentAgentId).length === 0 && currentAgentId ? (
+                            {visibleRoleBootstrapRoles.length === 0 && currentAgentId ? (
                               <div className="rounded-xl border border-dashed border-border bg-background px-3 py-4 text-sm text-muted-foreground">
                                 No roles created for this agent yet.
                               </div>
                             ) : null}
-                            {roleBootstrapRoles
-                              .filter((role) => String(role.agent_id || "") === currentAgentId)
+                            {visibleRoleBootstrapRoles
                               .map((role) => {
                                 const selected = role.id === selectedRoleId;
                                 return (
@@ -2072,7 +1708,7 @@ export default function TenantAgentCreatePage() {
                               })}
                           </div>
                           <div>
-                            <Button type="button" variant="outline" className="w-full" size="lg" onClick={openRoleModal}>
+                            <Button type="button" variant="outline" className="w-full cursor-pointer hover:text-primary" size="lg" onClick={openRoleModal}>
                               Add role
                             </Button>
                           </div>
@@ -2119,6 +1755,9 @@ export default function TenantAgentCreatePage() {
 
                   <div className="min-w-0 p-4 sm:p-6">
                     {roleViewMode === "roles" ? (
+                      visibleRoleBootstrapRoles.length === 0 ? (
+                        <div className="min-h-105 rounded-2xl border border-dashed border-border bg-background" />
+                      ) : (
                       <div className="space-y-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
@@ -2151,25 +1790,59 @@ export default function TenantAgentCreatePage() {
                               <tr>
                                 <th className="bg-muted/30 px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</th>
                                 <td className="px-4 py-4">
-                                  <div className="mb-3 flex items-center justify-between gap-2">
-                                    <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users..." className="max-w-sm" />
-                                    {/* <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge> */}
-                                  </div>
-                                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                                    {loadingUsers ? <span className="text-sm text-muted-foreground">Loading users...</span> : null}
-                                    {filteredUsers.map((user) => {
-                                      const userId = String(user.id);
-                                      const checked = selectedRoleUserIds.includes(userId);
-                                      return (
-                                        <label key={userId} className={cn("flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-colors", checked ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-muted/20")}>
-                                          <Checkbox checked={checked} onCheckedChange={() => toggleRoleUser(userId)} />
-                                          <div className="min-w-0">
-                                            <p className="truncate text-sm font-medium text-foreground">{formatUserName(user)}</p>
-                                            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-                                          </div>
-                                        </label>
-                                      );
-                                    })}
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                      <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users..." className="max-w-sm" />
+                                      <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge>
+                                    </div>
+
+                                    {userSearch.trim().length < 3 ? (
+                                      <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
+                                        Type at least 3 characters to search users.
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        {loadingUsers ? <span className="text-sm text-muted-foreground">Loading users...</span> : null}
+                                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                          {filteredUsers.map((user) => {
+                                            const userId = String(user.id);
+                                            const checked = selectedRoleUserIds.includes(userId);
+                                            return (
+                                              <label key={userId} className={cn("flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-colors", checked ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-muted/20")}>
+                                                <Checkbox checked={checked} onCheckedChange={() => toggleRoleUser(userId)} />
+                                                <div className="min-w-0">
+                                                  <p className="truncate text-sm font-medium text-foreground">{formatUserName(user)}</p>
+                                                  <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                                                </div>
+                                              </label>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div className="space-y-2">
+                                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Selected users</p>
+                                      {selectedRoleUsers.length === 0 ? (
+                                        <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+                                          No users selected yet.
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                          {selectedRoleUsers.map((user) => {
+                                            const userId = String(user.id);
+                                            return (
+                                              <span key={userId} className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-sm text-foreground">
+                                                <span className="max-w-xs truncate">{formatUserName(user)}</span>
+                                                <button type="button" onClick={() => toggleRoleUser(userId)} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border text-xs text-muted-foreground transition-colors hover:bg-background hover:text-foreground" aria-label={`Remove ${formatUserName(user)}`}>
+                                                  ×
+                                                </button>
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
                               </tr>
@@ -2210,6 +1883,7 @@ export default function TenantAgentCreatePage() {
                           </table>
                         </div>
                       </div>
+                      )
                     ) : (
                       <div className="space-y-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2229,7 +1903,6 @@ export default function TenantAgentCreatePage() {
                                 className=""
                                 onClick={() => {
                                   setAddUserModalOpen(true);
-                                  setAddUserError(null);
                                 }}
                             >
                                 Add User
@@ -2270,24 +1943,11 @@ export default function TenantAgentCreatePage() {
                                     <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">No actions found for the selected tool.</div>
                                   ) : (
                                     <div className="space-y-3">
-                                      {/* {selectedUserRolesForTool.length > 0 ? (
-                                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-                                          Updating a switch will apply the change to all of this user&apos;s active roles for the selected tool.
-                                        </div>
-                                      ) : (
-                                        <div className="rounded-xl border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
-                                          This user is not assigned to a role for the selected tool. Switches are disabled until a role is assigned.
-                                        </div>
-                                      )} */}
                                       <div className="grid gap-2 md:grid-cols-2">
                                         {selectedToolActions.map((action) => {
-                                          const assigned = selectedUserRolesForTool.some((role) =>
-                                            roleBootstrapActions.some((item) =>
-                                              String(item.role_id) === String(role.id) &&
-                                              String(item.action_id) === String(action.id) &&
-                                              Number(item.is_active ?? 1) !== 0,
-                                            ),
-                                          );
+                                          const selectedAction = selectedUserActions.find((item) => String(item.action_id || "") === String(action.id));
+                                          const assigned = Boolean(selectedAction);
+                                          const locked = String(selectedAction?.grant_source || "") === "role";
 
                                           return (
                                             <div key={action.id} className={cn("rounded-xl border px-3 py-3", assigned ? "border-primary bg-primary/5" : "border-border bg-background") }>
@@ -2298,10 +1958,11 @@ export default function TenantAgentCreatePage() {
                                                 </div>
                                                 <Switch
                                                   checked={assigned}
-                                                  // disabled={savingUserAction || selectedUserRolesForTool.length === 0}
-                                                  onCheckedChange={(nextChecked) =>
-                                                    void handleUserActionToggle(action, Boolean(nextChecked))
-                                                  }
+                                                  disabled={savingUserAction || locked}
+                                                  onCheckedChange={(nextChecked) => {
+                                                    if (locked) return;
+                                                    void handleUserActionToggle(action, Boolean(nextChecked));
+                                                  }}
                                                 />
                                               </div>
                                             </div>
@@ -2376,7 +2037,7 @@ export default function TenantAgentCreatePage() {
               ) : (
                 <Button
                   className="cursor-pointer bg-primary hover:bg-primary/90 py-5 px-6"
-                  disabled={saving || loadingEditData}
+                  disabled={!canEnableSaveAgent}
                   onClick={createAgent}
                 >
                   {saving ? "Saving..." : finalButtonLabel}
@@ -2390,58 +2051,43 @@ export default function TenantAgentCreatePage() {
       <ConnectorDialog
         open={connectorModalOpen}
         onOpenChange={setConnectorModalOpen}
-        selectedCatalogConnector={selectedCatalogConnector}
-        connectorModalLoading={connectorModalLoading}
-        connectorModalError={connectorModalError}
-        connectorModalSuccess={connectorModalSuccess}
-        connectorModalSaving={connectorModalSaving}
-        connectorModalTesting={connectorModalTesting}
-        selectedConnectorVersionId={selectedConnectorVersionId}
-        connectorVersions={connectorVersions}
-        selectedConnectorAuthSchemeId={selectedConnectorAuthSchemeId}
-        connectorAuthSchemes={connectorAuthSchemes}
-        selectedConnectorFields={selectedConnectorFields}
-        connectorCredentialValues={connectorCredentialValues}
-        closeConnectorModal={closeConnectorModal}
-        handleConnectorVersionSelection={handleConnectorVersionSelection}
-        handleConnectorAuthSchemeSelection={handleConnectorAuthSchemeSelection}
-        handleConnectorFieldChange={handleConnectorFieldChange}
-        handleConnectorTest={handleConnectorTest}
-        handleConnectorSave={handleConnectorSave}
-        formatConnectorAuthSchemeLabel={formatConnectorAuthSchemeLabel}
-        getConnectorAuthMethodHint={getConnectorAuthMethodHint}
+        selectedCatalogConnector={selectedToolConnector || connectors[0] || null}
+        onConnectorSaved={handleConnectorSaved}
       />
 
       <RoleDialog
         open={roleModalOpen}
         onOpenChange={setRoleModalOpen}
+        tenantId={tenantId}
         selectedRoleId={selectedRoleId}
-        roleBootstrapError={roleBootstrapError}
-        roleName={roleName}
-        onRoleNameChange={setRoleName}
-        roleIsActive={roleIsActive}
-        onRoleIsActiveChange={setRoleIsActive}
-        roleFormDisabled={roleFormDisabled}
-        savingRoleAccess={savingRoleAccess}
-        closeRoleModal={closeRoleModal}
-        saveSelectedRoleAccess={saveSelectedRoleAccess}
+        initialRoleName={roleName}
+        initialRoleIsActive={roleIsActive}
+        roleDescription={roleDescription}
+        roleConnectorId={roleConnectorId}
+        roleToolId={roleToolId}
+        fallbackConnectorId={selectedToolConnector?.id || connectors[0]?.id || ""}
+        fallbackToolId={
+          selectedToolActions[0]?.id ||
+          roleActionCatalog.find(
+            (item) =>
+              item.connector_id ===
+              (roleConnectorId || selectedToolConnector?.id || connectors[0]?.id || ""),
+          )?.id ||
+          ""
+        }
+        selectedRoleUserIds={selectedRoleUserIds}
+        selectedRoleActionIds={selectedRoleActionIds}
+        roleActionCatalog={roleActionCatalog}
+        buildRoleAutoName={buildRoleAutoName}
+        onRoleSaved={handleRoleSaved}
       />
 
       <AddUserDialog
         open={addUserModalOpen}
         onOpenChange={setAddUserModalOpen}
-        addUserError={addUserError}
-        newUserFirstName={newUserFirstName}
-        onFirstNameChange={setNewUserFirstName}
-        newUserLastName={newUserLastName}
-        onLastNameChange={setNewUserLastName}
-        newUserEmail={newUserEmail}
-        onEmailChange={setNewUserEmail}
-        newUserIsActive={newUserIsActive}
-        onIsActiveChange={setNewUserIsActive}
-        addingUser={addingUser}
-        handleAddUserDialogChange={handleAddUserDialogChange}
-        handleAddUserSubmit={handleAddUserSubmit}
+        onUserSaved={async () => {
+          await loadUsers({ forceRefresh: true });
+        }}
       />
     </main>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,35 +14,170 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
+type RoleBootstrapAction = {
+  id: string;
+  connector_id: string;
+};
+
+type RoleBootstrapRole = {
+  id: string;
+  tenant_id: string;
+  user_id?: string | null;
+  agent_id?: string | null;
+  connector_id?: string | null;
+  tool_id?: string | null;
+  name: string;
+  description?: string | null;
+  is_active?: number | boolean | null;
+};
+
 type RoleDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  tenantId: string;
   selectedRoleId: string;
-  roleBootstrapError: string | null;
-  roleName: string;
-  onRoleNameChange: (value: string) => void;
-  roleIsActive: boolean;
-  onRoleIsActiveChange: (value: boolean) => void;
-  roleFormDisabled: boolean;
-  savingRoleAccess: boolean;
-  closeRoleModal: () => void;
-  saveSelectedRoleAccess: () => Promise<void>;
+  initialRoleName: string;
+  initialRoleIsActive: boolean;
+  roleDescription: string;
+  roleConnectorId: string;
+  roleToolId: string;
+  fallbackConnectorId: string;
+  fallbackToolId: string;
+  selectedRoleUserIds: string[];
+  selectedRoleActionIds: string[];
+  roleActionCatalog: RoleBootstrapAction[];
+  buildRoleAutoName: (connectorId: string, toolId: string) => string;
+  onRoleSaved: (payload: {
+    previousRoleId: string;
+    roleRecord: RoleBootstrapRole;
+    userIds: string[];
+    actions: Array<{ connectorId: string; actionId: string }>;
+  }) => void;
+};
+
+const createDraftRoleId = () => {
+  const randomPart =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return `draft-role-${randomPart}`;
 };
 
 export default function RoleDialog({
+  tenantId,
   open,
   onOpenChange,
   selectedRoleId,
-  roleBootstrapError,
-  roleName,
-  onRoleNameChange,
-  roleIsActive,
-  onRoleIsActiveChange,
-  roleFormDisabled,
-  savingRoleAccess,
-  closeRoleModal,
-  saveSelectedRoleAccess,
+  initialRoleName,
+  initialRoleIsActive,
+  roleDescription,
+  roleConnectorId,
+  roleToolId,
+  fallbackConnectorId,
+  fallbackToolId,
+  selectedRoleUserIds,
+  selectedRoleActionIds,
+  roleActionCatalog,
+  buildRoleAutoName,
+  onRoleSaved,
 }: RoleDialogProps) {
+  const [roleName, setRoleName] = useState(initialRoleName);
+  const [roleIsActive, setRoleIsActive] = useState(initialRoleIsActive);
+  const [roleBootstrapError, setRoleBootstrapError] = useState<string | null>(
+    null,
+  );
+  const [savingRoleAccess, setSavingRoleAccess] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setRoleName(initialRoleName);
+    setRoleIsActive(initialRoleIsActive);
+    setRoleBootstrapError(null);
+    setSavingRoleAccess(false);
+  }, [initialRoleIsActive, initialRoleName, open]);
+
+  const resolvedConnectorId = useMemo(
+    () => roleConnectorId || fallbackConnectorId || "",
+    [fallbackConnectorId, roleConnectorId],
+  );
+
+  const resolvedToolId = useMemo(
+    () =>
+      roleToolId ||
+      fallbackToolId ||
+      roleActionCatalog.find((item) => item.connector_id === resolvedConnectorId)
+        ?.id ||
+      "",
+    [fallbackToolId, resolvedConnectorId, roleActionCatalog, roleToolId],
+  );
+
+  const closeRoleModal = () => {
+    onOpenChange(false);
+  };
+
+  const saveSelectedRoleAccess = async () => {
+    const resolvedRoleName =
+      roleName.trim() || buildRoleAutoName(resolvedConnectorId, resolvedToolId);
+
+    if (!resolvedConnectorId) {
+      setRoleBootstrapError("Unable to determine the connector for this role.");
+      return;
+    }
+
+    if (!resolvedToolId) {
+      setRoleBootstrapError("Unable to determine the tool for this role.");
+      return;
+    }
+
+    setSavingRoleAccess(true);
+    setRoleBootstrapError(null);
+
+    try {
+      const actions = selectedRoleActionIds
+        .map((actionId) => roleActionCatalog.find((item) => item.id === actionId))
+        .filter((item): item is RoleBootstrapAction => Boolean(item))
+        .map((item) => ({ connectorId: item.connector_id, actionId: item.id }));
+
+      const nextRoleId = String(selectedRoleId || createDraftRoleId()).trim();
+
+      const roleRecord: RoleBootstrapRole = {
+        id: nextRoleId,
+        tenant_id: tenantId,
+        user_id: null,
+        agent_id: null,
+        connector_id: resolvedConnectorId,
+        tool_id: resolvedToolId,
+        name: resolvedRoleName,
+        description: roleDescription.trim(),
+        is_active: roleIsActive ? 1 : 0,
+      };
+
+      onRoleSaved({
+        previousRoleId: selectedRoleId,
+        roleRecord: {
+          ...roleRecord,
+          agent_id: null,
+        },
+        userIds: selectedRoleUserIds,
+        actions,
+      });
+
+      closeRoleModal();
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message?: string }).message || "")
+          : "";
+      setRoleBootstrapError(message || "Failed to save role.");
+    } finally {
+      setSavingRoleAccess(false);
+    }
+  };
+
   return (
     <Dialog
       open={open}
@@ -53,17 +189,17 @@ export default function RoleDialog({
         closeRoleModal();
       }}
     >
-      <DialogContent className="sm:max-w-xl rounded-2xl border border-border bg-background p-0">
-        <div className="p-6">
-          <DialogHeader className="space-y-2">
-            <DialogTitle>{selectedRoleId ? "Edit Role" : "Add Role"}</DialogTitle>
-            <DialogDescription>
-              Create a role for the current agent. After saving, the new role
-              will appear in the left list.
-            </DialogDescription>
-          </DialogHeader>
+      <DialogContent className="sm:max-w-xl overflow-hidden rounded-2xl border border-border bg-background p-0">
+        <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5 text-left">
+          <DialogTitle className="text-lg">{selectedRoleId ? "Edit Role" : "Add Role"}</DialogTitle>
+          {/* <DialogDescription className="pt-1">
+            Create a role for the current agent. After saving, the new role
+            will appear in the left list.
+          </DialogDescription> */}
+        </DialogHeader>
 
-          <div className="mt-6 space-y-4">
+        <div className="px-6 py-5">
+          <div className="space-y-6">
             {roleBootstrapError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {roleBootstrapError}
@@ -71,14 +207,14 @@ export default function RoleDialog({
             ) : null}
 
             <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground">
+              <Label className="text-sm font-medium text-muted-foreground">
                 Role name
               </Label>
               <Input
                 value={roleName}
-                onChange={(event) => onRoleNameChange(event.target.value)}
+                onChange={(event) => setRoleName(event.target.value)}
                 placeholder="Enter role name"
-                disabled={roleFormDisabled}
+                className="py-5"
               />
             </div>
 
@@ -88,16 +224,19 @@ export default function RoleDialog({
               </div>
               <Switch
                 checked={roleIsActive}
-                onCheckedChange={(value) => onRoleIsActiveChange(Boolean(value))}
-                disabled={roleFormDisabled}
+                size="md"
+                onCheckedChange={(value) => setRoleIsActive(Boolean(value))}
               />
             </div>
           </div>
+        </div>
 
-          <DialogFooter className="mt-6 px-0 pb-0">
+        <DialogFooter className="min-h-20 border-t border-border bg-muted/20 px-6 py-0">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2">
             <Button
               type="button"
               variant="outline"
+              className="cursor-pointer"
               onClick={closeRoleModal}
               disabled={savingRoleAccess}
             >
@@ -105,9 +244,9 @@ export default function RoleDialog({
             </Button>
             <Button
               type="button"
-              className="bg-primary hover:bg-primary/90"
+              className="bg-primary hover:bg-primary/90 cursor-pointer"
               onClick={() => void saveSelectedRoleAccess()}
-              disabled={roleFormDisabled}
+              disabled={savingRoleAccess}
             >
               {savingRoleAccess
                 ? "Saving..."
@@ -115,8 +254,8 @@ export default function RoleDialog({
                   ? "Update Role"
                   : "Create Role"}
             </Button>
-          </DialogFooter>
-        </div>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

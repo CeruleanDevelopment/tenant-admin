@@ -88,7 +88,7 @@ export default function UserAssignedAgentsPage() {
           </Card>
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-3">
           {agents.map((agent) => (
             <Card key={agent.id} className="rounded-2xl">
               <CardHeader>
