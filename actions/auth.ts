@@ -309,6 +309,22 @@ export type UserChatSessionItem = {
   title: string;
 };
 
+export type TenantAgentConversationItem = {
+  id: string;
+  message_id?: string | null;
+  created_at: string;
+  title?: string | null;
+  user_id?: string | null;
+  user_email?: string | null;
+};
+
+export type TenantAgentConversationsPage = {
+  rows: TenantAgentConversationItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
 const TENANT_SIGNIN_PATH = "/tenant/signin";
 const TENANT_SIGNUP_PATH = "/tenant/signup";
 
@@ -340,6 +356,8 @@ export type TenantConnectorItem = {
   tenant_id: string;
   connector_id: string;
   connector_version_id: string;
+  connector_key?: string | null;
+  catalog_connector_display_name?: string | null;
   connector_type?: string | null;
   connector_display_name?: string | null;
   connection_id?: string | null;
@@ -2183,13 +2201,121 @@ export const deleteTenantAgentConversationUser = (input: {
   };
 };
 
-let _fetchTenantConnectorsPromise: Promise<TenantConnectorItem[]> | null = null;
+export const fetchTenantAgentConversations = (input: {
+  agentId: string;
+  page?: number;
+  limit?: number;
+  userEmail?: string;
+  userId?: string;
+  q?: string;
+}): ThunkAction<
+  Promise<TenantAgentConversationsPage>,
+  RootState,
+  unknown,
+  AnyAction
+> => {
+  return async (): Promise<TenantAgentConversationsPage> => {
+    const agentId = String(input.agentId || "").trim();
+    if (!agentId) throw new Error("Agent id is required.");
+
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const page = Math.max(1, Number(input.page || 1));
+    const limit = Math.max(1, Math.min(200, Number(input.limit || 20)));
+    const params: Record<string, string | number> = {
+      page,
+      limit,
+    };
+
+    const userEmail = String(input.userEmail || "").trim();
+    const userId = String(input.userId || "").trim();
+    const q = String(input.q || "").trim();
+    if (userEmail) params.userEmail = userEmail;
+    if (userId) params.userId = userId;
+    if (q) params.q = q;
+
+    const response = await axios.get(
+      `/ai/agents/${encodeURIComponent(agentId)}/conversations`,
+      { headers, params },
+    );
+
+    const payload = (response?.data || {}) as Record<string, unknown>;
+    const rowsRaw = Array.isArray(payload.rows) ? payload.rows : [];
+
+    const rows: TenantAgentConversationItem[] = [];
+    rowsRaw.forEach((row) => {
+      const item = row as Record<string, unknown>;
+      const id = String(item.id || "").trim();
+      if (!id) return;
+
+      rows.push({
+        id,
+        message_id: item.message_id ? String(item.message_id) : null,
+        created_at: String(item.created_at || ""),
+        title: item.title ? String(item.title) : "New chat",
+        user_id: item.user_id ? String(item.user_id) : null,
+        user_email: item.user_email ? String(item.user_email) : null,
+      });
+    });
+
+    return {
+      rows,
+      total: Number(payload.total || 0),
+      page: Number(payload.page || page),
+      limit: Number(payload.limit || limit),
+    };
+  };
+};
+
+export const renameTenantAgentConversation = (input: {
+  agentId: string;
+  conversationId: string;
+  title: string;
+}): ThunkAction<
+  Promise<{ updated?: boolean }>,
+  RootState,
+  unknown,
+  AnyAction
+> => {
+  return async (): Promise<{ updated?: boolean }> => {
+    const agentId = String(input.agentId || "").trim();
+    const conversationId = String(input.conversationId || "").trim();
+    const title = String(input.title || "").trim();
+
+    if (!agentId) throw new Error("Agent id is required.");
+    if (!conversationId) throw new Error("Conversation id is required.");
+    if (!title) throw new Error("Title is required.");
+
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const response = await axios.patch(
+      `/ai/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}`,
+      { title },
+      { headers },
+    );
+
+    return (response?.data || {}) as { updated?: boolean };
+  };
+};
+
+const _fetchTenantConnectorsInFlight = new Map<
+  string,
+  Promise<TenantConnectorItem[]>
+>();
 
 export const fetchTenantConnectors =
-  (connectorId?: string):
+  (options?: { connectorId?: string; connectedOnly?: boolean }):
     ThunkAction<Promise<TenantConnectorItem[]>, RootState, unknown, AnyAction> =>
   async () => {
-    if (_fetchTenantConnectorsPromise) return _fetchTenantConnectorsPromise;
+    const normalizedConnectorId = String(options?.connectorId || "").trim();
+    const connectedOnly = Boolean(options?.connectedOnly);
+    const connectorKey = `${normalizedConnectorId || "__all__"}:${connectedOnly ? "connected" : "all"}`;
+    const inFlight = _fetchTenantConnectorsInFlight.get(connectorKey);
+    if (inFlight) return inFlight;
 
     const token = loadAuthTokenCookie();
     if (!token) {
@@ -2201,14 +2327,20 @@ export const fetchTenantConnectors =
 
     const headers: Record<string, string> = {};
     headers["x-tenant-token"] = token;
+    headers["Cache-Control"] = "no-cache";
+    headers["Pragma"] = "no-cache";
 
-    _fetchTenantConnectorsPromise = (async (): Promise<
+    const request = (async (): Promise<
       TenantConnectorItem[]
     > => {
       try {
-        const params = connectorId
-          ? { connectorId: String(connectorId).trim() }
-          : undefined;
+        const params = normalizedConnectorId
+          ? {
+              connectorId: normalizedConnectorId,
+              connectedOnly: connectedOnly ? "true" : "false",
+              _ts: Date.now(),
+            }
+          : { connectedOnly: connectedOnly ? "true" : "false", _ts: Date.now() };
         const response = await axios.get("/api/connectors/platform/tenant", {
           headers,
           params,
@@ -2221,11 +2353,49 @@ export const fetchTenantConnectors =
         console.warn("fetchTenantConnectors failed:", extractApiMessage(error));
         return [];
       } finally {
-        _fetchTenantConnectorsPromise = null;
+        _fetchTenantConnectorsInFlight.delete(connectorKey);
       }
     })();
 
-    return _fetchTenantConnectorsPromise;
+    _fetchTenantConnectorsInFlight.set(connectorKey, request);
+    return request;
+  };
+
+export const testTenantConnectorCredentials =
+  (input: {
+    connectorId: string;
+    connectorVersionId: string;
+    connectorAuthSchemeId: string;
+    credentials: Record<string, unknown>;
+  }): ThunkAction<Promise<{ success?: boolean; message?: string }>, RootState, unknown, AnyAction> =>
+  async () => {
+    const connectorId = String(input.connectorId || "").trim();
+    const connectorVersionId = String(input.connectorVersionId || "").trim();
+    const connectorAuthSchemeId = String(input.connectorAuthSchemeId || "").trim();
+
+    if (!connectorId) throw new Error("Connector id is required.");
+    if (!connectorVersionId) throw new Error("Connector version id is required.");
+    if (!connectorAuthSchemeId) throw new Error("Connector auth scheme id is required.");
+
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const response = await axios.post(
+      "/api/connectors/platform/connections/test",
+      {
+        connectorId,
+        connectorVersionId,
+        connectorAuthSchemeId,
+        credentials: input.credentials || {},
+      },
+      { headers },
+    );
+
+    return {
+      success: Boolean(response?.data?.success),
+      message: String(response?.data?.message || ""),
+    };
   };
 
 export const fetchConnectorVersions =
@@ -2428,8 +2598,15 @@ export const fetchConnectorCatalog =
             const connectorId = String(
               row.connector_id || row.id || row.connector_type || "",
             ).trim();
+            const connectorKey = String(
+              row.connector_key || row.key || connectorId,
+            ).trim();
             const displayName = String(
-              row.connector_display_name || row.display_name || connectorId,
+              row.catalog_connector_display_name ||
+                row.connector_display_name ||
+                row.display_name ||
+                connectorKey ||
+                connectorId,
             ).trim();
 
             if (!connectorId) {
@@ -2437,8 +2614,8 @@ export const fetchConnectorCatalog =
             }
 
             return {
-              id: String(row.id || connectorId),
-              key: connectorId,
+              id: connectorId,
+              key: connectorKey,
               display_name: displayName,
               description: "",
               category: null,

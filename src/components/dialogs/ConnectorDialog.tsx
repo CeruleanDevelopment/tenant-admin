@@ -30,6 +30,7 @@ import {
   fetchConnectorAuthSchemes,
   fetchConnectorVersions,
   saveTenantConnectorBundle as saveConnectorBundle,
+  testTenantConnectorCredentials,
 } from "../../../actions/auth";
 import type { AppDispatch } from "../../../redux/store";
 
@@ -117,6 +118,10 @@ export default function ConnectorDialog({
       schema && typeof schema === "object"
         ? (schema as Record<string, unknown>)
         : {};
+    const connectorKey = String(selectedCatalogConnector?.key || "")
+      .trim()
+      .toLowerCase();
+    const isBusinessCentral = connectorKey === "microsoft-dynamics-365-business-central";
     const properties =
       schemaRecord.properties && typeof schemaRecord.properties === "object"
         ? (schemaRecord.properties as Record<string, Record<string, unknown>>)
@@ -129,19 +134,21 @@ export default function ConnectorDialog({
         : [],
     );
 
-    return Object.entries(properties).map(([name, definition]) => ({
-      name,
-      label: String(definition.title || name.replace(/_/g, " ")).replace(
-        /^./,
-        (char) => char.toUpperCase(),
-      ),
-      type: String(definition.type || "string"),
-      description: String(definition.description || "").trim(),
-      required: required.has(name),
-      options: Array.isArray(definition.enum)
-        ? definition.enum.map((value) => String(value || ""))
-        : undefined,
-    }));
+    return Object.entries(properties)
+      .filter(([name]) => !(isBusinessCentral && name === "company_id"))
+      .map(([name, definition]) => ({
+        name,
+        label: String(definition.title || name.replace(/_/g, " ")).replace(
+          /^./,
+          (char) => char.toUpperCase(),
+        ),
+        type: String(definition.type || "string"),
+        description: String(definition.description || "").trim(),
+        required: required.has(name),
+        options: Array.isArray(definition.enum)
+          ? definition.enum.map((value) => String(value || ""))
+          : undefined,
+      }));
   };
 
   const getDefaultCredentialValues = (fields: ConnectorCredentialField[]) => {
@@ -342,7 +349,7 @@ export default function ConnectorDialog({
     } as const;
   };
 
-  const handleConnectorTest = () => {
+  const handleConnectorTest = async () => {
     setConnectorModalTesting(true);
     const draft = buildConnectorDraft();
     if ("error" in draft) {
@@ -352,11 +359,34 @@ export default function ConnectorDialog({
       return;
     }
 
-    setConnectorModalError(null);
-    setConnectorModalSuccess(
-      `Credentials for ${draft.connector.display_name} look complete. Save to persist this connector for the tenant.`,
-    );
-    setConnectorModalTesting(false);
+    try {
+      const testResult = await dispatch(
+        testTenantConnectorCredentials({
+          connectorId: draft.connector.id,
+          connectorVersionId: selectedConnectorVersionId,
+          connectorAuthSchemeId: draft.authScheme.id,
+          credentials: draft.credentials,
+        }),
+      );
+
+      setConnectorModalError(null);
+      setConnectorModalSuccess(
+        testResult?.message ||
+          `Credentials for ${draft.connector.display_name} look valid. Save to persist this connector for the tenant.`,
+      );
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message?: string }).message || "")
+          : "";
+      setConnectorModalError(message || "Connector test failed.");
+      setConnectorModalSuccess(null);
+    } finally {
+      setConnectorModalTesting(false);
+    }
   };
 
   const handleConnectorSave = async () => {
@@ -656,7 +686,7 @@ export default function ConnectorDialog({
               type="button"
               variant="outline"
               className="cursor-pointer"
-              onClick={handleConnectorTest}
+                    onClick={() => void handleConnectorTest()}
               disabled={connectorModalSaving || connectorModalTesting}
             >
               {connectorModalTesting ? "Testing..." : "Test Connector"}

@@ -367,7 +367,10 @@ export default function TenantAgentCreatePage() {
       const request =
         pending ||
         (dispatch(
-          fetchTenantConnectors(options?.connectorId),
+          fetchTenantConnectors({
+            connectorId: options?.connectorId,
+            connectedOnly: true,
+          }),
         ) as Promise<TenantConnectorItem[]>);
       TENANT_CONNECTORS_IN_FLIGHT.set(key, request);
       const rows = await request;
@@ -1756,7 +1759,7 @@ export default function TenantAgentCreatePage() {
                   <div className="min-w-0 p-4 sm:p-6">
                     {roleViewMode === "roles" ? (
                       visibleRoleBootstrapRoles.length === 0 ? (
-                        <div className="min-h-105 rounded-2xl border border-dashed border-border bg-background" />
+                        <div className="min-h-105 rounded-2xl bg-background" />
                       ) : (
                       <div className="space-y-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">

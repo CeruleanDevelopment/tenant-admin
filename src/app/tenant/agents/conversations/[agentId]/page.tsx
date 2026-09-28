@@ -1,27 +1,25 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
-import axios from "@/service/api"
+import { usePathname, useRouter } from "next/navigation"
+import { useDispatch } from "react-redux"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-
-type Row = {
-  id: string
-  message_id?: string | null
-  created_at: string
-  title?: string | null
-  user_id?: string | null
-  user_email?: string | null
-}
+import {
+  fetchTenantAgentConversations,
+  renameTenantAgentConversation,
+  type TenantAgentConversationItem,
+} from "../../../../../../actions/auth"
+import type { AppDispatch } from "../../../../../../redux/store"
 
 export default function AgentConversationsPage() {
-  const params = useParams() as { agentId?: string }
+  const pathname = usePathname()
   const router = useRouter()
-  const agentId = params.agentId || ""
+  const dispatch = useDispatch<AppDispatch>()
+  const agentId = String(pathname || "").split("/").filter(Boolean).pop() || ""
 
-  const [rows, setRows] = useState<Row[]>([])
+  const [rows, setRows] = useState<TenantAgentConversationItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
@@ -38,16 +36,15 @@ export default function AgentConversationsPage() {
     setLoading(true)
     setError(null)
     try {
-      const resp = await axios.get(`/ai/agents/${encodeURIComponent(agentId)}/conversations`, {
-        params: {
+      const data = await dispatch(
+        fetchTenantAgentConversations({
+          agentId,
           page: opts?.page || page,
           limit: opts?.limit || limit,
           userEmail: userEmail || undefined,
           q: q || undefined,
-        },
-      })
-
-      const data = resp?.data || {}
+        }),
+      )
       setRows(Array.isArray(data.rows) ? data.rows : [])
       setTotal(Number(data.total || 0))
       setPage(Number(data.page || page))
@@ -121,7 +118,13 @@ export default function AgentConversationsPage() {
                         onClick={async () => {
                           setSaving(true)
                           try {
-                            await axios.patch(`/ai/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(r.id)}`, { title: editingTitle })
+                            await dispatch(
+                              renameTenantAgentConversation({
+                                agentId,
+                                conversationId: r.id,
+                                title: editingTitle,
+                              }),
+                            )
                             setEditingId(null)
                             setEditingTitle("")
                             void fetchConversations({ page, limit })
