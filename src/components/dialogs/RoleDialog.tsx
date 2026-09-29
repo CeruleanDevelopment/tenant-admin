@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useDispatch } from "react-redux";
+import { saveTenantRole } from "../../../actions/auth";
+import type { AppDispatch } from "../../../redux/store";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +38,7 @@ type RoleDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tenantId: string;
+  agentId?: string;
   selectedRoleId: string;
   initialRoleName: string;
   initialRoleIsActive: boolean;
@@ -66,6 +70,7 @@ const createDraftRoleId = () => {
 
 export default function RoleDialog({
   tenantId,
+  agentId,
   open,
   onOpenChange,
   selectedRoleId,
@@ -82,6 +87,7 @@ export default function RoleDialog({
   buildRoleAutoName,
   onRoleSaved,
 }: RoleDialogProps) {
+  const dispatch = useDispatch<AppDispatch>();
   const [roleName, setRoleName] = useState(initialRoleName);
   const [roleIsActive, setRoleIsActive] = useState(initialRoleIsActive);
   const [roleBootstrapError, setRoleBootstrapError] = useState<string | null>(
@@ -139,13 +145,29 @@ export default function RoleDialog({
         .filter((item): item is RoleBootstrapAction => Boolean(item))
         .map((item) => ({ connectorId: item.connector_id, actionId: item.id }));
 
-      const nextRoleId = String(selectedRoleId || createDraftRoleId()).trim();
+      let nextRoleId = String(selectedRoleId || "").trim();
+      if (!nextRoleId || nextRoleId.startsWith("draft-role-")) {
+        const created = await dispatch(
+          saveTenantRole({
+            name: resolvedRoleName,
+            description: roleDescription.trim(),
+            agentId: agentId || "",
+            connectorId: resolvedConnectorId,
+            toolId: resolvedToolId,
+            isActive: roleIsActive ? 1 : 0,
+            userIds: selectedRoleUserIds,
+            actions,
+          }),
+        );
+        const createdId = String(created?.role?.id || "").trim();
+        nextRoleId = createdId || createDraftRoleId();
+      }
 
       const roleRecord: RoleBootstrapRole = {
         id: nextRoleId,
         tenant_id: tenantId,
         user_id: null,
-        agent_id: null,
+        agent_id: agentId || null,
         connector_id: resolvedConnectorId,
         tool_id: resolvedToolId,
         name: resolvedRoleName,
@@ -157,7 +179,7 @@ export default function RoleDialog({
         previousRoleId: selectedRoleId,
         roleRecord: {
           ...roleRecord,
-          agent_id: null,
+          agent_id: agentId || null,
         },
         userIds: selectedRoleUserIds,
         actions,

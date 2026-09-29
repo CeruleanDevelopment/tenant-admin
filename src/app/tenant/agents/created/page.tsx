@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useDispatch } from "react-redux"
 import {
-  fetchTenantAgentAssignments,
-  fetchTenantAgents,
-  fetchTenantUsers,
-  updateTenantUser,
-  upsertTenantAgentAssignment,
+  fetchTenantAgentsOverview,
+  setTenantAgentActive,
+  updateTenantRoleMembers,
+  updateTenantRoleUserActions,
+  updateTenantUserActions,
+  type TenantAgentOverview,
+  type TenantOverviewUser,
 } from "../../../../../actions/auth"
 import type { AppDispatch } from "../../../../../redux/store"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +19,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -27,232 +28,101 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type AgentCategory = "gmail" | "crm" | "support" | "calendar" | "knowledge" | "automation" | "general"
+type DialogTab = "roles" | "users"
 
-const roleOptions: Array<{ value: string; label: string }> = [
-  { value: "tenant-admin", label: "Tenant Admin" },
-  { value: "manager", label: "Manager" },
-  { value: "user", label: "User" },
+const toggleId = (list: string[], id: string, checked: boolean): string[] =>
+  checked ? Array.from(new Set([...list, id])) : list.filter((item) => item !== id)
+
+const errorMessage = (error: unknown, fallback: string): string =>
+  typeof error === "object" && error !== null && "message" in error
+    ? String((error as { message?: string }).message || fallback)
+    : fallback
+
+const initials = (name: string, email: string): string => {
+  const source = (name || email || "?").trim()
+  const parts = source.split(/\s+/).filter(Boolean)
+  return ((parts[0]?.[0] || "?") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
+}
+
+const AVATAR_TONES = [
+  "bg-sky-100 text-sky-700",
+  "bg-violet-100 text-violet-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
 ]
 
-const CATEGORY_LABEL: Record<AgentCategory, string> = {
-  gmail: "Gmail",
-  crm: "CRM",
-  support: "Support",
-  calendar: "Calendar",
-  knowledge: "Knowledge",
-  automation: "Automation",
-  general: "General",
+const avatarTone = (seed: string): string => {
+  let hash = 0
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return AVATAR_TONES[hash % AVATAR_TONES.length]
 }
 
-const CATEGORY_STYLE: Record<AgentCategory, string> = {
-  gmail: "border-sky-300 bg-sky-50 text-sky-700",
-  crm: "border-indigo-300 bg-indigo-50 text-indigo-700",
-  support: "border-violet-300 bg-violet-50 text-violet-700",
-  calendar: "border-cyan-300 bg-cyan-50 text-cyan-700",
-  knowledge: "border-emerald-300 bg-emerald-50 text-emerald-700",
-  automation: "border-orange-300 bg-orange-50 text-orange-700",
-  general: "border-slate-300 bg-slate-50 text-slate-700",
+function Avatar({ name, email }: { name: string; email: string }) {
+  return (
+    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarTone(email || name)}`}>
+      {initials(name, email)}
+    </span>
+  )
 }
 
-type TenantAgentCard = {
-  id: string
-  name: string
-  description: string
-  category: AgentCategory
-  configured: boolean
-  isActive: 0 | 1
-  aiProvider: "openai" | "openrouter"
-  aiModel: string
-  managerCanRun: boolean
-  userCanRun: boolean
-  assignedUserIds: string[]
-  workflowType?: string
-  createdAt?: string | null
+function UserIdentity({ name, email }: { name: string; email: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <Avatar name={name} email={email} />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-slate-900">{name || email}</p>
+        {name ? <p className="truncate text-xs text-slate-500">{email}</p> : null}
+      </div>
+    </div>
+  )
 }
-
-type TenantUser = {
-  id: string
-  email: string
-  firstName?: string | null
-  lastName?: string | null
-  role?: string | null
-  isActive?: boolean | null
-  assignedAgentIds?: string | null
-  assigned_agent_ids?: string | null
-  agentIds?: string | null
-}
-
-const detectAgentCategory = (input: {
-  name: string
-  description: string
-  systemPrompt?: string
-  allowedCollections?: string[]
-}): AgentCategory => {
-  const blob = [
-    input.name,
-    input.description,
-    input.systemPrompt || "",
-    ...(input.allowedCollections || []),
-  ]
-    .join(" ")
-    .toLowerCase()
-
-  if (/gmail|email|inbox|thread/.test(blob)) return "gmail"
-  if (/crm|salesforce|hubspot|lead|opportunity|pipeline|contact/.test(blob)) return "crm"
-  if (/ticket|support|helpdesk|zendesk|service desk/.test(blob)) return "support"
-  if (/calendar|meeting|schedule|appointment/.test(blob)) return "calendar"
-  if (/knowledge|document|rag|embedding|search/.test(blob)) return "knowledge"
-  if (/workflow|automation|trigger|approval/.test(blob)) return "automation"
-  return "general"
-}
-
-const normalizeRoleValue = (value: unknown): string =>
-  String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-")
-
-const getRoleLabel = (value: unknown): string => {
-  const normalized = normalizeRoleValue(value)
-  const matched = roleOptions.find((option) => option.value === normalized)
-  return matched?.label || normalized || "User"
-}
-
-const STATUS_BADGE_CLASS = {
-  active: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  inactive: "border-slate-200 bg-slate-50 text-slate-600",
-} as const
 
 export default function TenantCreatedAgentsPage() {
   const dispatch = useDispatch<AppDispatch>()
-  const [agents, setAgents] = useState<TenantAgentCard[]>([])
-  const [tenantUsers, setTenantUsers] = useState<TenantUser[]>([])
-  const [loadingAgents, setLoadingAgents] = useState(false)
-  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [agents, setAgents] = useState<TenantAgentOverview[]>([])
+  const [users, setUsers] = useState<TenantOverviewUser[]>([])
+  const [loading, setLoading] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
-  const [viewUsersModalOpen, setViewUsersModalOpen] = useState(false)
-  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
-  const [viewAgent, setViewAgent] = useState<TenantAgentCard | null>(null)
-  const [selectedAgent, setSelectedAgent] = useState<TenantAgentCard | null>(null)
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
-  const [selectedUserRoles, setSelectedUserRoles] = useState<Record<string, string>>({})
+  const [togglingId, setTogglingId] = useState("")
+
+  const [dialogAgentId, setDialogAgentId] = useState("")
+  const [tab, setTab] = useState<DialogTab>("roles")
+  const [saving, setSaving] = useState(false)
+  const [dialogMessage, setDialogMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null)
   const [userSearch, setUserSearch] = useState("")
-  const [savingAssignment, setSavingAssignment] = useState(false)
-  const [assignmentError, setAssignmentError] = useState<string | null>(null)
 
-  const parseAssignedAgentIds = useCallback((value: unknown): string[] => {
-    if (Array.isArray(value)) {
-      return value.map((item) => String(item || "").trim()).filter(Boolean)
-    }
+  const [roleId, setRoleId] = useState("")
+  const [roleUserId, setRoleUserId] = useState("")
+  const [roleUserActionIds, setRoleUserActionIds] = useState<string[]>([])
+  const [memberDraft, setMemberDraft] = useState<Record<string, boolean>>({})
 
-    if (typeof value !== "string") {
-      return []
-    }
+  const [userId, setUserId] = useState("")
+  const [directActionIds, setDirectActionIds] = useState<string[]>([])
 
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean)
-  }, [])
+  const dialogAgent = useMemo(() => agents.find((agent) => agent.id === dialogAgentId) || null, [agents, dialogAgentId])
+  const selectedRole = dialogAgent?.roles.find((role) => role.id === roleId) || null
+  const selectedUserAccess = dialogAgent?.userAccess.find((item) => item.id === userId) || null
+  const selectedUser = users.find((user) => user.id === userId) || null
 
-  const getUserDisplayName = useCallback((user: TenantUser): string => {
-    const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
-    return fullName || user.email || "Unknown user"
-  }, [])
-
-  const getUserInitials = useCallback((user: TenantUser): string => {
-    const parts = [user.firstName, user.lastName].filter(Boolean).map((value) => String(value).trim())
-    if (parts.length > 0) {
-      return parts.slice(0, 2).map((value) => value.charAt(0).toUpperCase()).join("")
-    }
-
-    return String(user.email || "U").charAt(0).toUpperCase()
-  }, [])
+  const filteredUsers = useMemo(() => {
+    const term = userSearch.trim().toLowerCase()
+    if (!term) return users
+    return users.filter((user) => `${user.name} ${user.email}`.toLowerCase().includes(term))
+  }, [users, userSearch])
 
   const loadAgents = useCallback(async () => {
-    setLoadingAgents(true)
+    setLoading(true)
     setPageError(null)
     try {
-      const rows = await (dispatch(fetchTenantAgents()) as Promise<Record<string, unknown>[]>)
-
-      const assignmentMap = await (dispatch(fetchTenantAgentAssignments()) as Promise<Record<string, Record<string, unknown> | null>>)
-
-      const mapped: Array<TenantAgentCard | null> = rows.map((row: Record<string, unknown>) => {
-        const id = String(row.id || "")
-        if (!id) return null
-
-        const assignment = assignmentMap[id] || null
-
-        return {
-          id,
-          name: String((assignment?.agentName as string) || row.name || "Untitled Agent"),
-          description: String(row.description || ""),
-          category: detectAgentCategory({
-            name: String((assignment?.agentName as string) || row.name || "Untitled Agent"),
-            description: String(row.description || ""),
-            systemPrompt: String(row.systemPrompt || ""),
-            allowedCollections: Array.isArray(row.allowedCollections)
-              ? row.allowedCollections.map((value: unknown) => String(value))
-              : [],
-          }),
-          configured: Boolean(assignment?.configured),
-          isActive: Number((assignment?.isActive as number | undefined) ?? row.isActive ?? 1) === 0 ? 0 : 1,
-          aiProvider: assignment?.aiProvider === "openrouter" ? "openrouter" : "openai",
-          aiModel: String((assignment?.aiModel as string | undefined) || "gpt-4.1-mini"),
-          managerCanRun: Boolean((assignment?.managerCanRun as boolean | undefined) ?? true),
-          userCanRun: Boolean((assignment?.userCanRun as boolean | undefined) ?? (assignment?.memberCanRun as boolean | undefined) ?? false),
-          assignedUserIds: Array.isArray(assignment?.assignedUserIds)
-            ? assignment.assignedUserIds.map((value: unknown) => String(value))
-            : [],
-          workflowType: row.workflowType ? String(row.workflowType) : undefined,
-          createdAt: row.createdAt ? String(row.createdAt) : null,
-        } as TenantAgentCard
-      })
-
-      setAgents(mapped.filter((value): value is TenantAgentCard => Boolean(value)))
+      const data = await dispatch(fetchTenantAgentsOverview())
+      setAgents(data.agents)
+      setUsers(data.users)
     } catch (error) {
-      const message =
-        typeof error === "object" && error !== null && "message" in error
-          ? String((error as { message?: string }).message || "Failed to load agents.")
-          : "Failed to load agents."
       setAgents([])
-      setPageError(message)
+      setPageError(errorMessage(error, "Failed to load agents."))
     } finally {
-      setLoadingAgents(false)
-    }
-  }, [dispatch])
-
-  const loadTenantUsers = useCallback(async () => {
-    setLoadingUsers(true)
-    try {
-      const rows = await (dispatch(fetchTenantUsers()) as Promise<Array<Record<string, unknown>>>)
-      const mapped = Array.isArray(rows)
-        ? rows
-            .map((row) => {
-              const id = String(row.id || "").trim()
-              if (!id) return null
-
-              return {
-                id,
-                email: String(row.email || "").trim(),
-                firstName: row.firstName ? String(row.firstName) : null,
-                lastName: row.lastName ? String(row.lastName) : null,
-                role: row.role ? String(row.role) : null,
-                isActive: typeof row.isActive === "boolean" ? row.isActive : null,
-                assignedAgentIds: row.assignedAgentIds ? String(row.assignedAgentIds) : null,
-                assigned_agent_ids: row.assigned_agent_ids ? String(row.assigned_agent_ids) : null,
-                agentIds: row.agentIds ? String(row.agentIds) : null,
-              } as TenantUser
-            })
-            .filter((row): row is TenantUser => Boolean(row))
-        : []
-
-      setTenantUsers(mapped)
-    } catch {
-      setTenantUsers([])
-    } finally {
-      setLoadingUsers(false)
+      setLoading(false)
     }
   }, [dispatch])
 
@@ -260,288 +130,182 @@ export default function TenantCreatedAgentsPage() {
     void loadAgents()
   }, [loadAgents])
 
-  useEffect(() => {
-    void loadTenantUsers()
-  }, [loadTenantUsers])
+  // Drafts are loaded from server data when a role/user is clicked, never carried over.
+  const selectRole = (role: TenantAgentOverview["roles"][number] | null) => {
+    setRoleId(role?.id || "")
+    setRoleUserId("")
+    setRoleUserActionIds([])
+    setMemberDraft({})
+    setDialogMessage(null)
+  }
 
-  const categoryCounts = useMemo(() => {
-    return agents.reduce<Record<AgentCategory, number>>(
-      (acc, agent) => {
-        acc[agent.category] += 1
-        return acc
-      },
-      {
-        gmail: 0,
-        crm: 0,
-        support: 0,
-        calendar: 0,
-        knowledge: 0,
-        automation: 0,
-        general: 0,
-      },
-    )
-  }, [agents])
+  const isRoleMember = (id: string): boolean =>
+    memberDraft[id] ?? Boolean(selectedRole?.users.some((member) => String(member.id) === id))
 
-  const getUsersAssignedToAgent = useCallback((agent: TenantAgentCard | null): TenantUser[] => {
-    if (!agent) return []
+  const toggleRoleMember = (id: string, checked: boolean) => {
+    setMemberDraft((prev) => ({ ...prev, [id]: checked }))
+    selectRoleUser(id)
+  }
 
-    const explicitSet = new Set(agent.assignedUserIds)
+  const selectRoleUser = (id: string) => {
+    setRoleUserId(id)
+    const direct = dialogAgent?.userAccess.find((item) => item.id === id)?.directActionIds || []
+    setRoleUserActionIds(Array.from(new Set([...(selectedRole?.userActions?.[id] || []), ...direct].map(String))))
+    setDialogMessage(null)
+  }
 
-    return tenantUsers.filter((user) => {
-      if (explicitSet.has(user.id)) {
-        return true
-      }
+  const selectUser = (id: string, access?: TenantAgentOverview["userAccess"][number]) => {
+    setUserId(id)
+    setDirectActionIds(access ? access.directActionIds.map(String) : [])
+    setDialogMessage(null)
+  }
 
-      const assignedAgentIds = parseAssignedAgentIds(user.assignedAgentIds ?? user.assigned_agent_ids ?? user.agentIds)
-      return assignedAgentIds.includes(agent.id)
-    })
-  }, [parseAssignedAgentIds, tenantUsers])
-
-  const buildSearchText = useCallback((user: TenantUser): string => {
-    return [getUserDisplayName(user), user.email, user.role || ""]
-      .join(" ")
-      .toLowerCase()
-  }, [getUserDisplayName])
-
-  const sortedTenantUsers = useMemo(() => {
-    return [...tenantUsers].sort((left, right) => getUserDisplayName(left).localeCompare(getUserDisplayName(right)))
-  }, [getUserDisplayName, tenantUsers])
-
-  const openViewUsersModal = useCallback((agent: TenantAgentCard) => {
-    setViewAgent(agent)
-    setViewUsersModalOpen(true)
-  }, [])
-
-  const openAssignUsersModal = useCallback((agent: TenantAgentCard) => {
-    const assignedUsers = getUsersAssignedToAgent(agent)
-    const roleMap = tenantUsers.reduce<Record<string, string>>((acc, user) => {
-      acc[user.id] = normalizeRoleValue(user.role) || "user"
-      return acc
-    }, {})
-    setSelectedAgent(agent)
-    setSelectedUserIds(Array.from(new Set(assignedUsers.map((user) => user.id))))
-    setSelectedUserRoles(roleMap)
+  const openDialog = (agent: TenantAgentOverview) => {
+    setDialogAgentId(agent.id)
+    setTab("roles")
+    selectRole(null)
+    selectUser("")
     setUserSearch("")
-    setAssignmentError(null)
-    setAssignmentModalOpen(true)
-  }, [getUsersAssignedToAgent, tenantUsers])
+    setDialogMessage(null)
+  }
 
-  const toggleUserSelection = useCallback((userId: string) => {
-    setSelectedUserIds((prev) => {
-      if (prev.includes(userId)) {
-        return prev.filter((id) => id !== userId)
-      }
-
-      return [...prev, userId]
-    })
-  }, [])
-
-  const handleRoleChange = useCallback((userId: string, role: string) => {
-    setSelectedUserRoles((prev) => ({
-      ...prev,
-      [userId]: normalizeRoleValue(role) || "user",
-    }))
-  }, [])
-
-  const handleSaveAssignments = useCallback(async () => {
-    if (!selectedAgent) return
-
-    setSavingAssignment(true)
-    setAssignmentError(null)
+  const toggleAgentActive = async (agent: TenantAgentOverview) => {
+    setTogglingId(agent.id)
+    setPageError(null)
     try {
-      await (dispatch(
-        upsertTenantAgentAssignment({
-          agentId: selectedAgent.id,
-          aiProvider: selectedAgent.aiProvider,
-          aiModel: selectedAgent.aiModel,
-          managerCanRun: selectedAgent.managerCanRun,
-          userCanRun: selectedAgent.userCanRun,
-          assignedUserIds: selectedUserIds,
-        }),
-      ) as Promise<unknown>)
-
-      const usersWithRoleChanges = tenantUsers.filter((user) => {
-        const nextRole = selectedUserRoles[user.id] || "user"
-        return nextRole !== (normalizeRoleValue(user.role) || "user")
-      })
-
-      if (usersWithRoleChanges.length > 0) {
-        await Promise.all(
-          usersWithRoleChanges.map((user) =>
-            dispatch(
-              updateTenantUser({
-                userId: user.id,
-                role: selectedUserRoles[user.id] || "user",
-              }),
-            ) as Promise<unknown>,
-          ),
-        )
-      }
-
-      setAgents((prev) =>
-        prev.map((agent) => {
-          if (agent.id !== selectedAgent.id) return agent
-          return {
-            ...agent,
-            assignedUserIds: Array.from(new Set(selectedUserIds)),
-          }
-        }),
-      )
-
-      setTenantUsers((prev) =>
-        prev.map((user) => {
-          const existing = parseAssignedAgentIds(user.assignedAgentIds ?? user.assigned_agent_ids ?? user.agentIds)
-          const hasAgent = existing.includes(selectedAgent.id)
-          const shouldHaveAgent = selectedUserIds.includes(user.id)
-          const nextRole = selectedUserRoles[user.id] || normalizeRoleValue(user.role) || "user"
-
-          if (hasAgent === shouldHaveAgent && nextRole === (normalizeRoleValue(user.role) || "user")) {
-            return user
-          }
-
-          const next = shouldHaveAgent
-            ? [...existing, selectedAgent.id]
-            : existing.filter((agentId) => agentId !== selectedAgent.id)
-
-          return {
-            ...user,
-            role: nextRole,
-            assignedAgentIds: Array.from(new Set(next)).join(","),
-          }
-        }),
-      )
-
-      setAssignmentModalOpen(false)
+      await dispatch(setTenantAgentActive(agent.id, !agent.isActive))
+      setAgents((prev) => prev.map((item) => (item.id === agent.id ? { ...item, isActive: !agent.isActive } : item)))
     } catch (error) {
-      const message =
-        typeof error === "object" && error !== null && "message" in error
-          ? String((error as { message?: string }).message || "Failed to update assigned users.")
-          : "Failed to update assigned users."
-      setAssignmentError(message)
+      setPageError(errorMessage(error, "Failed to update agent status."))
     } finally {
-      setSavingAssignment(false)
+      setTogglingId("")
     }
-  }, [dispatch, parseAssignedAgentIds, selectedAgent, selectedUserIds, selectedUserRoles, tenantUsers])
+  }
 
-  const assignedUsersForSelectedAgent = useMemo(() => {
-    const selected = new Set(selectedUserIds)
-    return sortedTenantUsers.filter((user) => selected.has(user.id))
-  }, [selectedUserIds, sortedTenantUsers])
-
-  const unassignedUsersForSelectedAgent = useMemo(() => {
-    const selected = new Set(selectedUserIds)
-    return sortedTenantUsers.filter((user) => !selected.has(user.id))
-  }, [selectedUserIds, sortedTenantUsers])
-
-  const viewAssignedUsers = useMemo(() => {
-    return getUsersAssignedToAgent(viewAgent)
-  }, [getUsersAssignedToAgent, viewAgent])
-
-  const filteredAssignedUsersForSelectedAgent = useMemo(() => {
-    const query = userSearch.trim().toLowerCase()
-    if (!query) return assignedUsersForSelectedAgent
-    return assignedUsersForSelectedAgent.filter((user) => buildSearchText(user).includes(query))
-  }, [assignedUsersForSelectedAgent, buildSearchText, userSearch])
-
-  const filteredUnassignedUsersForSelectedAgent = useMemo(() => {
-    const query = userSearch.trim().toLowerCase()
-    if (!query) return unassignedUsersForSelectedAgent
-    return unassignedUsersForSelectedAgent.filter((user) => buildSearchText(user).includes(query))
-  }, [buildSearchText, unassignedUsersForSelectedAgent, userSearch])
-
-  const assignmentSummary = useMemo(() => {
-    return {
-      assignedCount: selectedUserIds.length,
-      availableCount: Math.max(tenantUsers.length - selectedUserIds.length, 0),
-      roleChanges: tenantUsers.filter((user) => {
-        const nextRole = selectedUserRoles[user.id] || normalizeRoleValue(user.role) || "user"
-        return nextRole !== (normalizeRoleValue(user.role) || "user")
-      }).length,
+  const saveRoleAssignments = async () => {
+    if (!dialogAgent || !selectedRole || !dialogAgent.connectorId) return
+    setSaving(true)
+    setDialogMessage(null)
+    try {
+      const memberIds = users.filter((user) => isRoleMember(user.id)).map((user) => user.id)
+      await dispatch(updateTenantRoleMembers(selectedRole.id, memberIds))
+      if (roleUserId && memberIds.includes(roleUserId)) {
+        const actions = dialogAgent.availableActions
+          .filter((action) => roleUserActionIds.includes(String(action.id)))
+          .map((action) => ({ connectorId: action.connectorId, actionId: action.id }))
+        await dispatch(updateTenantRoleUserActions(selectedRole.id, roleUserId, dialogAgent.connectorId, actions))
+      }
+      await loadAgents()
+      setMemberDraft({})
+      setDialogMessage({ type: "ok", text: "Role users and actions saved." })
+    } catch (error) {
+      setDialogMessage({ type: "error", text: errorMessage(error, "Failed to save role assignments.") })
+    } finally {
+      setSaving(false)
     }
-  }, [selectedUserIds, selectedUserRoles, tenantUsers])
+  }
 
-  const renderAssignmentUserCard = useCallback((user: TenantUser, tone: "emerald" | "sky") => {
-    const isSelected = selectedUserIds.includes(user.id)
-    const roleValue = selectedUserRoles[user.id] || normalizeRoleValue(user.role) || "user"
-    const roleChanged = roleValue !== (normalizeRoleValue(user.role) || "user")
-    const accent = tone === "emerald"
-      ? {
-          shell: "border-emerald-200 bg-white hover:border-emerald-300",
-          avatar: "bg-emerald-100 text-emerald-800",
-          chip: "border-emerald-200 bg-emerald-50 text-emerald-700",
-        }
-      : {
-          shell: "border-sky-200 bg-white hover:border-sky-300",
-          avatar: "bg-sky-100 text-sky-800",
-          chip: "border-sky-200 bg-sky-50 text-sky-700",
-        }
+  const saveUserActions = async () => {
+    if (!dialogAgent || !userId || !dialogAgent.connectorId) return
+    setSaving(true)
+    setDialogMessage(null)
+    try {
+      const actions = dialogAgent.availableActions
+        .filter((action) => directActionIds.includes(String(action.id)))
+        .map((action) => ({ connectorId: action.connectorId, actionId: action.id }))
+      await dispatch(updateTenantUserActions(userId, dialogAgent.connectorId, actions))
+      await loadAgents()
+      setDialogMessage({ type: "ok", text: "User actions updated." })
+    } catch (error) {
+      setDialogMessage({ type: "error", text: errorMessage(error, "Failed to update user actions.") })
+    } finally {
+      setSaving(false)
+    }
+  }
 
-    return (
-      <label key={user.id} className={`block cursor-pointer rounded-2xl border px-4 py-4 shadow-sm transition ${accent.shell}`}>
-        <div className="flex gap-3">
-          <div className="pt-0.5">
+  // Actions the user already receives through roles cannot be removed as direct grants.
+  const roleDerivedIds = new Set(
+    (selectedUserAccess?.actions || []).filter((action) => action.source.includes("role")).map((action) => String(action.id)),
+  )
+
+  // Role-wide actions apply only to users who are members of the selected role.
+  const roleLockedIds = new Set(
+    selectedRole?.users.some((member) => String(member.id) === roleUserId)
+      ? selectedRole.actions.map((action) => String(action.id))
+      : [],
+  )
+
+  const tabButton = (value: DialogTab, label: string, count: number) => (
+    <button
+      type="button"
+      onClick={() => { setTab(value); setDialogMessage(null) }}
+      className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors cursor-pointer ${
+        tab === value ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+      }`}
+    >
+      {label}
+      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-700">{count}</span>
+    </button>
+  )
+
+  const searchBox = (
+    <Input
+      value={userSearch}
+      onChange={(event: React.ChangeEvent<HTMLInputElement>) => setUserSearch(event.target.value)}
+      placeholder="Search by name or email"
+      className="h-9 bg-white"
+    />
+  )
+
+  const actionList = (
+    checkedFor: (id: string) => boolean,
+    onChange: (id: string, checked: boolean) => void,
+    disabledFor?: (id: string) => boolean,
+    assignedFor?: (id: string) => boolean,
+  ) => (
+    <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+      {dialogAgent?.availableActions.length === 0 ? (
+        <p className="text-sm text-slate-500">No actions available for this tool.</p>
+      ) : null}
+      {dialogAgent?.availableActions.map((action) => {
+        const id = String(action.id)
+        const disabled = disabledFor?.(id) || false
+        const checked = checkedFor(id)
+        return (
+          <label
+            key={id}
+            className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-sm transition-colors ${
+              checked ? "border-sky-200 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"
+            } ${disabled ? "cursor-not-allowed opacity-80" : "cursor-pointer"}`}
+          >
             <Checkbox
-              checked={isSelected}
-              onCheckedChange={() => toggleUserSelection(user.id)}
+              checked={checked}
+              disabled={disabled}
+              onCheckedChange={(value: boolean | "indeterminate") => onChange(id, value === true)}
             />
-          </div>
-          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${accent.avatar}`}>
-            {getUserInitials(user)}
-          </div>
-          <div className="min-w-0 flex-1 space-y-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="truncate text-sm font-semibold text-slate-900">{getUserDisplayName(user)}</p>
-                <Badge variant="outline" className={isSelected ? accent.chip : "border-slate-200 bg-slate-50 text-slate-700"}>
-                  {isSelected ? "assigned" : "available"}
-                </Badge>
-                {roleChanged ? (
-                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
-                    role changed
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="truncate text-xs text-slate-600">{user.email}</p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-slate-900">{action.displayName || action.actionKey}</p>
+              <p className="truncate text-xs text-slate-500">{action.actionKey}</p>
             </div>
+            {disabled && checked ? (
+              <Badge variant="outline" className="border-sky-200 bg-white text-sky-700">via role</Badge>
+            ) : assignedFor?.(id) ? (
+              <Badge variant="outline" className="border-emerald-200 bg-white text-emerald-700">assigned</Badge>
+            ) : null}
+          </label>
+        )
+      })}
+    </div>
+  )
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-end">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                  {getRoleLabel(roleValue)}
-                </Badge>
-                <Badge variant="outline" className={user.isActive ? STATUS_BADGE_CLASS.active : STATUS_BADGE_CLASS.inactive}>
-                  {user.isActive ? "active" : "inactive"}
-                </Badge>
-              </div>
-              <div>
-                <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500">Role</p>
-                <Select
-                  value={roleValue}
-                  onValueChange={(value) => handleRoleChange(user.id, value)}
-                  disabled={savingAssignment}
-                >
-                  <SelectTrigger className="h-9 w-full bg-white text-left">
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roleOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-        </div>
-      </label>
-    )
-  }, [getUserDisplayName, getUserInitials, handleRoleChange, savingAssignment, selectedUserIds, selectedUserRoles, toggleUserSelection])
-
-  const agentAssignedPreview = useCallback((agent: TenantAgentCard): string[] => {
-    return getUsersAssignedToAgent(agent).slice(0, 2).map((user) => getUserDisplayName(user))
-  }, [getUserDisplayName, getUsersAssignedToAgent])
+  const footer = (summary: string, label: string, onSave: () => void, disabled: boolean) => (
+    <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
+      <p className="text-sm text-slate-600">{summary}</p>
+      <Button type="button" disabled={saving || disabled} onClick={onSave} className="cursor-pointer">
+        {saving ? "Saving..." : label}
+      </Button>
+    </div>
+  )
 
   return (
     <main className="p-0">
@@ -550,7 +314,7 @@ export default function TenantCreatedAgentsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Created Agents</h1>
-              <p className="mt-2 text-sm text-slate-600">All already-created tenant agents in one dedicated page.</p>
+              <p className="mt-2 text-sm text-slate-600">Manage agent status, roles, users and allowed actions.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href="/tenant/agents" prefetch={false}>
@@ -566,45 +330,27 @@ export default function TenantCreatedAgentsPage() {
         <Card className="rounded-2xl">
           <CardHeader>
             <CardTitle>Tenant Agent Inventory</CardTitle>
-            <CardDescription>Configured and unconfigured agents with runtime details.</CardDescription>
+            <CardDescription>{agents.length} agents</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {pageError ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                {pageError}
-              </div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{pageError}</div>
             ) : null}
-            {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
-            {!loadingAgents && agents.length === 0 ? <p className="text-sm text-muted-foreground">No agents found.</p> : null}
+            {loading ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
+            {!loading && agents.length === 0 ? <p className="text-sm text-muted-foreground">No agents found.</p> : null}
 
-            {!loadingAgents && agents.length > 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-700 space-y-2">
-                <p>
-                  Showing <span className="font-semibold text-slate-900">{agents.length}</span> agents. Configured: <span className="font-semibold text-slate-900">{agents.filter((agent) => agent.configured).length}</span>.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(Object.keys(categoryCounts) as AgentCategory[])
-                    .filter((category) => categoryCounts[category] > 0)
-                    .map((category) => (
-                      <Badge key={category} variant="outline" className={CATEGORY_STYLE[category]}>
-                        {CATEGORY_LABEL[category]}: {categoryCounts[category]}
-                      </Badge>
-                    ))}
-                </div>
-              </div>
-            ) : null}
-
-            {!loadingAgents && agents.length > 0 ? (
+            {agents.length > 0 ? (
               <div className="rounded-xl border border-slate-200 bg-white">
                 <Table>
                   <TableHeader className="bg-slate-50">
                     <TableRow>
                       <TableHead>Agent</TableHead>
-                      <TableHead>Category</TableHead>
+                      <TableHead>Tool</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Provider</TableHead>
                       <TableHead>Model</TableHead>
-                      {/* <TableHead>Assigned Users</TableHead> */}
+                      <TableHead>Roles</TableHead>
+                      <TableHead>Users</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="text-center">Actions</TableHead>
                     </TableRow>
@@ -612,68 +358,37 @@ export default function TenantCreatedAgentsPage() {
                   <TableBody>
                     {agents.map((agent) => (
                       <TableRow key={agent.id}>
+                        <TableCell className="font-medium text-slate-900">{agent.name}</TableCell>
+                        <TableCell>{agent.connectorName || "-"}</TableCell>
                         <TableCell>
-                          <div className="space-y-1">
-                            <p className="font-medium text-slate-900">{agent.name}</p>
-                            {/* <p className="text-xs text-slate-500">{agent.description || "No description provided."}</p> */}
-                          </div>
+                          <Badge variant={agent.isActive ? "outline" : "destructive"}>{agent.isActive ? "active" : "inactive"}</Badge>
                         </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={CATEGORY_STYLE[agent.category]}>{CATEGORY_LABEL[agent.category]}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge variant={agent.isActive === 1 ? "outline" : "destructive"}>
-                              {agent.isActive === 1 ? "active" : "inactive"}
-                            </Badge>
-                            {/* <Badge
-                              variant="outline"
-                              className={agent.configured ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-amber-300 bg-amber-50 text-amber-700"}
-                            >
-                              {agent.configured ? "configured" : "not configured"}
-                            </Badge> */}
-                          </div>
-                        </TableCell>
-                        <TableCell>{agent.aiProvider}</TableCell>
-                        <TableCell className="max-w-52 truncate">{agent.aiModel}</TableCell>
-                        {/* <TableCell>
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium text-slate-900">{getUsersAssignedToAgent(agent).length}</p>
-                            {agentAssignedPreview(agent).length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {agentAssignedPreview(agent).map((name) => (
-                                  <Badge key={name} variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                                    {name}
-                                  </Badge>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-slate-500">No users assigned</p>
-                            )}
-                          </div>
-                        </TableCell> */}
+                        <TableCell>{agent.aiProvider || "-"}</TableCell>
+                        <TableCell className="max-w-52 truncate">{agent.aiModel || "-"}</TableCell>
+                        <TableCell>{agent.roles.length}</TableCell>
+                        <TableCell>{agent.userAccess.length}</TableCell>
                         <TableCell>{agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : "-"}</TableCell>
-                        <TableCell className="text-right align-middle">
-                          <div className="flex items-stretch justify-center gap-2">
+                        <TableCell>
+                          <div className="flex items-center justify-center gap-2">
                             <Button
                               type="button"
                               variant="outline"
-                              className="h-9 min-w-28 cursor-pointer rounded-lg bg-primary px-4 text-sm font-medium text-white"
-                              onClick={() => openViewUsersModal(agent)}
+                              size="sm"
+                              className="inline-flex h-8 items-center justify-center leading-none cursor-pointer"
+                              onClick={() => openDialog(agent)}
                             >
-                              <span className="flex h-full items-center justify-center leading-none">View Users</span>
+                              <span className="relative top-px leading-none">View</span>
                             </Button>
                             <Button
                               type="button"
-                              variant="outline"
-                              className="h-9 min-w-28 cursor-pointer rounded-lg border-sky-200 bg-sky-50 px-4 text-sm font-medium text-sky-700 hover:bg-sky-100 hover:text-sky-800"
-                              onClick={() => openAssignUsersModal(agent)}
+                              variant={agent.isActive ? "destructive" : "default"}
+                              size="sm"
+                              className="inline-flex h-8 items-center justify-center leading-none cursor-pointer"
+                              disabled={togglingId === agent.id}
+                              onClick={() => void toggleAgentActive(agent)}
                             >
-                              <span className="flex h-full items-center justify-center leading-none">Assign Users</span>
+                              <span className="relative top-px leading-none">{agent.isActive ? "Deactivate" : "Activate"}</span>
                             </Button>
-                            {/* <Link href={`/tenant/agents/create?agentId=${encodeURIComponent(agent.id)}`} prefetch={false}>
-                              <Button size="sm" className="cursor-pointer">Edit Agent</Button>
-                            </Link> */}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -685,163 +400,211 @@ export default function TenantCreatedAgentsPage() {
           </CardContent>
         </Card>
 
-        <Dialog open={viewUsersModalOpen} onOpenChange={setViewUsersModalOpen}>
-          <DialogContent className="sm:max-w-2xl rounded-2xl border border-slate-200 bg-white p-0">
-            <DialogHeader className="border-b border-slate-200 bg-linear-to-r from-slate-50 to-white px-6 py-5">
-              <DialogTitle className="text-base font-semibold text-slate-900">Assigned Users</DialogTitle>
-              <DialogDescription>
-                {viewAgent ? `Users currently assigned to ${viewAgent.name}.` : "Assigned users for this agent."}
-              </DialogDescription>
+        <Dialog open={Boolean(dialogAgent)} onOpenChange={(open) => { if (!open) setDialogAgentId("") }}>
+          <DialogContent className="flex h-[680px] max-h-[92vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+            <DialogHeader className="border-b border-slate-200 bg-linear-to-r from-slate-50 to-sky-50 px-6 py-5">
+              <div className="flex flex-wrap items-center gap-3">
+                <DialogTitle className="text-xl font-semibold text-slate-900">{dialogAgent?.name}</DialogTitle>
+                {dialogAgent?.connectorName ? (
+                  <Badge variant="outline" className="border-sky-200 bg-white text-sky-700">{dialogAgent.connectorName}</Badge>
+                ) : null}
+                <Badge variant={dialogAgent?.isActive ? "outline" : "destructive"}>
+                  {dialogAgent?.isActive ? "active" : "inactive"}
+                </Badge>
+              </div>
+              <DialogDescription>Control who can use this agent and which actions they are allowed to run.</DialogDescription>
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                {[
+                  { label: "Roles", value: dialogAgent?.roles.length || 0 },
+                  { label: "Users with access", value: dialogAgent?.userAccess.length || 0 },
+                  { label: "Available actions", value: dialogAgent?.availableActions.length || 0 },
+                ].map((stat) => (
+                  <div key={stat.label} className="rounded-xl border border-slate-200 bg-white px-4 py-2">
+                    <p className="text-xs text-slate-500">{stat.label}</p>
+                    <p className="text-lg font-semibold text-slate-900">{stat.value}</p>
+                  </div>
+                ))}
+              </div>
             </DialogHeader>
 
-            <div className="space-y-4 px-6 py-5">
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">{viewAgent?.name || "Agent"}</p>
-                  <p className="text-xs text-slate-600">Assigned user count: {viewAssignedUsers.length}</p>
-                </div>
-                {viewAgent ? <Badge variant="outline" className={CATEGORY_STYLE[viewAgent.category]}>{CATEGORY_LABEL[viewAgent.category]}</Badge> : null}
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+              <div className="inline-flex rounded-xl bg-slate-100 p-1">
+                {tabButton("roles", "Role wise", dialogAgent?.roles.length || 0)}
+                {tabButton("users", "User wise", users.length)}
               </div>
 
-              {viewAssignedUsers.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-8 text-center">
-                  <p className="text-sm font-medium text-slate-700">No users assigned yet</p>
-                  <p className="mt-1 text-xs text-slate-500">Use the Assign Users button to attach tenant users to this agent.</p>
-                </div>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {viewAssignedUsers.map((user) => (
-                    <div key={user.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">
-                          {getUserInitials(user)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-slate-900">{getUserDisplayName(user)}</p>
-                          <p className="truncate text-xs text-slate-600">{user.email}</p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                              {getRoleLabel(user.role)}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className={user.isActive ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-600"}
-                            >
-                              {user.isActive ? "active" : "inactive"}
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={assignmentModalOpen} onOpenChange={setAssignmentModalOpen}>
-          <DialogContent className="sm:max-w-5xl rounded-2xl border border-slate-200 bg-white p-0">
-            <DialogHeader className="border-b border-slate-200 bg-linear-to-r from-sky-50 via-white to-slate-50 px-6 py-5">
-              <DialogTitle className="text-base font-semibold text-slate-900">Assign Users</DialogTitle>
-              <DialogDescription>
-                {selectedAgent
-                  ? `Choose which tenant users should be able to access ${selectedAgent.name}.`
-                  : "Manage assigned users for this agent."}
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 px-6 py-5">
-              <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{selectedAgent?.name || "Agent"}</p>
-                  <p className="text-xs text-slate-600">Assigned: {selectedUserIds.length} of {tenantUsers.length} tenant users</p>
-                </div>
-                <div className="w-full lg:w-80">
-                  <Input
-                    value={userSearch}
-                    onChange={(event) => setUserSearch(event.target.value)}
-                    placeholder="Search users by name, email, or role"
-                    className="bg-white"
-                  />
-                </div>
-              </div>
-
-              {assignmentError ? <p className="text-sm text-red-600">{assignmentError}</p> : null}
-              {loadingUsers ? <p className="text-sm text-slate-600">Loading tenant users...</p> : null}
-
-              {!loadingUsers ? (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-emerald-900">Assigned Users</p>
-                        <p className="text-xs text-emerald-700">Users who currently have this agent.</p>
-                      </div>
-                      <Badge variant="outline" className="border-emerald-300 bg-white text-emerald-700">
-                        {filteredAssignedUsersForSelectedAgent.length}
-                      </Badge>
-                    </div>
-
-                    <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                      {filteredAssignedUsersForSelectedAgent.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-emerald-300 bg-white/70 px-4 py-6 text-center">
-                          <p className="text-sm text-emerald-800">No assigned users match this filter.</p>
-                        </div>
-                      ) : (
-                        filteredAssignedUsersForSelectedAgent.map((user) => renderAssignmentUserCard(user, "emerald"))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-sky-900">Available Tenant Users</p>
-                        <p className="text-xs text-sky-700">Select users here to assign this agent.</p>
-                      </div>
-                      <Badge variant="outline" className="border-sky-300 bg-white text-sky-700">
-                        {filteredUnassignedUsersForSelectedAgent.length}
-                      </Badge>
-                    </div>
-
-                    <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                      {filteredUnassignedUsersForSelectedAgent.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-sky-300 bg-white/70 px-4 py-6 text-center">
-                          <p className="text-sm text-sky-800">No available users match this filter.</p>
-                        </div>
-                      ) : (
-                        filteredUnassignedUsersForSelectedAgent.map((user) => renderAssignmentUserCard(user, "sky"))
-                      )}
-                    </div>
-                  </div>
+              {dialogMessage ? (
+                <div className={`rounded-lg border px-3 py-2 text-sm ${dialogMessage.type === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+                  {dialogMessage.text}
                 </div>
               ) : null}
 
-              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4">
-                <div className="mr-auto flex flex-wrap gap-2 text-xs text-slate-600">
-                  <span className="rounded-full bg-slate-100 px-3 py-1">Assigned: {assignmentSummary.assignedCount}</span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1">Available: {assignmentSummary.availableCount}</span>
-                  <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">Role changes: {assignmentSummary.roleChanges}</span>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="cursor-pointer"
-                  onClick={() => setAssignmentModalOpen(false)}
-                  disabled={savingAssignment}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  className="cursor-pointer"
-                  onClick={() => void handleSaveAssignments()}
-                  disabled={savingAssignment || !selectedAgent}
-                >
-                  {savingAssignment ? "Saving..." : "Save Assignments"}
-                </Button>
-              </div>
+              {dialogAgent && tab === "roles" ? (
+                dialogAgent.roles.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                    No roles for this agent.
+                  </p>
+                ) : (
+                  <div className="grid h-[370px] gap-4 md:grid-cols-[220px_1fr]">
+                    <div className="space-y-2 overflow-y-auto pr-1">
+                      {dialogAgent.roles.map((role) => (
+                        <button
+                          key={role.id}
+                          type="button"
+                          onClick={() => selectRole(role)}
+                          className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+                            role.id === roleId ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50 cursor-pointer"
+                          }`}
+                        >
+                          <p className="truncate text-sm font-semibold text-slate-900">{role.name}</p>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex h-full min-h-0 flex-col gap-4">
+                      {!selectedRole ? (
+                        <p className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                          Select a role, then tick users to assign them and choose their actions.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[260px_1fr]">
+                            <div className="flex min-h-0 flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                              <p className="text-sm font-semibold text-slate-900">
+                                Users ({users.filter((user) => isRoleMember(user.id)).length} assigned)
+                              </p>
+                              {searchBox}
+                              <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+                                {filteredUsers.length === 0 ? <p className="text-sm text-slate-500">No users match.</p> : null}
+                                {filteredUsers.map((user) => (
+                                  <div
+                                    key={user.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => selectRoleUser(user.id)}
+                                    onKeyDown={(event) => { if (event.key === "Enter") selectRoleUser(user.id) }}
+                                    className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors cursor-pointer ${
+                                      user.id === roleUserId ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                                    }`}
+                                  >
+                                    <span onClick={(event) => event.stopPropagation()}>
+                                      <Checkbox
+                                        checked={isRoleMember(user.id)}
+                                        onCheckedChange={(value: boolean | "indeterminate") => toggleRoleMember(user.id, value === true)}
+                                      />
+                                    </span>
+                                    <UserIdentity name={user.name} email={user.email} />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex min-h-0 flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                              {!roleUserId ? (
+                                <p className="flex flex-1 items-center justify-center text-center text-sm text-slate-500">
+                                  Select a user to view and assign actions.
+                                </p>
+                              ) : !isRoleMember(roleUserId) ? (
+                                <p className="flex flex-1 items-center justify-center text-center text-sm text-slate-500">
+                                  Tick the checkbox to assign this user to the role, then choose actions.
+                                </p>
+                              ) : (
+                                <>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    Actions for {users.find((user) => user.id === roleUserId)?.name || "user"} ({roleUserActionIds.length + roleLockedIds.size})
+                                  </p>
+                                  {actionList(
+                                    (id) => roleLockedIds.has(id) || roleUserActionIds.includes(id),
+                                    (id, checked) => setRoleUserActionIds((prev) => toggleId(prev, id, checked)),
+                                    (id) => roleLockedIds.has(id),
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {footer(
+                            `${users.filter((user) => isRoleMember(user.id)).length} users assigned · ${roleUserActionIds.length} actions for selected user`,
+                            "Save",
+                            () => void saveRoleAssignments(),
+                            !dialogAgent.connectorId,
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              ) : null}
+
+              {dialogAgent && tab === "users" ? (
+                users.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                    No users found.
+                  </p>
+                ) : (
+                  <div className="grid h-[370px] gap-4 md:grid-cols-[280px_1fr]">
+                    <div className="flex min-h-0 flex-col gap-2">
+                      {searchBox}
+                      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+                        {filteredUsers.map((user) => {
+                          const access = dialogAgent.userAccess.find((item) => item.id === user.id)
+                          return (
+                            <button
+                              key={user.id}
+                              type="button"
+                              onClick={() => selectUser(user.id, access)}
+                              className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left transition-colors cursor-pointer ${
+                                user.id === userId ? "border-sky-300 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                              }`}
+                            >
+                              <UserIdentity name={user.name} email={user.email} />
+                              <Badge variant="outline" className="shrink-0">{access?.actions.length || 0}</Badge>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="flex h-full min-h-0 flex-col gap-4">
+                      {selectedUser ? (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                            <UserIdentity name={selectedUser.name} email={selectedUser.email} />
+                            <div className="flex flex-wrap items-center gap-1">
+                              {(selectedUserAccess?.roles || []).length === 0 ? (
+                                <span className="text-xs text-slate-500">No roles on this agent</span>
+                              ) : (
+                                selectedUserAccess?.roles.map((role) => (
+                                  <Badge key={role.id} variant="outline" className="border-violet-200 bg-violet-50 text-violet-700">
+                                    {role.name}
+                                  </Badge>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex min-h-0 flex-1 flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                            <p className="text-sm font-semibold text-slate-900">Allowed actions</p>
+                            {actionList(
+                              (id) => roleDerivedIds.has(id) || directActionIds.includes(id),
+                              (id, checked) => setDirectActionIds((prev) => toggleId(prev, id, checked)),
+                              (id) => roleDerivedIds.has(id),
+                            )}
+                          </div>
+                          {footer(
+                            `${directActionIds.length + roleDerivedIds.size} actions selected`,
+                            "Save User Actions",
+                            () => void saveUserActions(),
+                            !dialogAgent.connectorId,
+                          )}
+                        </>
+                      ) : (
+                        <p className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+                          Select a user to view actions.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              ) : null}
             </div>
           </DialogContent>
         </Dialog>

@@ -151,6 +151,10 @@ type TenantAgentCreateInput = {
   topK?: number;
   isActive?: 0 | 1;
   allowedCollections?: string[];
+  connectorId?: string;
+  tenantConnectorId?: string;
+  aiProvider?: string;
+  aiModel?: string;
 };
 
 type TenantAgentUpdateInput = TenantAgentCreateInput & {
@@ -234,6 +238,7 @@ export type TenantRoleBootstrapPayload = {
   roleMembers: TenantRoleBootstrapMember[];
   roleActions: TenantRoleBootstrapRoleAction[];
   actions: TenantRoleBootstrapAction[];
+  assignments?: Array<Record<string, unknown>>;
 };
 
 type TenantRoleActionAssignment = {
@@ -1432,6 +1437,117 @@ export const fetchTenantUsers =
     return request;
   };
 
+export type TenantAgentActionRef = {
+  id: string;
+  connectorId: string;
+  actionKey: string;
+  displayName: string;
+};
+
+export type TenantAgentOverview = {
+  id: string;
+  name: string;
+  status: string;
+  isActive: boolean;
+  connectorId: string | null;
+  connectorName: string | null;
+  aiProvider: string | null;
+  aiModel: string | null;
+  createdAt: string | null;
+  availableActions: TenantAgentActionRef[];
+  roles: Array<{
+    id: string;
+    name: string;
+    description: string;
+    isActive: boolean;
+    users: Array<{ id: string; email: string; name: string; role: string; isActive: boolean }>;
+    actions: TenantAgentActionRef[];
+    userActions: Record<string, string[]>;
+  }>;
+  userAccess: Array<{
+    id: string;
+    name: string;
+    email: string;
+    roles: Array<{ id: string; name: string }>;
+    directActionIds: string[];
+    actions: Array<TenantAgentActionRef & { source: Array<"role" | "direct"> }>;
+  }>;
+};
+
+export type TenantOverviewUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+};
+
+export const fetchTenantAgentsOverview =
+  (): ThunkAction<
+    Promise<{ agents: TenantAgentOverview[]; users: TenantOverviewUser[] }>,
+    RootState,
+    unknown,
+    AnyAction
+  > =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const response = await axios.get("/tenant/agents/overview", { headers });
+    return {
+      agents: Array.isArray(response?.data?.agents) ? response.data.agents : [],
+      users: Array.isArray(response?.data?.users) ? response.data.users : [],
+    };
+  };
+
+export const setTenantAgentActive =
+  (agentId: string, isActive: boolean): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    await axios.patch(
+      `/tenant/agents/${encodeURIComponent(agentId)}/status`,
+      { isActive },
+      { headers },
+    );
+  };
+
+export const updateTenantRoleMembers =
+  (roleId: string, userIds: string[]): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    await axios.put(
+      `/tenant/role-management/roles/${encodeURIComponent(roleId)}/members`,
+      { userIds },
+      { headers },
+    );
+  };
+
+export const updateTenantRoleUserActions =
+  (
+    roleId: string,
+    userId: string,
+    connectorId: string,
+    actions: TenantUserActionAssignment[],
+  ): ThunkAction<Promise<void>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    await axios.put(
+      `/tenant/role-management/roles/${encodeURIComponent(roleId)}/users/${encodeURIComponent(userId)}/actions`,
+      { connectorId, actions },
+      { headers },
+    );
+  };
+
 export const fetchTenantRoleBootstrap =
   (): ThunkAction<Promise<TenantRoleBootstrapPayload>, RootState, unknown, AnyAction> =>
   async () => {
@@ -1459,6 +1575,7 @@ export const fetchTenantRoleBootstrap =
           ? payload.roleActions
           : [],
         actions: Array.isArray(payload.actions) ? payload.actions : [],
+        assignments: Array.isArray(payload.assignments) ? payload.assignments : [],
       };
     } catch (error) {
       console.warn(
@@ -1826,6 +1943,10 @@ export const createTenantAgent =
         allowedCollections: Array.isArray(input.allowedCollections)
           ? input.allowedCollections
           : [],
+        connectorId: input.connectorId || undefined,
+        tenantConnectorId: input.tenantConnectorId || undefined,
+        aiProvider: input.aiProvider || undefined,
+        aiModel: input.aiModel || undefined,
       },
       { headers },
     );
@@ -1880,6 +2001,10 @@ export const updateTenantAgent =
         allowedCollections: Array.isArray(input.allowedCollections)
           ? input.allowedCollections
           : [],
+        connectorId: input.connectorId || undefined,
+        tenantConnectorId: input.tenantConnectorId || undefined,
+        aiProvider: input.aiProvider || undefined,
+        aiModel: input.aiModel || undefined,
       },
       { headers },
     );

@@ -20,6 +20,8 @@ type AssignedAgent = {
   aiProvider: string
   aiModel: string
   canRun: boolean
+  roles?: string[]
+  allowedActions?: Array<{ actionKey: string; displayName: string; sources: string[] }>
 }
 
 export default function UserAssignedAgentsPage() {
@@ -100,9 +102,31 @@ export default function UserAssignedAgentsPage() {
                   <Badge variant={agent.isActive === 1 ? "outline" : "destructive"}>
                     {agent.isActive === 1 ? "active (1)" : "inactive (0)"}
                   </Badge>
-                  <Badge variant="outline">{agent.aiProvider}</Badge>
-                  <Badge variant="outline">{agent.aiModel}</Badge>
+                  {agent.aiProvider ? <Badge variant="outline">{agent.aiProvider}</Badge> : null}
+                  {agent.aiModel ? <Badge variant="outline">{agent.aiModel}</Badge> : null}
                 </div>
+
+                {agent.roles?.length ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Your roles</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {agent.roles.map((role) => (
+                        <Badge key={role} variant="secondary">{role}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {agent.allowedActions?.length ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Allowed actions</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {agent.allowedActions.map((action) => (
+                        <Badge key={action.actionKey} variant="outline">{action.displayName}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="rounded-md border bg-muted/40 p-3 text-sm">Permission: {agent.canRun ? "Run allowed" : "View only"}</div>
 

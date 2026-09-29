@@ -61,8 +61,9 @@ type TenantAgentCard = {
   oauthReady?: boolean
   requiresGoogleLogin?: boolean
   canRun?: boolean
-  aiProvider: "openai" | "openrouter"
+  aiProvider: string
   aiModel: string
+  allowedActions?: string[]
   managerCanRun: boolean
   userCanRun: boolean
   assignedUserIds: string[]
@@ -904,8 +905,13 @@ export default function ChatPage() {
           oauthReady: Boolean(row.oauthReady ?? false),
           requiresGoogleLogin: Boolean(row.requiresGoogleLogin ?? false),
           canRun: Boolean(row.canRun ?? true),
-          aiProvider: row.aiProvider === "openrouter" ? "openrouter" : "openai",
-          aiModel: String(row.aiModel || "gpt-4.1-mini"),
+          aiProvider: String(row.aiProvider || ""),
+          aiModel: String(row.aiModel || ""),
+          allowedActions: Array.isArray(row.allowedActions)
+            ? (row.allowedActions as Array<{ displayName?: string; actionKey?: string }>).map((action) =>
+                String(action.displayName || action.actionKey || ""),
+              )
+            : [],
           managerCanRun: Boolean(row.managerCanRun ?? true),
           userCanRun: Boolean(row.userCanRun ?? row.memberCanRun ?? false),
           assignedUserIds: Array.isArray(row.assignedUserIds) ? row.assignedUserIds.map((value: unknown) => String(value)) : [],
@@ -1702,11 +1708,11 @@ export default function ChatPage() {
                         </Badge>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-                        <span>{agent.aiProvider}</span>
+                        <span>{agent.aiProvider || "provider not set"}</span>
                         <span>•</span>
-                        <span>{agent.aiModel}</span>
+                        <span>{agent.aiModel || "model not set"}</span>
                         <span>•</span>
-                        <span>configured</span>
+                        <span>{agent.allowedActions?.length || 0} actions</span>
                       </div>
                     </button>
                   )
