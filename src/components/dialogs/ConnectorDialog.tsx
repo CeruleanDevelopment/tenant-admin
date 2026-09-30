@@ -93,7 +93,7 @@ export default function ConnectorDialog({
       .toLowerCase();
 
     if (key === "azure-devops" || key === "azure_devops") {
-      if (authType === "basic") return "Personal Access Token (PAT)";
+      if (authType === "oauth2") return "Microsoft Entra OAuth (Recommended)";
     }
     if (!authType) return "Authentication";
     return authType
@@ -108,7 +108,7 @@ export default function ConnectorDialog({
       .trim()
       .toLowerCase();
     if (key === "azure-devops" || key === "azure_devops") {
-      return "Azure DevOps uses Personal Access Token (PAT) with basic auth credentials.";
+      return "Register an app in Microsoft Entra ID, create a client secret, then add the app as a user in your Azure DevOps organization (Organization settings > Users) before testing.";
     }
     return "";
   };
@@ -513,7 +513,7 @@ export default function ConnectorDialog({
                       </div>
                       {getConnectorAuthMethodHint() ? (
                         <Badge variant="secondary" className="rounded-full">
-                          PAT / Basic auth
+                          Microsoft Entra OAuth
                         </Badge>
                       ) : null}
                     </div>
@@ -638,7 +638,13 @@ export default function ConnectorDialog({
                           ) : (
                             <Input
                               className="mt-2 h-11 bg-background"
-                              type={field.type === "number" ? "number" : "text"}
+                              type={
+                                field.type === "number"
+                                  ? "number"
+                                  : /secret|token|password/i.test(field.name)
+                                    ? "password"
+                                    : "text"
+                              }
                               value={value}
                               onChange={(event) =>
                                 handleConnectorFieldChange(

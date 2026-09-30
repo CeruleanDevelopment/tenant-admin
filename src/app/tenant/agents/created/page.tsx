@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useAutoDismissApiMessage } from "@/hooks/useAutoDismissApiMessage"
 
 type DialogTab = "roles" | "users"
 
@@ -129,6 +130,9 @@ export default function TenantCreatedAgentsPage() {
   useEffect(() => {
     void loadAgents()
   }, [loadAgents])
+
+  useAutoDismissApiMessage(pageError, () => setPageError(null))
+  useAutoDismissApiMessage(dialogMessage, () => setDialogMessage(null))
 
   // Drafts are loaded from server data when a role/user is clicked, never carried over.
   const selectRole = (role: TenantAgentOverview["roles"][number] | null) => {
@@ -299,7 +303,7 @@ export default function TenantCreatedAgentsPage() {
   )
 
   const footer = (summary: string, label: string, onSave: () => void, disabled: boolean) => (
-    <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
+    <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-6 py-3">
       <p className="text-sm text-slate-600">{summary}</p>
       <Button type="button" disabled={saving || disabled} onClick={onSave} className="cursor-pointer">
         {saving ? "Saving..." : label}
@@ -413,15 +417,15 @@ export default function TenantCreatedAgentsPage() {
                 </Badge>
               </div>
               <DialogDescription>Control who can use this agent and which actions they are allowed to run.</DialogDescription>
-              <div className="mt-3 grid grid-cols-3 gap-3">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {[
                   { label: "Roles", value: dialogAgent?.roles.length || 0 },
                   { label: "Users with access", value: dialogAgent?.userAccess.length || 0 },
                   { label: "Available actions", value: dialogAgent?.availableActions.length || 0 },
                 ].map((stat) => (
-                  <div key={stat.label} className="rounded-xl border border-slate-200 bg-white px-4 py-2">
-                    <p className="text-xs text-slate-500">{stat.label}</p>
-                    <p className="text-lg font-semibold text-slate-900">{stat.value}</p>
+                  <div key={stat.label} className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs">
+                    <span className="text-slate-500">{stat.label}</span>
+                    <span className="font-semibold text-slate-900">{stat.value}</span>
                   </div>
                 ))}
               </div>
@@ -522,12 +526,6 @@ export default function TenantCreatedAgentsPage() {
                               )}
                             </div>
                           </div>
-                          {footer(
-                            `${users.filter((user) => isRoleMember(user.id)).length} users assigned · ${roleUserActionIds.length} actions for selected user`,
-                            "Save",
-                            () => void saveRoleAssignments(),
-                            !dialogAgent.connectorId,
-                          )}
                         </>
                       )}
                     </div>
@@ -589,12 +587,6 @@ export default function TenantCreatedAgentsPage() {
                               (id) => roleDerivedIds.has(id),
                             )}
                           </div>
-                          {footer(
-                            `${directActionIds.length + roleDerivedIds.size} actions selected`,
-                            "Save User Actions",
-                            () => void saveUserActions(),
-                            !dialogAgent.connectorId,
-                          )}
                         </>
                       ) : (
                         <p className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
@@ -606,6 +598,23 @@ export default function TenantCreatedAgentsPage() {
                 )
               ) : null}
             </div>
+
+            {dialogAgent && tab === "roles" && selectedRole
+              ? footer(
+                  `${users.filter((user) => isRoleMember(user.id)).length} users assigned · ${roleUserActionIds.length} actions for selected user`,
+                  "Save",
+                  () => void saveRoleAssignments(),
+                  !dialogAgent.connectorId,
+                )
+              : null}
+            {dialogAgent && tab === "users" && selectedUser
+              ? footer(
+                  `${directActionIds.length + roleDerivedIds.size} actions selected`,
+                  "Save User Actions",
+                  () => void saveUserActions(),
+                  !dialogAgent.connectorId,
+                )
+              : null}
           </DialogContent>
         </Dialog>
       </div>

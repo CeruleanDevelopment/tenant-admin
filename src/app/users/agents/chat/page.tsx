@@ -49,6 +49,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { RiChat3Line } from "react-icons/ri";
+import { useAutoDismissApiMessage } from "../../../../hooks/useAutoDismissApiMessage"
 
 type TenantAgentCard = {
   id: string
@@ -804,6 +805,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useAutoDismissApiMessage(error, () => setError(null))
   const [sessionPersisted, setSessionPersisted] = useState(false)
   const [userSessions, setUserSessions] = useState<UserChatSession[]>([])
   const [loadingUserSessions, setLoadingUserSessions] = useState(false)

@@ -8,6 +8,7 @@ import { fetchAssignedAgents } from "../../../../actions/auth"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useAutoDismissApiMessage } from "../../../hooks/useAutoDismissApiMessage"
 
 type AssignedAgent = {
   id: string
@@ -28,6 +29,8 @@ export default function UserAssignedAgentsPage() {
   const [agents, setAgents] = useState<AssignedAgent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useAutoDismissApiMessage(error, () => setError(null))
 
   const dispatch = useDispatch<AppDispatch>()
   const router = useRouter() as { push: (href: string) => void }
