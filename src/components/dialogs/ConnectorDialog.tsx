@@ -33,11 +33,17 @@ import {
   testTenantConnectorCredentials,
 } from "../../../actions/auth";
 import type { AppDispatch } from "../../../redux/store";
+import {
+  getToolAuthHintOverride,
+  getToolAuthLabelOverride,
+  isToolCredentialFieldHidden,
+} from "@/components/dialogs/connectorToolUiConfig";
 
 export type ConnectorCredentialField = {
   name: string;
   label: string;
   type: string;
+  format?: string;
   description?: string;
   required: boolean;
   options?: string[];
@@ -84,33 +90,74 @@ export default function ConnectorDialog({
     Record<string, string>
   >({});
 
-  const formatConnectorAuthSchemeLabel = (scheme: ConnectorAuthSchemeItem) => {
-    const authType = String(scheme.auth_type || "")
-      .trim()
-      .toLowerCase();
-    const key = String(selectedCatalogConnector?.key || "")
-      .trim()
-      .toLowerCase();
-
-    if (key === "azure-devops" || key === "azure_devops") {
-      if (authType === "oauth2") return "Microsoft Entra OAuth (Recommended)";
-    }
-    if (!authType) return "Authentication";
-    return authType
+  const toTitleCase = (value: string) =>
+    value
       .split(/[\s_-]+/)
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(" ");
+
+  const getObjectString = (
+    source: Record<string, unknown> | null | undefined,
+    keys: string[],
+  ): string => {
+    if (!source) return "";
+    for (const key of keys) {
+      const candidate = source[key];
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return "";
+  };
+
+  const selectedConnectorAuthScheme = useMemo(
+    () =>
+      connectorAuthSchemes.find(
+        (scheme) => scheme.id === selectedConnectorAuthSchemeId,
+      ) || null,
+    [connectorAuthSchemes, selectedConnectorAuthSchemeId],
+  );
+
+  const formatConnectorAuthSchemeLabel = (scheme: ConnectorAuthSchemeItem) => {
+    const connectorKey = String(selectedCatalogConnector?.key || "");
+    const authType = String(scheme.auth_type || "").trim().toLowerCase();
+    const toolOverrideLabel = getToolAuthLabelOverride(connectorKey, authType);
+    if (toolOverrideLabel) return toolOverrideLabel;
+
+    const config =
+      scheme.config && typeof scheme.config === "object"
+        ? (scheme.config as Record<string, unknown>)
+        : null;
+    const configLabel = getObjectString(config, [
+      "display_name",
+      "label",
+      "auth_label",
+      "ui_label",
+    ]);
+    if (configLabel) return configLabel;
+
+    if (!authType) return "Authentication";
+    return toTitleCase(authType);
   };
 
   const getConnectorAuthMethodHint = () => {
-    const key = String(selectedCatalogConnector?.key || "")
-      .trim()
-      .toLowerCase();
-    if (key === "azure-devops" || key === "azure_devops") {
-      return "Register an app in Microsoft Entra ID, create a client secret, then add the app as a user in your Azure DevOps organization (Organization settings > Users) before testing.";
-    }
-    return "";
+    const connectorKey = String(selectedCatalogConnector?.key || "");
+    const authType = String(selectedConnectorAuthScheme?.auth_type || "");
+    const toolOverrideHint = getToolAuthHintOverride(connectorKey, authType);
+    if (toolOverrideHint) return toolOverrideHint;
+
+    const config =
+      selectedConnectorAuthScheme?.config &&
+      typeof selectedConnectorAuthScheme.config === "object"
+        ? (selectedConnectorAuthScheme.config as Record<string, unknown>)
+        : null;
+    return getObjectString(config, [
+      "instructions",
+      "help_text",
+      "auth_hint",
+      "hint",
+    ]);
   };
 
   const buildCredentialFields = (schema: unknown): ConnectorCredentialField[] => {
@@ -118,10 +165,6 @@ export default function ConnectorDialog({
       schema && typeof schema === "object"
         ? (schema as Record<string, unknown>)
         : {};
-    const connectorKey = String(selectedCatalogConnector?.key || "")
-      .trim()
-      .toLowerCase();
-    const isBusinessCentral = connectorKey === "microsoft-dynamics-365-business-central";
     const properties =
       schemaRecord.properties && typeof schemaRecord.properties === "object"
         ? (schemaRecord.properties as Record<string, Record<string, unknown>>)
@@ -134,8 +177,19 @@ export default function ConnectorDialog({
         : [],
     );
 
+    const connectorKey = String(selectedCatalogConnector?.key || "");
+    const authType = String(selectedConnectorAuthScheme?.auth_type || "");
+
     return Object.entries(properties)
-      .filter(([name]) => !(isBusinessCentral && name === "company_id"))
+      .filter(([name, definition]) => {
+        const xHidden = definition["x-hidden"];
+        const xHiddenAlt = definition["x_hidden"];
+        if (xHidden === true || xHiddenAlt === true) return false;
+        if (isToolCredentialFieldHidden(connectorKey, authType, name)) {
+          return false;
+        }
+        return true;
+      })
       .map(([name, definition]) => ({
         name,
         label: String(definition.title || name.replace(/_/g, " ")).replace(
@@ -143,6 +197,7 @@ export default function ConnectorDialog({
           (char) => char.toUpperCase(),
         ),
         type: String(definition.type || "string"),
+        format: String(definition.format || "").trim() || undefined,
         description: String(definition.description || "").trim(),
         required: required.has(name),
         options: Array.isArray(definition.enum)
@@ -160,12 +215,10 @@ export default function ConnectorDialog({
   };
 
   const selectedConnectorFields = useMemo(() => {
-    const selectedScheme =
-      connectorAuthSchemes.find(
-        (scheme) => scheme.id === selectedConnectorAuthSchemeId,
-      ) || null;
-    return buildCredentialFields(selectedScheme?.credential_schema || {});
-  }, [connectorAuthSchemes, selectedConnectorAuthSchemeId]);
+    return buildCredentialFields(
+      selectedConnectorAuthScheme?.credential_schema || {},
+    );
+  }, [selectedConnectorAuthScheme]);
 
   const resetState = () => {
     setConnectorModalLoading(false);
@@ -623,7 +676,52 @@ export default function ConnectorDialog({
                             {field.label}
                             {field.required ? " *" : ""}
                           </Label>
-                          {field.type === "object" || field.type === "array" ? (
+                          {field.options && field.options.length > 0 ? (
+                            <Select
+                              value={value || "__none__"}
+                              onValueChange={(nextValue) =>
+                                handleConnectorFieldChange(
+                                  field.name,
+                                  nextValue === "__none__" ? "" : nextValue,
+                                )
+                              }
+                            >
+                              <SelectTrigger className="mt-2 h-11 w-full bg-background">
+                                <SelectValue placeholder={`Select ${field.label}`} />
+                              </SelectTrigger>
+                              <SelectContent
+                                position="popper"
+                                className="w-(--radix-select-trigger-width)"
+                              >
+                                <SelectItem value="__none__">
+                                  Select {field.label}
+                                </SelectItem>
+                                {field.options.map((option) => (
+                                  <SelectItem key={option} value={option}>
+                                    {option}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : field.type === "boolean" ? (
+                            <Select
+                              value={value || "false"}
+                              onValueChange={(nextValue) =>
+                                handleConnectorFieldChange(field.name, nextValue)
+                              }
+                            >
+                              <SelectTrigger className="mt-2 h-11 w-full bg-background">
+                                <SelectValue placeholder={`Select ${field.label}`} />
+                              </SelectTrigger>
+                              <SelectContent
+                                position="popper"
+                                className="w-(--radix-select-trigger-width)"
+                              >
+                                <SelectItem value="true">True</SelectItem>
+                                <SelectItem value="false">False</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : field.type === "object" || field.type === "array" ? (
                             <textarea
                               className="mt-2 min-h-28 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
                               value={value}
@@ -641,6 +739,8 @@ export default function ConnectorDialog({
                               type={
                                 field.type === "number"
                                   ? "number"
+                                  : field.format === "password"
+                                    ? "password"
                                   : /secret|token|password/i.test(field.name)
                                     ? "password"
                                     : "text"

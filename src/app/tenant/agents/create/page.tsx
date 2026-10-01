@@ -1634,9 +1634,6 @@ export default function TenantAgentCreatePage() {
                                     >
                                       {catalogConnector?.display_name ||
                                         tenantConnector.connector_id}
-                                      {tenantConnector.status
-                                        ? ` · ${tenantConnector.status}`
-                                        : ""}
                                     </SelectItem>
                                   ),
                                 )}
