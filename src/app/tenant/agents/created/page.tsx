@@ -378,7 +378,7 @@ export default function TenantCreatedAgentsPage() {
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="inline-flex h-8 items-center justify-center leading-none cursor-pointer"
+                              className="inline-flex h-8 items-center justify-center leading-none cursor-pointer bg-primary text-white"
                               onClick={() => openDialog(agent)}
                             >
                               <span className="relative top-px leading-none">View</span>
@@ -405,16 +405,16 @@ export default function TenantCreatedAgentsPage() {
         </Card>
 
         <Dialog open={Boolean(dialogAgent)} onOpenChange={(open) => { if (!open) setDialogAgentId("") }}>
-          <DialogContent className="flex h-[680px] max-h-[92vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogContent className="flex h-170 max-h-[92vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
             <DialogHeader className="border-b border-slate-200 bg-linear-to-r from-slate-50 to-sky-50 px-6 py-5">
               <div className="flex flex-wrap items-center gap-3">
                 <DialogTitle className="text-xl font-semibold text-slate-900">{dialogAgent?.name}</DialogTitle>
                 {dialogAgent?.connectorName ? (
                   <Badge variant="outline" className="border-sky-200 bg-white text-sky-700">{dialogAgent.connectorName}</Badge>
                 ) : null}
-                <Badge variant={dialogAgent?.isActive ? "outline" : "destructive"}>
+                {/* <Badge variant={dialogAgent?.isActive ? "outline" : "destructive"}>
                   {dialogAgent?.isActive ? "active" : "inactive"}
-                </Badge>
+                </Badge> */}
               </div>
               <DialogDescription>Control who can use this agent and which actions they are allowed to run.</DialogDescription>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -449,7 +449,7 @@ export default function TenantCreatedAgentsPage() {
                     No roles for this agent.
                   </p>
                 ) : (
-                  <div className="grid h-[370px] gap-4 md:grid-cols-[220px_1fr]">
+                  <div className="grid h-92.5 gap-4 md:grid-cols-[220px_1fr]">
                     <div className="space-y-2 overflow-y-auto pr-1">
                       {dialogAgent.roles.map((role) => (
                         <button
@@ -539,7 +539,7 @@ export default function TenantCreatedAgentsPage() {
                     No users found.
                   </p>
                 ) : (
-                  <div className="grid h-[370px] gap-4 md:grid-cols-[280px_1fr]">
+                  <div className="grid h-92.5 gap-4 md:grid-cols-[280px_1fr]">
                     <div className="flex min-h-0 flex-col gap-2">
                       {searchBox}
                       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">

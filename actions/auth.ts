@@ -1954,6 +1954,64 @@ export const createTenantAgent =
     return (resp?.data || {}) as { agent?: { id?: string } };
   };
 
+export type TenantAgentToolBinding = {
+  connectorId: string;
+  actionKey: string;
+  isRequired: boolean;
+};
+
+export const fetchTenantAgentToolBindings =
+  (
+    agentId: string,
+  ): ThunkAction<
+    Promise<TenantAgentToolBinding[]>,
+    RootState,
+    unknown,
+    AnyAction
+  > =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const resp = await axios.get(
+      `/ai/agents/${encodeURIComponent(String(agentId || ""))}/tool-bindings`,
+      { headers },
+    );
+    return (resp?.data?.bindings || []) as TenantAgentToolBinding[];
+  };
+
+export const saveTenantAgentToolBindings =
+  (input: {
+    agentId: string;
+    connectorId?: string;
+    tenantConnectorId?: string;
+    actionKeys: string[];
+    requiredActionKeys?: string[];
+  }): ThunkAction<
+    Promise<TenantAgentToolBinding[]>,
+    RootState,
+    unknown,
+    AnyAction
+  > =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const resp = await axios.put(
+      `/ai/agents/${encodeURIComponent(String(input.agentId || ""))}/tool-bindings`,
+      {
+        connectorId: input.connectorId || undefined,
+        tenantConnectorId: input.tenantConnectorId || undefined,
+        actionKeys: input.actionKeys,
+        requiredActionKeys: input.requiredActionKeys || [],
+      },
+      { headers },
+    );
+    return (resp?.data?.bindings || []) as TenantAgentToolBinding[];
+  };
+
 export const fetchTenantAgent =
   (
     agentId: string,

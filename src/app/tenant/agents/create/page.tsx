@@ -13,7 +13,7 @@ import {
   fetchTenantUsers,
   fetchTenantRoleBootstrap,
   saveTenantRole,
-  updateTenantAgent,
+  saveTenantAgentToolBindings,  updateTenantAgent,
   updateTenantUserActions,
   type ConnectorCatalogItem,
   type TenantConnectorItem,
@@ -52,6 +52,7 @@ import {
   FileText,
   Shield,
   Users,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1177,6 +1178,28 @@ export default function TenantAgentCreatePage() {
         setRoleBootstrapRoles((current) =>
           current.map((item) => (savedRoleIds.has(item.id) ? { ...item, agent_id: agentId } : item)),
         );
+
+        // Agent tool allowlist = union of actions granted to its roles.
+        const actionKeyById = new Map(roleActionCatalog.map((item) => [String(item.id), item.action_key]));
+        const boundActionKeys = Array.from(
+          new Set(
+            roleBootstrapActions
+              .filter((item) => savedRoleIds.has(item.role_id) && Number(item.is_active ?? 1) !== 0)
+              .map((item) => actionKeyById.get(String(item.action_id || "")) || "")
+              .filter(Boolean),
+          ),
+        );
+
+        if (boundActionKeys.length > 0) {
+          await dispatch(
+            saveTenantAgentToolBindings({
+              agentId,
+              connectorId: selectedToolConnector.id,
+              tenantConnectorId: selectedTenantConnectorRow.id,
+              actionKeys: boundActionKeys,
+            }),
+          );
+        }
       }
 
       for (const [userId, byConnector] of Object.entries(userDirectActions)) {
@@ -1867,11 +1890,11 @@ export default function TenantAgentCreatePage() {
                                       <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge>
                                     </div>
 
-                                    {userSearch.trim().length < 3 ? (
+                                    {/* {userSearch.trim().length < 3 ? (
                                       <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
                                         Type at least 3 characters to search users.
                                       </div>
-                                    ) : (
+                                    ) : ( */}
                                       <div className="space-y-2">
                                         {loadingUsers ? <span className="text-sm text-muted-foreground">Loading users...</span> : null}
                                         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -1890,7 +1913,7 @@ export default function TenantAgentCreatePage() {
                                           })}
                                         </div>
                                       </div>
-                                    )}
+                                    {/* )} */}
 
                                     <div className="space-y-2">
                                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Selected users</p>
@@ -1905,8 +1928,8 @@ export default function TenantAgentCreatePage() {
                                             return (
                                               <span key={userId} className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-sm text-foreground">
                                                 <span className="max-w-xs truncate">{formatUserName(user)}</span>
-                                                <button type="button" onClick={() => toggleRoleUser(userId)} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border text-xs text-muted-foreground transition-colors hover:bg-background hover:text-foreground" aria-label={`Remove ${formatUserName(user)}`}>
-                                                  ×
+                                                <button type="button" onClick={() => toggleRoleUser(userId)} className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border text-xs text-muted-foreground transition-colors hover:bg-black hover:text-white cursor-pointer" aria-label={`Remove ${formatUserName(user)}`}>
+                                                  <X className="h-3 w-3" />
                                                 </button>
                                               </span>
                                             );
