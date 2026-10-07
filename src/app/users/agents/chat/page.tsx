@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useDispatch } from "react-redux"
+import tenantAdminConfig from "../../../../../config/config"
 import {
   ArrowLeft,
   Bot,
@@ -24,6 +25,7 @@ import {
   MessageSquare,
   Paperclip,
   Pencil,
+  Plus,
   RefreshCw,
   SendHorizonal,
   ShieldCheck,
@@ -40,6 +42,7 @@ import {
   fetchUserChatSessions,
   renameTenantAgentConversationUser,
   sendTenantAgentChat,
+  transcribeTenantAgentAudio,
 } from "../../../../../actions/auth"
 import { extractApiMessage } from "../../../../../service/api"
 import type { AppDispatch } from "../../../../../redux/store"
@@ -113,25 +116,17 @@ type ChatAttachmentView = ChatAttachment & {
   isPreviewImage: boolean
 }
 
+type ChatHistoryRow = {
+  id?: unknown
+  role?: unknown
+  content?: unknown
+  created_at?: unknown
+  attachment_urls?: unknown
+}
+
 let assignedAgentsCache: TenantAgentCard[] | null = null
 let assignedAgentsLastFetchAt = 0
 let assignedAgentsRequestPromise: Promise<Record<string, unknown>[]> | null = null
-
-const GENERIC_QUICK_PROMPTS = [
-  "Summarize the latest activity in 3 bullets.",
-  "What should I prioritize next?",
-  "Draft a concise response for the top priority.",
-  "List blockers and suggested next actions.",
-]
-
-const GMAIL_QUICK_PROMPTS = [
-  "Summarize the latest Gmail activity in 3 bullets.",
-  "Find the most important unanswered emails and suggest next actions.",
-  "Draft a short reply to the newest thread.",
-  "List any urgent emails from VIP senders.",
-]
-
-const isGmailAnalysisType = (value?: string): boolean => String(value || "").toLowerCase() === "gmail_analysis"
 
 const DEFAULT_CHAT_TIMEZONE = "Asia/Kolkata"
 
@@ -176,50 +171,6 @@ const formatTimeByTimeZone = (date: Date, timezone?: string): string => {
       return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
     }
   }
-}
-
-
-const normalizeOAuthErrorMessage = (value: string): string => {
-  const text = String(value || "").trim()
-  const lower = text.toLowerCase()
-  if (!lower) return ""
-
-  if (
-    lower.includes("no refresh token") ||
-    lower.includes("missing_refresh_token") ||
-    lower.includes("no access token") ||
-    lower.includes("refresh token is set")
-  ) {
-    return "Google OAuth refresh token is missing or expired. Reconnect Google from the Assigned Agents page and then refresh this page."
-  }
-
-  if (
-    lower.includes("insufficient permission") ||
-    lower.includes("insufficient_permissions") ||
-    lower.includes("insufficient scope") ||
-    lower.includes("insufficient_scopes")
-  ) {
-    return "Google OAuth permissions are insufficient. Reconnect Google and grant the requested Gmail permissions (read/send) so the agent can access email content and send messages."
-  }
-
-  if (lower.includes("consent_required") || lower.includes("consent required") || lower.includes("access_denied")) {
-    return "Access to the Google account was denied or consent is required. Reconnect Google and approve the requested permissions to continue."
-  }
-
-  if (lower.includes("invalid_grant") || lower.includes("invalid_token") || lower.includes("token_revoked") || lower.includes("revoked")) {
-    return "Google OAuth token is invalid or has been revoked. Reconnect Google from the Assigned Agents page to restore access."
-  }
-
-  if (lower.includes("rate limit") || lower.includes("quotaexceeded") || lower.includes("quota") || lower.includes("429")) {
-    return "Google API quota or rate limit reached. Try again shortly; if it persists, check your Google API quota and usage in the Google Cloud Console."
-  }
-
-  if (lower.includes("network") || lower.includes("timeout") || lower.includes("failed to fetch") || lower.includes("econnrefused")) {
-    return "Network error contacting Google API. Check your network connection and try again."
-  }
-
-  const short = text.length > 300 ? `${text.slice(0, 300).trim()}…` : text
-  return `Google API error: ${short}`
 }
 
 const normalizeNumberedListDetailBullets = (value: string): string => {
@@ -559,14 +510,6 @@ const normalizeUserSessions = (rows: UserChatSession[]): UserChatSession[] => {
   })
 }
 
-const mapHistoryRowsToMessages = (rows: Record<string, unknown>[], timezone?: string): ChatMessage[] =>
-  rows.map((row, index) => ({
-    id: String(row.id || `history-${Date.now()}-${index}`),
-    role: String(row.role || "assistant") === "user" ? "user" : "assistant",
-    text: String(row.content || ""),
-    time: formatTimeFromIso(String(row.created_at || ""), timezone),
-  }))
-
 const cloneAttachmentsForMessage = (items: ChatAttachment[]): ChatAttachmentView[] =>
   items.map((item) => ({
     ...item,
@@ -579,6 +522,50 @@ const formatFileSize = (bytes: number): string => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+const createVirtualFile = (name: string, mimeType?: string): File => {
+  return new File([new Blob([])], String(name || "attachment"), {
+    type: String(mimeType || "application/octet-stream"),
+  })
+}
+
+const mapStoredAttachments = (urls: unknown): ChatAttachment[] => {
+  if (!Array.isArray(urls)) return []
+
+  const mapped: ChatAttachment[] = []
+  urls.forEach((raw, index) => {
+    const rawUrl = String(raw || "").trim()
+    if (!rawUrl) return
+    const url = rawUrl.startsWith("/") ? `${tenantAdminConfig.apiUrl}${rawUrl}` : rawUrl
+    const storedName = decodeURIComponent(rawUrl.split("?")[0].split("/").pop() || "attachment")
+    // Stored file names are prefixed with `<timestamp>-<uuid>-`.
+    const name = storedName.replace(/^\d+-[0-9a-f-]{36}-/i, "") || "attachment"
+    const lower = name.toLowerCase()
+    const kind: ChatAttachment["kind"] = /\.(png|jpg|jpeg|gif|webp|bmp|svg|avif)$/.test(lower)
+      ? "image"
+      : /\.(mp3|wav|ogg|mp4|mov|avi|mkv|m4a|webm)$/.test(lower)
+        ? "media"
+        : "document"
+
+    mapped.push({
+      id: `history-attachment-${index}-${name}`,
+      file: createVirtualFile(name),
+      kind,
+      previewUrl: kind === "image" ? url : undefined,
+    })
+  })
+
+  return mapped
+}
+
+const mapHistoryRowsToMessages = (rows: ChatHistoryRow[], timezone?: string): ChatMessage[] =>
+  rows.map((row, index) => ({
+    id: String(row.id || `history-${Date.now()}-${index}`),
+    role: String(row.role || "assistant") === "user" ? "user" : "assistant",
+    text: String(row.content || ""),
+    time: formatTimeFromIso(String(row.created_at || ""), timezone),
+    attachments: mapStoredAttachments(row.attachment_urls),
+  }))
 
 const inferAttachmentKind = (file: File): ChatAttachment["kind"] => {
   const type = String(file.type || "").toLowerCase()
@@ -802,7 +789,10 @@ export default function ChatPage() {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false)
   const [isMicActive, setIsMicActive] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [recordingLevels, setRecordingLevels] = useState<number[]>([])
   const [sending, setSending] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useAutoDismissApiMessage(error, () => setError(null))
@@ -835,6 +825,16 @@ export default function ChatPage() {
   const pendingSessionsForceRefreshByAgentRef = useRef<Record<string, boolean>>({})
   const hasLoadedSessionsOnceByAgentRef = useRef<Record<string, boolean>>({})
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingStreamRef = useRef<MediaStream | null>(null)
+  const recordingChunksRef = useRef<Blob[]>([])
+  const recordingAudioCtxRef = useRef<AudioContext | null>(null)
+  const recordingTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const sendRecordingOnStopRef = useRef(false)
+  const sendMessageRef = useRef<(extra?: ChatAttachment[]) => Promise<void>>(async () => {})
+  const micStartingRef = useRef(false)
+  const speechRecRef = useRef<any>(null)
+  const speechTextRef = useRef("")
 
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
   const SESSIONS_REFRESH_COOLDOWN_MS = 30000
@@ -1080,10 +1080,8 @@ export default function ChatPage() {
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
     [agents, selectedAgentId],
   )
-  const selectedAgentIsGmail = isGmailAnalysisType(selectedAgent?.type || selectedAgent?.workflowType)
   const selectedWorkflowType = String(selectedAgent?.workflowType || selectedAgent?.type || "direct")
   const activeDisplayTimeZone = resolveChatTimeZone()
-  const selectedQuickPrompts = selectedAgentIsGmail ? GMAIL_QUICK_PROMPTS : GENERIC_QUICK_PROMPTS
   const activeChatId = selectedAgentId ? chatIdByAgent[selectedAgentId] || "" : ""
   const activeMessageBucketKey = selectedAgentId && activeChatId ? buildMessageBucketKey(selectedAgentId, activeChatId) : ""
 
@@ -1241,8 +1239,184 @@ export default function ChatPage() {
     setAttachmentMenuOpen(false)
   }
 
+  const releaseRecordingResources = useCallback(() => {
+    try {
+      speechRecRef.current?.abort()
+    } catch {}
+    speechRecRef.current = null
+    if (recordingTickRef.current) {
+      clearInterval(recordingTickRef.current)
+      recordingTickRef.current = null
+    }
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+    recordingStreamRef.current = null
+    void recordingAudioCtxRef.current?.close().catch(() => undefined)
+    recordingAudioCtxRef.current = null
+    mediaRecorderRef.current = null
+    setIsMicActive(false)
+    setRecordingSeconds(0)
+    setRecordingLevels([])
+  }, [])
+
+  const startRecording = async () => {
+    if (isMicActive || micStartingRef.current || sending || !selectedAgentId) return
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setError("Audio recording is not supported in this browser.")
+      return
+    }
+
+    micStartingRef.current = true
+    let stream: MediaStream | null = null
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      recordingStreamRef.current = stream
+      const acquiredStream = stream
+
+      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find((type) =>
+        MediaRecorder.isTypeSupported(type),
+      )
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      recordingChunksRef.current = []
+      sendRecordingOnStopRef.current = false
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordingChunksRef.current.push(event.data)
+      }
+
+      recorder.onstop = () => {
+        const shouldSend = sendRecordingOnStopRef.current
+        const baseType = String(recorder.mimeType || mimeType || "audio/webm").split(";")[0]
+        const chunks = recordingChunksRef.current
+        recordingChunksRef.current = []
+        const liveText = speechTextRef.current.trim()
+        acquiredStream.getTracks().forEach((track) => track.stop())
+        releaseRecordingResources()
+        if (!shouldSend || !chunks.length) return
+
+        if (liveText) {
+          setInput((prev) => (prev.trim() ? `${prev.trim()} ${liveText}` : liveText))
+          return
+        }
+
+        const extension = baseType.includes("mp4") ? "m4a" : baseType.includes("ogg") ? "ogg" : "webm"
+        const file = new File([new Blob(chunks, { type: baseType })], `voice-${Date.now()}.${extension}`, {
+          type: baseType,
+        })
+        setTranscribing(true)
+        void (async () => {
+          try {
+            const text = await dispatch(
+              transcribeTenantAgentAudio({ agentId: selectedAgentId, audio: file }) as any,
+            )
+            if (text) setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : String(text)))
+          } catch (transcribeError: unknown) {
+            setError(extractApiMessage(transcribeError as any) || "Could not transcribe the audio. Please try again.")
+          } finally {
+            setTranscribing(false)
+          }
+        })()
+      }
+
+      const AudioContextCtor =
+        window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      let analyser: AnalyserNode | null = null
+      if (AudioContextCtor) {
+        const audioCtx = new AudioContextCtor()
+        recordingAudioCtxRef.current = audioCtx
+        analyser = audioCtx.createAnalyser()
+        analyser.fftSize = 256
+        audioCtx.createMediaStreamSource(stream).connect(analyser)
+      }
+
+      const startedAt = Date.now()
+      const samples = new Uint8Array(analyser?.fftSize || 0)
+      recordingTickRef.current = setInterval(() => {
+        setRecordingSeconds(Math.floor((Date.now() - startedAt) / 1000))
+        if (!analyser) return
+        analyser.getByteTimeDomainData(samples)
+        let sum = 0
+        for (const value of samples) {
+          const centered = (value - 128) / 128
+          sum += centered * centered
+        }
+        const level = Math.min(1, Math.sqrt(Math.sqrt(sum / samples.length)) * 1.4)
+        setRecordingLevels((prev) => [...prev.slice(-119), level])
+      }, 80)
+
+      mediaRecorderRef.current = recorder
+      recorder.start()
+
+      speechTextRef.current = ""
+      const SpeechCtor =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      if (SpeechCtor) {
+        try {
+          const rec = new SpeechCtor()
+          rec.continuous = true
+          rec.interimResults = true
+          rec.lang = navigator.language || "en-US"
+          rec.onresult = (event: any) => {
+            let text = ""
+            for (let i = 0; i < event.results.length; i += 1) {
+              text += `${event.results[i][0].transcript} `
+            }
+            speechTextRef.current = text.trim()
+          }
+          rec.onerror = () => undefined
+          rec.start()
+          speechRecRef.current = rec
+        } catch {
+          speechRecRef.current = null
+        }
+      }
+      setIsMicActive(true)
+    } catch {
+      stream?.getTracks().forEach((track) => track.stop())
+      releaseRecordingResources()
+      setError("Microphone access was denied or is unavailable.")
+    } finally {
+      micStartingRef.current = false
+    }
+  }
+
+  const stopRecording = (send: boolean) => {
+    const recorder = mediaRecorderRef.current
+    if (!recorder || recorder.state === "inactive") {
+      releaseRecordingResources()
+      return
+    }
+    sendRecordingOnStopRef.current = send
+    try {
+      speechRecRef.current?.stop()
+    } catch {}
+    recorder.stop()
+    // Release the mic immediately so the browser tab recording indicator clears.
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+    recordingStreamRef.current = null
+    void recordingAudioCtxRef.current?.close().catch(() => undefined)
+    recordingAudioCtxRef.current = null
+    if (recordingTickRef.current) {
+      clearInterval(recordingTickRef.current)
+      recordingTickRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      sendRecordingOnStopRef.current = false
+      const recorder = mediaRecorderRef.current
+      if (recorder && recorder.state !== "inactive") recorder.stop()
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+      if (recordingTickRef.current) clearInterval(recordingTickRef.current)
+    }
+  }, [])
+
   const toggleMic = () => {
-    setIsMicActive((prev) => !prev)
+    if (isMicActive) {
+      stopRecording(true)
+      return
+    }
+    void startRecording()
   }
 
   const handleCopyMessage = useCallback(async (message: ChatMessage) => {
@@ -1465,26 +1639,40 @@ export default function ChatPage() {
     setOpenSessionMenuId(null)
   }, [router, selectedAgentId])
 
-  const sendMessage = async () => {
-    const message = input.trim()
-    if (!selectedAgentId || (!message && attachments.length === 0)) return
+  const startNewChat = useCallback(() => {
+    if (!selectedAgentId) return
+    const nextChatId = createChatId()
+    const nextBucketKey = buildMessageBucketKey(selectedAgentId, nextChatId)
+    setChatIdByAgent((prev) => ({
+      ...prev,
+      [selectedAgentId]: nextChatId,
+    }))
+    setMessagesByBucket((prev) => ({
+      ...prev,
+      [nextBucketKey]: getInitialMessages(),
+    }))
+    router.replace(buildChatUrl(selectedAgentId, nextChatId))
+    setOpenSessionMenuId(null)
+  }, [router, selectedAgentId])
 
-    if (selectedAgent && selectedAgentIsGmail && !selectedAgent.oauthReady) {
-      setError("Google OAuth refresh token missing or expired. Please reconnect Google from the Assigned Agents page and refresh this page.")
-      return
-    }
+  const sendMessage = async (extraAttachments: ChatAttachment[] = []) => {
+    const message = input.trim()
+    const pendingAttachments = [...attachments, ...extraAttachments]
+    if (!selectedAgentId || (!message && pendingAttachments.length === 0)) return
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      text: message || "Please review the attached files.",
+      text: message,
       time: nowTime(activeDisplayTimeZone),
-      attachments: attachments.length ? cloneAttachmentsForMessage(attachments) : undefined,
+      attachments: pendingAttachments.length ? cloneAttachmentsForMessage(pendingAttachments) : undefined,
     }
 
     setError(null)
     setSending(true)
     setInput("")
+    setAttachments([])
+    setAttachmentMenuOpen(false)
 
     const resolvedChatId = String(activeChatId || createChatId()).trim()
     if (!resolvedChatId) {
@@ -1504,7 +1692,7 @@ export default function ChatPage() {
     setUserSessions((prev) => {
       const optimisticNow = new Date().toISOString()
       const existing = prev.find((session) => String(session.id) === resolvedChatId)
-      const fallbackTitle = buildOptimisticSessionTitle(message, attachments.length > 0)
+      const fallbackTitle = buildOptimisticSessionTitle(message, pendingAttachments.length > 0)
       const nextSession: UserChatSession = existing
         ? {
             ...existing,
@@ -1529,23 +1717,29 @@ export default function ChatPage() {
     }))
 
     try {
-      const composedMessage = (() => {
-        if (attachments.length === 0) return message
-        const attachmentLines = attachments.map((item) => `- ${item.file.name} (${item.kind}, ${formatFileSize(item.file.size)})`)
-        const body = message || "Please review the attached files and respond accordingly."
-        return `${body}\n\nAttachments:\n${attachmentLines.join("\n")}`
-      })()
-
       const payload = (await dispatch(
         sendTenantAgentChat({
           agentId: selectedAgentId,
-          message: composedMessage,
+          message: message,
           chatId: resolvedChatId,
           workflowType: selectedWorkflowType,
+          files: pendingAttachments.map((item) => ({
+            file: item.file,
+            kind: item.kind,
+          })),
         }) as any,
       )) as Record<string, unknown>
 
       const returnedChatId = String(payload.chatId || "").trim()
+      const spokenText = String(payload.transcript || "").trim()
+      if (spokenText) {
+        setMessagesByBucket((prev) => ({
+          ...prev,
+          [targetBucketKey]: (prev[targetBucketKey] ?? []).map((item) =>
+            item.id === userMessage.id ? { ...item, text: spokenText, attachments: undefined } : item,
+          ),
+        }))
+      }
       if (returnedChatId && returnedChatId !== resolvedChatId) {
         setChatIdByAgent((prev) => ({
           ...prev,
@@ -1601,14 +1795,6 @@ export default function ChatPage() {
         ...prev,
         [responseBucketKey]: [...(prev[responseBucketKey] ?? []), assistantMessage],
       }))
-      for (const attachment of attachments) {
-        if (attachment.previewUrl) {
-          URL.revokeObjectURL(attachment.previewUrl)
-        }
-      }
-      setAttachments([])
-      setAttachmentMenuOpen(false)
-      setIsMicActive(false)
     } catch (chatError: unknown) {
       const extracted = extractApiMessage(chatError as any)
       const rawMessage =
@@ -1616,7 +1802,7 @@ export default function ChatPage() {
           ? String((chatError as { message?: string }).message || "Failed to send message.")
           : "Failed to send message."
       const messageText = extracted || rawMessage
-      const friendlyError = normalizeOAuthErrorMessage(messageText)
+      const friendlyError = messageText
 
       setError(friendlyError)
       setMessagesByBucket((prev) => ({
@@ -1632,9 +1818,17 @@ export default function ChatPage() {
         ],
       }))
     } finally {
+      for (const attachment of pendingAttachments) {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      }
+      setIsMicActive(false)
       setSending(false)
     }
   }
+
+  sendMessageRef.current = sendMessage
 
   return (
     <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-4 lg:p-4 rounded-2xl">
@@ -1668,9 +1862,22 @@ export default function ChatPage() {
         <div className="grid gap-0 lg:items-stretch lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
           <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:sticky lg:top-4 lg:rounded-r-none lg:border-r-0">
             <CardHeader className="border-b border-slate-200 bg-white px-4 py-4">
-              <CardTitle className="flex items-center justify-start gap-2 text-base font-semibold tracking-wide text-slate-700">
-                <RiChat3Line className="h-5 w-5" />
-                <span>Recent Chats</span>
+              <CardTitle className="flex items-center justify-between gap-2 text-base font-semibold tracking-wide text-slate-700">
+                <span className="flex items-center gap-2">
+                  <RiChat3Line className="h-5 w-5" />
+                  <span>Recent Chats</span>
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 cursor-pointer gap-1 px-2 text-xs"
+                  onClick={startNewChat}
+                  disabled={!selectedAgentId}
+                >
+                  <Plus className="h-4 w-4" />
+                  New Chat
+                </Button>
                 {/* <Badge variant="secondary" className="h-6 shrink-0 px-2 text-[11px]">{userSessions.length}</Badge> */}
               </CardTitle>
               {/* <CardDescription className="mt-2">
@@ -2040,19 +2247,13 @@ export default function ChatPage() {
                   ))}
                 </div> */}
 
-                {selectedAgentIsGmail && !selectedAgent?.oauthReady ? (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    Required Google integration is not connected yet. Use the assigned agents page to complete login, then return here and refresh.
-                  </div>
-                ) : null}
-
                 <div className="rounded-[26px] border border-slate-200 p-3 bg-white shadow-sm">
                   <input
                     ref={filesInputRef}
                     type="file"
                     multiple
                     onChange={onAttachmentInputChange}
-                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.md"
+                    accept="*/*"
                     className="hidden"
                   />
 
@@ -2112,7 +2313,46 @@ export default function ChatPage() {
                     </div>
                   ) : null}
 
-                  <div className="flex h-12 items-stretch gap-2">
+                  {isMicActive ? (
+                    <div className="flex h-12 items-center gap-3 rounded-full border border-slate-200 bg-white pl-4 pr-1.5 text-slate-700">
+                      <div className="flex h-full min-w-0 flex-1 items-center justify-between overflow-hidden">
+                        {Array.from({ length: 120 }).map((_, index) => {
+                          const level = recordingLevels[recordingLevels.length - 120 + index] ?? 0
+                          return (
+                            <span
+                              key={index}
+                              className="w-0.5 shrink-0 rounded-full bg-slate-400 transition-[height] duration-75"
+                              style={{ height: `${Math.max(3, Math.round(level * 32))}px` }}
+                            />
+                          )
+                        })}
+                      </div>
+
+                      <span className="shrink-0 text-sm tabular-nums text-slate-500">
+                        {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, "0")}
+                      </span>
+
+                      <button
+                        type="button"
+                        aria-label="Cancel recording"
+                        onClick={() => stopRecording(false)}
+                        className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        aria-label="Send recording"
+                        onClick={() => stopRecording(true)}
+                        className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-slate-900 text-white transition hover:bg-slate-700"
+                      >
+                        <Check className="h-5 w-5" />
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className={`${isMicActive ? "hidden" : "flex"} h-12 items-stretch gap-2`}>
                     <div ref={attachmentMenuRef} className="relative">
                       <Button
                         type="button"
@@ -2164,7 +2404,7 @@ export default function ChatPage() {
                             : "Select an agent first..."
                         }
                         className="h-full w-full resize-none bg-transparent py-3 text-sm outline-none placeholder:text-slate-400"
-                        disabled={!selectedAgentId || sending}
+                        disabled={!selectedAgentId || sending || transcribing}
                       />
                     </div>
 
@@ -2172,7 +2412,7 @@ export default function ChatPage() {
                       type="button"
                       variant={isMicActive ? "default" : "outline"}
                       className={`h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed ${isMicActive ? "bg-rose-500 text-white hover:bg-rose-600" : ""}`}
-                      disabled={!selectedAgentId || sending}
+                      disabled={!selectedAgentId || sending || transcribing}
                       onClick={toggleMic}
                     >
                       <Mic className="h-4 w-4" />
@@ -2181,7 +2421,7 @@ export default function ChatPage() {
                     <Button
                       type="button"
                       className="h-12 w-12 cursor-pointer rounded-2xl bg-primary text-white shadow-lg shadow-primary/20 hover:bg-primary-light disabled:cursor-not-allowed"
-                      disabled={!selectedAgentId || sending || (!input.trim() && attachments.length === 0)}
+                      disabled={!selectedAgentId || sending || transcribing || (!input.trim() && attachments.length === 0)}
                       onClick={() => void sendMessage()}
                     >
                       <SendHorizonal className="h-4 w-4" />

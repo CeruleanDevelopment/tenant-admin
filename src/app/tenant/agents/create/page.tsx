@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import {
   createTenantAgent,
@@ -51,7 +50,6 @@ import {
   CheckCircle2,
   FileText,
   Shield,
-  Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -146,18 +144,6 @@ type RoleBootstrapPayload = {
   roleActions: RoleBootstrapRoleAction[];
   actions: RoleBootstrapAction[];
 };
-
-const USERS_CACHE = new Map<string, TenantUser[]>();
-const USERS_IN_FLIGHT = new Map<string, Promise<TenantUser[]>>();
-const CONNECTORS_CACHE = new Map<string, ConnectorCatalogItem[]>();
-const CONNECTORS_IN_FLIGHT = new Map<string, Promise<ConnectorCatalogItem[]>>();
-const TENANT_CONNECTORS_CACHE = new Map<string, TenantConnectorItem[]>();
-const TENANT_CONNECTORS_IN_FLIGHT = new Map<
-  string,
-  Promise<TenantConnectorItem[]>
->();
-
-const tenantCacheKey = (tenantId: string) => String(tenantId || "__default__");
 
 const extractBackendMessage = (payload: unknown): string => {
   if (!payload || typeof payload !== "object") return "";
@@ -290,7 +276,6 @@ const wizardSteps = [
 
 export default function TenantAgentCreatePage() {
   const dispatch = useDispatch<AppDispatch>();
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -352,47 +337,20 @@ export default function TenantAgentCreatePage() {
   const [success, setSuccess] = useState<string | null>(null);
   
 
-  const getConnectorById = (connectorId: string) =>
-    connectors.find((connector) => connector.id === connectorId) || null;
-
   const getConnectorByKey = (connectorKey: string) =>
     connectors.find((connector) => connector.key === connectorKey) || null;
 
   const selectedToolConnector = getConnectorByKey(serviceType);
 
-  const loadTenantConnectors = async (options?: {
-    forceRefresh?: boolean;
-    connectorId?: string;
-  }) => {
-    const key = tenantCacheKey(
-      `${tenantId}:${String(options?.connectorId || "__all__")}`,
-    );
-    const cached = TENANT_CONNECTORS_CACHE.get(key);
-    if (cached && !options?.forceRefresh) {
-      setTenantConnectors(cached);
-      return;
-    }
-
+  const loadTenantConnectors = async () => {
     setLoadingTenantConnectors(true);
-    const pending = TENANT_CONNECTORS_IN_FLIGHT.get(key);
-
     try {
-      const request =
-        pending ||
-        (dispatch(
-          fetchTenantConnectors({
-            connectorId: options?.connectorId,
-            connectedOnly: true,
-          }),
-        ) as Promise<TenantConnectorItem[]>);
-      TENANT_CONNECTORS_IN_FLIGHT.set(key, request);
-      const rows = await request;
-
-      TENANT_CONNECTORS_CACHE.set(key, rows);
+      const rows = (await dispatch(
+        fetchTenantConnectors({ connectedOnly: true }),
+      )) as TenantConnectorItem[];
       setTenantConnectors(rows);
     } finally {
       setLoadingTenantConnectors(false);
-      TENANT_CONNECTORS_IN_FLIGHT.delete(key);
     }
   };
 
@@ -484,83 +442,132 @@ export default function TenantAgentCreatePage() {
     // router.replace(nextUrl, { scroll: false });
   };
 
-  const loadUsers = async (options?: { forceRefresh?: boolean }) => {
-    const key = tenantCacheKey(tenantId);
-    const cached = USERS_CACHE.get(key);
-    if (cached && !options?.forceRefresh) {
-      setUsers(cached);
-      return;
-    }
-
+  const loadUsers = async () => {
     setLoadingUsers(true);
-    const pending = USERS_IN_FLIGHT.get(key);
-
     try {
-      const rows = pending
-        ? await pending
-        : await (() => {
-            const request = (
-              dispatch(fetchTenantUsers()) as Promise<unknown>
-            ).then((result) =>
-              Array.isArray(result) ? (result as TenantUser[]) : [],
-            );
-            USERS_IN_FLIGHT.set(key, request);
-            return request;
-          })();
-
-      USERS_CACHE.set(key, rows);
-      setUsers(rows);
+      const result = await dispatch(fetchTenantUsers());
+      setUsers(Array.isArray(result) ? (result as TenantUser[]) : []);
     } finally {
       setLoadingUsers(false);
-      USERS_IN_FLIGHT.delete(key);
     }
   };
 
-  const loadConnectors = async (options?: { forceRefresh?: boolean }) => {
-    const key = tenantCacheKey(tenantId);
-    const cached = CONNECTORS_CACHE.get(key);
-    if (cached && !options?.forceRefresh) {
-      setConnectors(cached);
-      return;
-    }
-
-    setLoadingConnectors(true);
-    const pending = CONNECTORS_IN_FLIGHT.get(key);
-
-    try {
-      const rows = pending
-        ? await pending
-        : await (() => {
-            const request = (
-              dispatch(fetchConnectorCatalog()) as Promise<unknown>
-            ).then((result) =>
-              Array.isArray(result) ? (result as ConnectorCatalogItem[]) : [],
-            );
-            CONNECTORS_IN_FLIGHT.set(key, request);
-            return request;
-          })();
-
-      CONNECTORS_CACHE.set(key, rows);
-      setConnectors(rows);
-    } finally {
-      setLoadingConnectors(false);
-      CONNECTORS_IN_FLIGHT.delete(key);
-    }
-  };
-
+  // Single page-load effect: all required data is fetched in parallel from the API.
   useEffect(() => {
-    const run = async () => {
-      await loadUsers();
-      await loadConnectors();
+    let cancelled = false;
+
+    const track = async <T,>(
+      setLoading: (value: boolean) => void,
+      request: () => Promise<T>,
+      apply: (value: T) => void,
+    ) => {
+      setLoading(true);
+      try {
+        const value = await request();
+        if (!cancelled) apply(value);
+      } catch (error: unknown) {
+        console.error("Failed to load page data:", extractErrorMessage(error));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
 
-    void run();
-  }, [dispatch, tenantId]);
+    const loadAgent = async () => {
+      const agent = (await dispatch(
+        fetchTenantAgent(editingAgentId),
+      )) as Record<string, unknown> | null;
+      if (cancelled) return;
 
+      setName(String(agent?.name || ""));
+      setSystemPrompt(String(agent?.systemPrompt || ""));
+      setIsActive(Number(agent?.isActive ?? 1) !== 0);
+      setSavedConnectorId(String(agent?.connectorId || "").trim());
+      setSelectedTenantConnectorId(String(agent?.tenantConnectorId || "").trim());
+      const savedAssignment = (agent?.config as { assignment?: { aiProvider?: string; aiModel?: string } } | undefined)?.assignment;
+      setAiProvider(savedAssignment?.aiProvider === "openrouter" ? "openrouter" : "");
+      setAiModel(String(savedAssignment?.aiModel || ""));
+    };
+
+    void track(
+      setLoadingUsers,
+      () => dispatch(fetchTenantUsers()) as Promise<unknown>,
+      (result) => setUsers(Array.isArray(result) ? (result as TenantUser[]) : []),
+    );
+    void track(
+      setLoadingConnectors,
+      () => dispatch(fetchConnectorCatalog()) as Promise<unknown>,
+      (result) =>
+        setConnectors(Array.isArray(result) ? (result as ConnectorCatalogItem[]) : []),
+    );
+    void track(
+      setLoadingTenantConnectors,
+      () =>
+        dispatch(fetchTenantConnectors({ connectedOnly: true })) as Promise<unknown>,
+      (rows) =>
+        setTenantConnectors(Array.isArray(rows) ? (rows as TenantConnectorItem[]) : []),
+    );
+    if (isEditMode) {
+      void track(setLoadingEditData, loadAgent, () => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, editingAgentId, isEditMode, tenantId]);
+
+  // Roles are matched in the query on tenant, agent and connector (tool) so only relevant roles load.
+  const selectedConnectorId = selectedToolConnector?.id || "";
   useEffect(() => {
-    const connectorId = selectedToolConnector?.id || "";
-    void loadTenantConnectors({ connectorId, forceRefresh: true });
-  }, [selectedToolConnector?.id, tenantId]);
+    if (!isEditMode || !editingAgentId || !tenantId || !selectedConnectorId) {
+      setRoleBootstrapRoles([]);
+      setRoleBootstrapMembers([]);
+      setRoleBootstrapActions([]);
+      return;
+    }
+    let cancelled = false;
+
+    const loadRoles = async () => {
+      const payload = await dispatch(
+        fetchTenantRoleBootstrap({
+          agentId: editingAgentId || undefined,
+          connectorId: selectedConnectorId,
+        }),
+      );
+      if (cancelled) return;
+
+      const isActiveRow = (row: { is_active?: number | boolean | null }) => Number(row.is_active ?? 1) !== 0;
+      const roleIds = new Set(payload.roles.map((role) => String(role.id)));
+
+      setRoleBootstrapRoles(payload.roles as unknown as RoleBootstrapRole[]);
+      setRoleBootstrapMembers(
+        (payload.roleMembers as unknown as RoleBootstrapMember[]).filter(
+          (item) => roleIds.has(String(item.role_id)) && isActiveRow(item),
+        ),
+      );
+      setRoleBootstrapActions(
+        (payload.roleActions as unknown as RoleBootstrapRoleAction[]).filter(
+          (item) => roleIds.has(String(item.role_id)) && isActiveRow(item),
+        ),
+      );
+
+      const direct: Record<string, Record<string, string[]>> = {};
+      for (const row of payload.assignments || []) {
+        if (row.role_id || Number(row.is_active ?? 1) === 0) continue;
+        const userId = String(row.user_id || "");
+        const connectorId = String(row.connector_id || "");
+        const actionId = String(row.action_id || "");
+        if (!userId || !connectorId || !actionId) continue;
+        const byConnector = (direct[userId] ||= {});
+        (byConnector[connectorId] ||= []).push(actionId);
+      }
+      setUserDirectActions(direct);
+    };
+
+    void loadRoles().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, editingAgentId, isEditMode, selectedConnectorId, tenantId]);
 
   useEffect(() => {
     if (!selectedTenantConnectorId) {
@@ -840,84 +847,7 @@ export default function TenantAgentCreatePage() {
     selectRole(roleRecord);
   };
 
-  useEffect(() => {
-    if (!isEditMode || !editingAgentId) return;
-
-    const loadEditData = async () => {
-      setLoadingEditData(true);
-      try {
-        const agent = (await dispatch(
-          fetchTenantAgent(editingAgentId),
-        )) as Record<string, unknown> | null;
-
-        setName(String(agent?.name || ""));
-        setSystemPrompt(String(agent?.systemPrompt || ""));
-        setIsActive(Number(agent?.isActive ?? 1) !== 0);
-
-        setSavedConnectorId(String(agent?.connectorId || "").trim());
-        setSelectedTenantConnectorId(String(agent?.tenantConnectorId || "").trim());
-        const savedAssignment = (agent?.config as { assignment?: { aiProvider?: string; aiModel?: string } } | undefined)?.assignment;
-        setAiProvider(savedAssignment?.aiProvider === "openrouter" ? "openrouter" : "");
-        setAiModel(String(savedAssignment?.aiModel || ""));
-      } catch {
-        console.error("Failed to load agent details for editing.");
-      } finally {
-        setLoadingEditData(false);
-      }
-    };
-
-    void loadEditData();
-  }, [dispatch, editingAgentId, isEditMode]);
-
   const activeUsers = users.filter((user) => Boolean(user.isActive ?? true));
-
-  // Load inserted roles (unassigned ones plus this agent's) so their ids are available on save.
-  useEffect(() => {
-    if (!tenantId) return;
-    let cancelled = false;
-
-    const loadSavedAccess = async () => {
-      const payload = (await dispatch(fetchTenantRoleBootstrap())) as unknown as {
-        roles: RoleBootstrapRole[];
-        roleMembers: RoleBootstrapMember[];
-        roleActions: RoleBootstrapRoleAction[];
-        assignments?: Array<Record<string, unknown>>;
-      };
-      if (cancelled) return;
-
-      const agentRoles = payload.roles.filter((role) => {
-        const roleAgentId = String(role.agent_id || "").trim();
-        return !roleAgentId || (Boolean(editingAgentId) && roleAgentId === editingAgentId);
-      });
-      const roleIds = new Set(agentRoles.map((role) => String(role.id)));
-      const isActiveRow = (row: { is_active?: number | boolean | null }) => Number(row.is_active ?? 1) !== 0;
-
-      setRoleBootstrapRoles(agentRoles);
-      setRoleBootstrapMembers(
-        payload.roleMembers.filter((item) => roleIds.has(String(item.role_id)) && isActiveRow(item)),
-      );
-      setRoleBootstrapActions(
-        payload.roleActions.filter((item) => roleIds.has(String(item.role_id)) && isActiveRow(item)),
-      );
-
-      const direct: Record<string, Record<string, string[]>> = {};
-      for (const row of isEditMode ? payload.assignments || [] : []) {
-        if (row.role_id || Number(row.is_active ?? 1) === 0) continue;
-        const userId = String(row.user_id || "");
-        const connectorId = String(row.connector_id || "");
-        const actionId = String(row.action_id || "");
-        if (!userId || !connectorId || !actionId) continue;
-        const byConnector = (direct[userId] ||= {});
-        (byConnector[connectorId] ||= []).push(actionId);
-      }
-      setUserDirectActions(direct);
-    };
-
-    void loadSavedAccess().catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatch, editingAgentId, isEditMode, tenantId]);
 
   const filteredUsers = (() => {
     const q = userSearch.trim().toLowerCase();
@@ -940,10 +870,7 @@ export default function TenantAgentCreatePage() {
       setSelectedTenantConnectorId(payload.tenantConnectorId);
     }
 
-    await loadTenantConnectors({
-      forceRefresh: true,
-      connectorId: payload.connectorId,
-    });
+    await loadTenantConnectors();
   };
 
   const handleRoleSaved = (payload: {
@@ -1037,6 +964,31 @@ export default function TenantAgentCreatePage() {
         `AI model: ${modelText}`,
       ].join("\n")
     );
+  };
+
+  const resetForm = () => {
+    setWorkingAgentId("");
+    setSavedConnectorId("");
+    setCurrentStep(1);
+    setName("");
+    setSystemPrompt("");
+    setAiProvider("");
+    setAiModel("");
+    setIsActive(true);
+    setServiceType("");
+    setSelectedTenantConnectorId("");
+    setStep1FieldErrors({});
+    setUserSearch("");
+    setRoleViewMode("roles");
+    setSelectedUserId("");
+    setSelectedRoleId("");
+    setSelectedRoleUserIds([]);
+    setSelectedRoleActionIds([]);
+    setRoleBootstrapRoles([]);
+    setRoleBootstrapMembers([]);
+    setRoleBootstrapActions([]);
+    setUserDirectActions({});
+    setRoleActionCatalog([]);
   };
 
   const createAgent = async () => {
@@ -1221,6 +1173,7 @@ export default function TenantAgentCreatePage() {
       setSuccess(
         coreMessage || backendMessage || fallbackMessage,
       );
+      resetForm();
     } catch (err: unknown) {
       setSaveError(extractErrorMessage(err));
     } finally {
@@ -1837,7 +1790,7 @@ export default function TenantAgentCreatePage() {
                     )}
                   </div>
 
-                  <div className="min-w-0 p-4 sm:p-6">
+                  <div className="flex min-w-0 flex-col p-4 sm:p-6">
                     {roleViewMode === "roles" ? (
                       visibleRoleBootstrapRoles.length === 0 ? (
                         <div className="min-h-105 rounded-2xl bg-background" />
@@ -1887,11 +1840,11 @@ export default function TenantAgentCreatePage() {
                                       <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge>
                                     </div>
 
-                                    {/* {userSearch.trim().length < 3 ? (
+                                    {userSearch.trim().length === 0 ? (
                                       <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
-                                        Type at least 3 characters to search users.
+                                        Search for a user to add them to this role.
                                       </div>
-                                    ) : ( */}
+                                    ) : (
                                       <div className="space-y-2">
                                         {loadingUsers ? <span className="text-sm text-muted-foreground">Loading users...</span> : null}
                                         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -1910,7 +1863,7 @@ export default function TenantAgentCreatePage() {
                                           })}
                                         </div>
                                       </div>
-                                    {/* )} */}
+                                    )}
 
                                     <div className="space-y-2">
                                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Selected users</p>
@@ -2010,19 +1963,6 @@ export default function TenantAgentCreatePage() {
                           <table className="min-w-full divide-y divide-border text-sm">
                             <tbody className="divide-y divide-border bg-background">
                               <tr>
-                                <th className="w-40 bg-muted/30 px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">User</th>
-                                {/* <td className="px-4 py-4">
-                                  {selectedUserId ? (
-                                    <div>
-                                      <p className="font-medium text-foreground">{selectedUserLabel}</p>
-                                      <p className="text-xs text-muted-foreground">{selectedUserEmail}</p>
-                                    </div>
-                                  ) : (
-                                    <span className="text-muted-foreground">Choose a user from the left list.</span>
-                                  )}
-                                </td> */}
-                              </tr>
-                              <tr>
                                 <th className="bg-muted/30 px-4 py-4 align-top text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</th>
                                 <td className="px-4 py-4">
                                   {loadingUserActions ? (
@@ -2069,7 +2009,7 @@ export default function TenantAgentCreatePage() {
                         </div>
                       </div>
                     )}
-                    <div className="space-y-1 mt-4 flex gap-4">
+                    <div className="mt-auto flex gap-4 pt-4">
                       <Label className="text-sm font-medium text-muted-foreground">
                         Active
                       </Label>
@@ -2178,7 +2118,7 @@ export default function TenantAgentCreatePage() {
         open={addUserModalOpen}
         onOpenChange={setAddUserModalOpen}
         onUserSaved={async () => {
-          await loadUsers({ forceRefresh: true });
+          await loadUsers();
         }}
       />
     </main>

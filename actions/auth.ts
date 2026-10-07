@@ -274,6 +274,7 @@ type TenantAgentChatResponse = {
   runId?: string;
   runStatus?: string;
   approvalId?: string;
+  transcript?: string;
 };
 
 type TenantAgentChatHistoryMessage = {
@@ -281,6 +282,43 @@ type TenantAgentChatHistoryMessage = {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  attachment_urls?: string[];
+  metadata_json?: Record<string, unknown> | null;
+};
+
+type TenantAgentChatFileInput = {
+  file: File;
+  kind?: "image" | "media" | "document";
+};
+
+const normalizeTenantChatResponse = (
+  rawInput: Record<string, unknown>,
+): TenantAgentChatResponse => {
+  const raw = (rawInput || {}) as Record<string, unknown>;
+  const reply =
+    raw.reply && typeof raw.reply === "object"
+      ? (raw.reply as Record<string, unknown>)
+      : null;
+  const markdownSummary = String(
+    raw.markdown_summary || reply?.markdown_summary || "",
+  ).trim();
+  const answer = String(
+    markdownSummary ||
+      raw.response ||
+      reply?.answer ||
+      reply?.reply ||
+      raw.answer ||
+      "",
+  ).trim();
+
+  return {
+    ...raw,
+    chatId: String(raw.chatId || "").trim() || undefined,
+    reply: typeof raw.reply === "string" ? raw.reply : answer,
+    answer,
+    markdown_summary: markdownSummary || undefined,
+    response: String(raw.response || answer || "").trim(),
+  } as TenantAgentChatResponse;
 };
 
 const unwrapEnvelope = <T>(input: unknown): T => {
@@ -819,6 +857,29 @@ export const startUserGmailIntegration = (
   };
 };
 
+export const transcribeTenantAgentAudio = (input: {
+  agentId: string;
+  audio: File;
+}): ThunkAction<Promise<string>, RootState, unknown, AnyAction> => {
+  return async (): Promise<string> => {
+    const headers: Record<string, string> = {};
+    const userToken = String(loadUserAuthTokenCookie() || "").trim();
+    if (userToken) {
+      headers.user = userToken;
+      headers.Authorization = `Bearer ${userToken}`;
+    }
+
+    const formData = new FormData();
+    formData.append("audio", input.audio, input.audio.name);
+    const response = await axios.post(
+      `/ai/agents/${encodeURIComponent(String(input.agentId || "").trim())}/transcribe`,
+      formData,
+      { headers, timeout: 120000 },
+    );
+    return String(response?.data?.text || "").trim();
+  };
+};
+
 export const sendTenantAgentChat = (input: {
   agentId: string;
   message: string;
@@ -826,6 +887,7 @@ export const sendTenantAgentChat = (input: {
   topK?: number;
   collections?: string[];
   workflowType?: string;
+  files?: TenantAgentChatFileInput[];
 }): ThunkAction<
   Promise<TenantAgentChatResponse>,
   RootState,
@@ -838,16 +900,12 @@ export const sendTenantAgentChat = (input: {
       throw new Error("Agent id is required.");
     }
 
-    const payload: Record<string, unknown> = {
-      message: String(input.message || "").trim(),
-    };
-
-    if (input.chatId) payload.chatId = String(input.chatId);
-
-    if (typeof input.topK === "number") payload.topK = input.topK;
-    if (Array.isArray(input.collections))
-      payload.collections = input.collections;
-    if (input.workflowType) payload.workflowType = input.workflowType;
+    const normalizedMessage = String(input.message || "").trim();
+    const files = Array.isArray(input.files)
+      ? input.files.filter(
+          (item) => item && item.file instanceof File && item.file.size >= 0,
+        )
+      : [];
 
     const headers: Record<string, string> = {};
     const userToken = String(loadUserAuthTokenCookie() || "").trim();
@@ -857,39 +915,64 @@ export const sendTenantAgentChat = (input: {
     }
 
     try {
-      const response = await axios.post(
-        `/ai/agents/${encodeURIComponent(agentId)}/chat`,
-        payload,
-        {
-          headers,
-          timeout: 120000,
-        },
-      );
-      const raw = (response?.data || {}) as Record<string, unknown>;
-      const reply =
-        raw.reply && typeof raw.reply === "object"
-          ? (raw.reply as Record<string, unknown>)
-          : null;
-      const markdownSummary = String(
-        raw.markdown_summary || reply?.markdown_summary || "",
-      ).trim();
-      const answer = String(
-        markdownSummary ||
-          raw.response ||
-          reply?.answer ||
-          reply?.reply ||
-          raw.answer ||
-          "",
-      ).trim();
+      const response = await (() => {
+        if (!files.length) {
+          const payload: Record<string, unknown> = {
+            message: normalizedMessage,
+          };
+          if (input.chatId) payload.chatId = String(input.chatId);
+          if (typeof input.topK === "number") payload.topK = input.topK;
+          if (Array.isArray(input.collections)) payload.collections = input.collections;
+          if (input.workflowType) payload.workflowType = input.workflowType;
 
-      return {
-        ...raw,
-        chatId: String(raw.chatId || "").trim() || undefined,
-        reply: typeof raw.reply === "string" ? raw.reply : answer,
-        answer,
-        markdown_summary: markdownSummary || undefined,
-        response: String(raw.response || answer || "").trim(),
-      } as TenantAgentChatResponse;
+          return axios.post(
+            `/ai/agents/${encodeURIComponent(agentId)}/chat`,
+            payload,
+            {
+              headers,
+              timeout: 120000,
+            },
+          );
+        }
+
+        const formData = new FormData();
+        formData.append("message", normalizedMessage);
+        if (input.chatId) formData.append("chatId", String(input.chatId));
+        if (typeof input.topK === "number") {
+          formData.append("topK", String(input.topK));
+        }
+        if (Array.isArray(input.collections)) {
+          formData.append("collections", JSON.stringify(input.collections));
+        }
+        if (input.workflowType) {
+          formData.append("workflowType", input.workflowType);
+        }
+
+        const attachmentHints = files.map((item) => ({
+          name: item.file.name,
+          type: item.file.type,
+          size: item.file.size,
+          kind: item.kind || "document",
+        }));
+        formData.append("attachmentHints", JSON.stringify(attachmentHints));
+
+        files.forEach((item) => {
+          formData.append("files", item.file, item.file.name);
+        });
+
+        return axios.post(
+          `/ai/agents/${encodeURIComponent(agentId)}/chat`,
+          formData,
+          {
+            headers,
+            timeout: 180000,
+          },
+        );
+      })();
+
+      return normalizeTenantChatResponse(
+        (response?.data || {}) as Record<string, unknown>,
+      );
     } catch (error: unknown) {
       const normalizeOAuthError = (value: string): string => {
         const text = String(value || "").trim();
@@ -962,6 +1045,32 @@ export const sendTenantAgentChat = (input: {
   };
 };
 
+export const sendTenantAgentChatWithFiles = (input: {
+  agentId: string;
+  message: string;
+  chatId?: string;
+  topK?: number;
+  collections?: string[];
+  workflowType?: string;
+  files: TenantAgentChatFileInput[];
+}): ThunkAction<
+  Promise<TenantAgentChatResponse>,
+  RootState,
+  unknown,
+  AnyAction
+> => {
+  // Backward compatibility wrapper while call sites migrate to sendTenantAgentChat.
+  return sendTenantAgentChat({
+    agentId: input.agentId,
+    message: input.message,
+    chatId: input.chatId,
+    topK: input.topK,
+    collections: input.collections,
+    workflowType: input.workflowType,
+    files: input.files,
+  });
+};
+
 export const fetchTenantAgentChatHistory = (input: {
   agentId: string;
   chatId: string;
@@ -1009,6 +1118,17 @@ export const fetchTenantAgentChatHistory = (input: {
             : "assistant") as "user" | "assistant",
           content: String((row as Record<string, unknown>).content || ""),
           created_at: String((row as Record<string, unknown>).created_at || ""),
+          attachment_urls: Array.isArray((row as Record<string, unknown>).attachment_urls)
+            ? ((row as Record<string, unknown>).attachment_urls as unknown[]).map(String)
+            : [],
+          metadata_json:
+            (row as Record<string, unknown>).metadata_json &&
+            typeof (row as Record<string, unknown>).metadata_json === "object"
+              ? ((row as Record<string, unknown>).metadata_json as Record<
+                  string,
+                  unknown
+                >)
+              : null,
         }))
         .filter((row) => Boolean(row.id || row.content)),
     };
@@ -1549,7 +1669,11 @@ export const updateTenantRoleUserActions =
   };
 
 export const fetchTenantRoleBootstrap =
-  (): ThunkAction<Promise<TenantRoleBootstrapPayload>, RootState, unknown, AnyAction> =>
+  (filters?: {
+    agentId?: string;
+    connectorId?: string;
+    toolId?: string;
+  }): ThunkAction<Promise<TenantRoleBootstrapPayload>, RootState, unknown, AnyAction> =>
   async () => {
     const token = loadAuthTokenCookie();
     if (!token) {
@@ -1562,6 +1686,11 @@ export const fetchTenantRoleBootstrap =
     try {
       const response = await axios.get("/tenant/role-management/bootstrap", {
         headers,
+        params: {
+          agentId: filters?.agentId || undefined,
+          connectorId: filters?.connectorId || undefined,
+          toolId: filters?.toolId || undefined,
+        },
       });
       const payload = (response?.data || {}) as TenantRoleBootstrapPayload;
 

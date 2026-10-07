@@ -40,7 +40,7 @@ export default function UserDashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl">
+          {/* <Card className="rounded-2xl">
             <CardHeader>
               <CardTitle className="text-lg">Quick Chat</CardTitle>
               <CardDescription>Pick an agent and start a new conversation instantly.</CardDescription>
@@ -53,7 +53,7 @@ export default function UserDashboardPage() {
                 </Link>
               </Button>
             </CardContent>
-          </Card>
+          </Card> */}
         </section>
       </div>
     </main>

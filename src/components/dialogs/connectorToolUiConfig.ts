@@ -14,7 +14,7 @@ const TOOL_UI_CONFIG: Record<string, ConnectorToolUiConfig> = {
     authType: {
       oauth2: {
         label: "Microsoft Entra OAuth (Recommended)",
-        hint: "Register an app in Microsoft Entra ID, create a client secret, then add the app as a user in your Azure DevOps organization (Organization settings > Users) before testing.",
+        hint: "",
       },
     },
   },
