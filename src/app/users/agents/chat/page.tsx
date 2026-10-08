@@ -1192,7 +1192,14 @@ export default function ChatPage() {
   }
 
   const onAttachmentInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || [])
+    const selected = Array.from(event.target.files || [])
+    event.target.value = ""
+    if (!selected.length) return
+
+    const files = selected.filter((file) => /\.(csv|xlsx)$/i.test(file.name))
+    if (files.length !== selected.length) {
+      setError("Only CSV or XLSX files are supported for attachments right now.")
+    }
     if (!files.length) return
 
     setAttachments((prev) => {
@@ -2253,7 +2260,7 @@ export default function ChatPage() {
                     type="file"
                     multiple
                     onChange={onAttachmentInputChange}
-                    accept="*/*"
+                    accept=".csv,.xlsx"
                     className="hidden"
                   />
 
@@ -2263,7 +2270,7 @@ export default function ChatPage() {
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Attached files</p>
                         <button
                           type="button"
-                          className="text-xs font-medium text-slate-500 transition hover:text-slate-700"
+                          className="text-xs font-medium text-slate-500 transition hover:text-slate-700 cursor-pointer"
                           onClick={() => {
                             for (const attachment of attachments) {
                               if (attachment.previewUrl) {
@@ -2302,7 +2309,7 @@ export default function ChatPage() {
                             <button
                               type="button"
                               onClick={() => removeAttachment(attachment.id)}
-                              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/70 text-white opacity-90 transition hover:bg-slate-900"
+                              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-slate-900/70 text-white opacity-90 transition hover:bg-slate-900 cursor-pointer"
                               aria-label={`Remove ${attachment.file.name}`}
                             >
                               <X className="h-3.5 w-3.5" />
@@ -2369,7 +2376,8 @@ export default function ChatPage() {
                           <div>
                             {[
                               {
-                                label: "Add photos and files",
+                                // label: "Add photos and files",
+                                 label: "Add Attachments",
                                 icon: FileText,
                                 onClick: () => openAttachmentSource(),
                               },

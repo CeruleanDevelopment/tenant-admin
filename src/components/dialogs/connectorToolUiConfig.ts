@@ -10,6 +10,14 @@ type ConnectorToolUiConfig = {
 };
 
 const TOOL_UI_CONFIG: Record<string, ConnectorToolUiConfig> = {
+  hubspot: {
+    authType: {
+      oauth2: {
+        label: "Private App Token (Recommended)",
+        hint: "Create a Private App in HubSpot (Settings > Integrations > Private Apps), select the CRM scopes, then paste its access token.",
+      },
+    },
+  },
   "azure-devops": {
     authType: {
       oauth2: {
