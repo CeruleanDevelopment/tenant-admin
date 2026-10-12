@@ -1,15 +1,15 @@
-const DEFAULT_LOCAL_API_URL = "http://localhost:4054"
-const DEFAULT_LOCAL_WEBSITE_URL = "http://localhost:3001"
-
 const readPublicValue = (value?: string): string => value?.trim() || ""
 
-const configuredApiUrl = readPublicValue(process.env.NEXT_PUBLIC_API_URL)
-const configuredWebsiteUrl = readPublicValue(process.env.NEXT_PUBLIC_WEBSITE_URL)
-const configuredDeploymentEnv = readPublicValue(process.env.NEXT_PUBLIC_DEPLOYMENT_ENV)
+// const server = readPublicValue(process.env.NEXT_PUBLIC_DEPLOYMENT_ENV).toUpperCase() || "LOCAL"
+const server: string = "LOCAL"
 
-const API_URL = configuredApiUrl || DEFAULT_LOCAL_API_URL
-const WEBSITE_URL = configuredWebsiteUrl || DEFAULT_LOCAL_WEBSITE_URL
-const server = configuredDeploymentEnv || "LOCAL"
+let API_URL = "http://localhost:4054"
+let WEBSITE_URL = "http://localhost:3001"
+
+if (server === "PRODUCTION") {
+  API_URL = "https://api.ceruleanai.cloud"
+  WEBSITE_URL = "https://ceruleanai.cloud"
+}
 
 export const GOOGLE_APP_ID = readPublicValue(process.env.NEXT_PUBLIC_GOOGLE_APP_ID)
 export const GOOGLE_APP_SECRET = readPublicValue(process.env.NEXT_PUBLIC_GOOGLE_APP_SECRET)
