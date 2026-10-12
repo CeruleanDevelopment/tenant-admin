@@ -10,6 +10,7 @@ type TenantOtpInputProps = {
   length?: number
   disabled?: boolean
   autoFocus?: boolean
+  inputClassName?: string
 }
 
 export function TenantOtpInput({
@@ -18,6 +19,7 @@ export function TenantOtpInput({
   length = 6,
   disabled = false,
   autoFocus = true,
+  inputClassName,
 }: TenantOtpInputProps) {
   const inputRefs = useRef<Array<HTMLInputElement | null>>([])
   const normalized = value.replace(/[^0-9]/g, "").slice(0, length)
@@ -121,6 +123,7 @@ export function TenantOtpInput({
           className={cn(
             "h-12 w-10 rounded-md border border-input bg-background text-center text-base font-semibold text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25 disabled:cursor-not-allowed disabled:opacity-60 sm:h-14 sm:w-12 sm:text-lg",
             digit ? "border-primary/60 bg-primary/5" : "",
+            inputClassName,
           )}
         />
       ))}

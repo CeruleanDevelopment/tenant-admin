@@ -217,11 +217,9 @@ export default function ProductList() {
   const PAGE_SIZE = 5
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE))
 
-  useEffect(() => {
-    setPage((p) => Math.min(p, totalPages))
-  }, [totalPages])
+  const currentPage = Math.min(page, totalPages)
 
-  const paginatedProducts = filteredOrders.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const paginatedProducts = filteredOrders.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   // ☑️ All selected logic
   const allSelected =
@@ -489,7 +487,7 @@ export default function ProductList() {
                 Prev
               </Button>
 
-              <span className="text-sm">Page {page} of {totalPages}</span>
+              <span className="text-sm">Page {currentPage} of {totalPages}</span>
 
               <Button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}

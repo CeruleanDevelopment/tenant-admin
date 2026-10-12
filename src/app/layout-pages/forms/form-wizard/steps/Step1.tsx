@@ -1,6 +1,7 @@
 // app/components/steps/Step1.tsx
 "use client"
 
+import type React from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -10,8 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import type { WizardForm } from "../WizardContext"
 
-export default function Step1({ form, setForm }: any) {
+export default function Step1({ form, setForm }: { form: WizardForm; setForm: React.Dispatch<React.SetStateAction<WizardForm>> }) {
   return (
     <div className="space-y-6 bg-background rounded-2xl shadow border p-8">
 
@@ -33,9 +35,9 @@ export default function Step1({ form, setForm }: any) {
           <Label>First Name</Label>
           <Input
             placeholder="First Name"
-            value={form.firstName}
-            onChange={(e) =>
-              setForm({ ...form, firstName: e.target.value })
+            value={form.firstName || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, firstName: e.target.value }))
             }
           />
         </div>
@@ -45,9 +47,9 @@ export default function Step1({ form, setForm }: any) {
           <Label>Last Name</Label>
           <Input
             placeholder="Last Name"
-            value={form.lastName}
-            onChange={(e) =>
-              setForm({ ...form, lastName: e.target.value })
+            value={form.lastName || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, lastName: e.target.value }))
             }
           />
         </div>
@@ -57,9 +59,9 @@ export default function Step1({ form, setForm }: any) {
           <Label>Phone Number</Label>
           <Input
             placeholder="Phone Number"
-            value={form.phone}
-            onChange={(e) =>
-              setForm({ ...form, phone: e.target.value })
+            value={form.phone || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, phone: e.target.value }))
             }
           />
         </div>
@@ -70,9 +72,9 @@ export default function Step1({ form, setForm }: any) {
           <Input
             type="email"
             placeholder="Enter Email Address"
-            value={form.email}
-            onChange={(e) =>
-              setForm({ ...form, email: e.target.value })
+            value={form.email || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, email: e.target.value }))
             }
           />
         </div>
@@ -82,8 +84,8 @@ export default function Step1({ form, setForm }: any) {
           <Label>Country</Label>
           <Select
             value={form.country}
-            onValueChange={(value) =>
-              setForm({ ...form, country: value })
+            onValueChange={(value: string) =>
+              setForm((prev) => ({ ...prev, country: value }))
             }
           >
             <SelectTrigger className="w-full">
@@ -102,8 +104,8 @@ export default function Step1({ form, setForm }: any) {
           <Label>Language</Label>
           <Select
             value={form.language}
-            onValueChange={(value) =>
-              setForm({ ...form, language: value })
+            onValueChange={(value: string) =>
+              setForm((prev) => ({ ...prev, language: value }))
             }
           >
             <SelectTrigger className="w-full">

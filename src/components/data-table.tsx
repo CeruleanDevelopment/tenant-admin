@@ -210,7 +210,7 @@ export function DataTable<TData, TValue>({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="flex flex-wrap gap-2 ml-auto">
+        {/* <div className="flex flex-wrap gap-2 ml-auto">
 
           <Button
             variant="outline"
@@ -245,7 +245,7 @@ export function DataTable<TData, TValue>({
             Print
           </Button>
 
-        </div>
+        </div> */}
 
       </div>
 

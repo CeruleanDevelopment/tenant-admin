@@ -1,10 +1,12 @@
 // app/components/steps/Step3.tsx
 "use client"
 
+import type React from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import type { WizardForm } from "../WizardContext"
 
-export default function Step3({ form, setForm }: any) {
+export default function Step3({ form, setForm }: { form: WizardForm; setForm: React.Dispatch<React.SetStateAction<WizardForm>> }) {
   return (
     <div className="space-y-6 bg-background rounded-2xl shadow border p-8">
 
@@ -26,9 +28,9 @@ export default function Step3({ form, setForm }: any) {
           <Label>Card Number</Label>
           <Input
             placeholder="1234 5678 9012 3456"
-            value={form.cardNumber}
-            onChange={(e) =>
-              setForm({ ...form, cardNumber: e.target.value })
+            value={form.cardNumber || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, cardNumber: e.target.value }))
             }
           />
         </div>
@@ -38,9 +40,9 @@ export default function Step3({ form, setForm }: any) {
           <Label>Card Holder Name</Label>
           <Input
             placeholder="John Doe"
-            value={form.cardHolder}
-            onChange={(e) =>
-              setForm({ ...form, cardHolder: e.target.value })
+            value={form.cardHolder || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, cardHolder: e.target.value }))
             }
           />
         </div>
@@ -50,9 +52,9 @@ export default function Step3({ form, setForm }: any) {
           <Label>Expiry Date</Label>
           <Input
             placeholder="MM/YY"
-            value={form.expiry}
-            onChange={(e) =>
-              setForm({ ...form, expiry: e.target.value })
+            value={form.expiry || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, expiry: e.target.value }))
             }
           />
         </div>
@@ -63,9 +65,9 @@ export default function Step3({ form, setForm }: any) {
           <Input
             type="password"
             placeholder="123"
-            value={form.cvv}
-            onChange={(e) =>
-              setForm({ ...form, cvv: e.target.value })
+            value={form.cvv || ""}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setForm((prev) => ({ ...prev, cvv: e.target.value }))
             }
           />
         </div>

@@ -1,4 +1,5 @@
 declare module "axios" {
-  const axios: any
+  import { AxiosInstance } from "axios"
+  const axios: AxiosInstance
   export default axios
 }

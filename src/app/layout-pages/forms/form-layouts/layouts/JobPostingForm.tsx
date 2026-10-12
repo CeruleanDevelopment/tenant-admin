@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -29,13 +30,17 @@ const initialState = {
   confirm: false,
 }
 
-export default function JobPostingForm() {
-  const [form, setForm] = useState(initialState)
-  const [errors, setErrors] = useState<any>({})
-  const [touched, setTouched] = useState<any>({})
+type JobPostingFormState = typeof initialState
+type FormErrors = Partial<Record<keyof JobPostingFormState, string>>
+type Touched = Partial<Record<keyof JobPostingFormState, boolean>>
 
-  const validate = () => {
-    const newErrors: any = {}
+export default function JobPostingForm() {
+  const [form, setForm] = useState<JobPostingFormState>(initialState)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [touched, setTouched] = useState<Touched>({})
+
+  const validate = (): FormErrors => {
+    const newErrors: FormErrors = {}
 
     if (!form.jobTitle) newErrors.jobTitle = "Job title is required"
     if (!form.companyName) newErrors.companyName = "Company name is required"
@@ -66,16 +71,16 @@ export default function JobPostingForm() {
     return newErrors
   }
 
-  const handleChange = (name: string, value: any) => {
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const handleChange = <K extends keyof JobPostingFormState>(name: K, value: JobPostingFormState[K]) => {
+    setForm((prev) => ({ ...prev, [name]: value } as JobPostingFormState))
   }
 
-  const handleBlur = (name: string) => {
-    setTouched((prev: any) => ({ ...prev, [name]: true }))
+  const handleBlur = (name: keyof JobPostingFormState) => {
+    setTouched((prev) => ({ ...prev, [name]: true }))
     setErrors(validate())
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const validationErrors = validate()
     setErrors(validationErrors)
@@ -87,7 +92,7 @@ export default function JobPostingForm() {
     }
   }
 
-  const inputStyle = (name: string) =>
+  const inputStyle = (name: keyof JobPostingFormState) =>
     touched[name] && errors[name]
       ? "border-red-500 focus-visible:ring-red-500"
       : ""
@@ -125,7 +130,7 @@ export default function JobPostingForm() {
 
             {/* Company + Location */}
             <div className="grid md:grid-cols-2 gap-6">
-              {["companyName", "location"].map((field) => (
+              {( ["companyName", "location"] as (keyof JobPostingFormState)[] ).map((field) => (
                 <div key={field} className="space-y-2">
                   <Label className="capitalize">
                     {field === "companyName"
@@ -133,11 +138,9 @@ export default function JobPostingForm() {
                       : "Location"}
                   </Label>
                   <Input
-                    placeholder={`Enter ${field}`}
-                    value={(form as any)[field]}
-                    onChange={(e) =>
-                      handleChange(field, e.target.value)
-                    }
+                    placeholder={`Enter ${String(field)}`}
+                    value={String(form[field] || "")}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange(field, e.target.value as JobPostingFormState[typeof field])}
                     onBlur={() => handleBlur(field)}
                     className={inputStyle(field)}
                   />
@@ -220,7 +223,7 @@ export default function JobPostingForm() {
 
             {/* Salary */}
             <div className="grid md:grid-cols-2 gap-6">
-              {["salaryMin", "salaryMax"].map((field) => (
+              {( ["salaryMin", "salaryMax"] as (keyof JobPostingFormState)[] ).map((field) => (
                 <div key={field} className="space-y-2">
                   <Label>
                     {field === "salaryMin"
@@ -230,10 +233,8 @@ export default function JobPostingForm() {
                   <Input
                     type="number"
                     placeholder="Enter amount"
-                    value={(form as any)[field]}
-                    onChange={(e) =>
-                      handleChange(field, e.target.value)
-                    }
+                    value={String(form[field] || "")}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange(field, e.target.value as JobPostingFormState[typeof field])}
                     onBlur={() => handleBlur(field)}
                     className={inputStyle(field)}
                   />
@@ -253,9 +254,7 @@ export default function JobPostingForm() {
                 rows={4}
                 placeholder="Enter detailed job description"
                 value={form.description}
-                onChange={(e) =>
-                  handleChange("description", e.target.value)
-                }
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => handleChange("description", e.target.value)}
                 onBlur={() => handleBlur("description")}
                 className={inputStyle("description")}
               />
@@ -272,9 +271,7 @@ export default function JobPostingForm() {
               <Input
                 placeholder="React, Node.js, SQL"
                 value={form.skills}
-                onChange={(e) =>
-                  handleChange("skills", e.target.value)
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("skills", e.target.value)}
                 onBlur={() => handleBlur("skills")}
                 className={inputStyle("skills")}
               />
@@ -291,9 +288,7 @@ export default function JobPostingForm() {
               <Input
                 type="date"
                 value={form.deadline}
-                onChange={(e) =>
-                  handleChange("deadline", e.target.value)
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("deadline", e.target.value)}
                 onBlur={() => handleBlur("deadline")}
                 className={inputStyle("deadline")}
               />
@@ -308,9 +303,7 @@ export default function JobPostingForm() {
             <div className="flex items-center space-x-2">
               <Checkbox
                 checked={form.confirm}
-                onCheckedChange={(value) =>
-                  handleChange("confirm", value)
-                }
+                onCheckedChange={(value) => handleChange("confirm", Boolean(value))}
               />
               <Label>
                 I confirm the job details are accurate before posting

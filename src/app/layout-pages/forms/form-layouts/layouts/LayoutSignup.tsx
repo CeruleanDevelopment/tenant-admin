@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type React from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -12,13 +13,17 @@ const initialState = {
   password: "",
 }
 
-export default function LayoutSignup() {
-  const [form, setForm] = useState(initialState)
-  const [errors, setErrors] = useState<any>({})
-  const [touched, setTouched] = useState<any>({})
+type SignupFormState = typeof initialState
+type FormErrors = Partial<Record<keyof SignupFormState, string>>
+type Touched = Partial<Record<keyof SignupFormState, boolean>>
 
-  const validate = () => {
-    const newErrors: any = {}
+export default function LayoutSignup() {
+  const [form, setForm] = useState<SignupFormState>(initialState)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [touched, setTouched] = useState<Touched>({})
+
+  const validate = (): FormErrors => {
+    const newErrors: FormErrors = {}
 
     if (!form.name) newErrors.name = "Name is required"
 
@@ -38,16 +43,16 @@ export default function LayoutSignup() {
     return newErrors
   }
 
-  const handleChange = (name: string, value: string) => {
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const handleChange = <K extends keyof SignupFormState>(name: K, value: SignupFormState[K]) => {
+    setForm((prev) => ({ ...prev, [name]: value } as SignupFormState))
   }
 
-  const handleBlur = (name: string) => {
-    setTouched((prev: any) => ({ ...prev, [name]: true }))
+  const handleBlur = (name: keyof SignupFormState) => {
+    setTouched((prev) => ({ ...prev, [name]: true }))
     setErrors(validate())
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const validationErrors = validate()
@@ -65,7 +70,7 @@ export default function LayoutSignup() {
     }
   }
 
-  const inputStyle = (name: string) =>
+  const inputStyle = (name: keyof SignupFormState) =>
     touched[name] && errors[name]
       ? "border-red-500 focus-visible:ring-red-500"
       : ""
@@ -101,9 +106,7 @@ export default function LayoutSignup() {
                   placeholder="Enter your name"
                   className={`pl-10 ${inputStyle("name")}`}
                   value={form.name}
-                  onChange={(e) =>
-                    handleChange("name", e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("name", e.target.value)}
                   onBlur={() => handleBlur("name")}
                 />
               </div>
@@ -123,9 +126,7 @@ export default function LayoutSignup() {
                   placeholder="Enter your email"
                   className={`pl-10 ${inputStyle("email")}`}
                   value={form.email}
-                  onChange={(e) =>
-                    handleChange("email", e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("email", e.target.value)}
                   onBlur={() => handleBlur("email")}
                 />
               </div>
@@ -145,9 +146,7 @@ export default function LayoutSignup() {
                   placeholder="Enter your password"
                   className={`pl-10 ${inputStyle("password")}`}
                   value={form.password}
-                  onChange={(e) =>
-                    handleChange("password", e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("password", e.target.value)}
                   onBlur={() => handleBlur("password")}
                 />
               </div>

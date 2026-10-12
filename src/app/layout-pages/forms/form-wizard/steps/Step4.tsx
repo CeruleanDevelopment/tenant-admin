@@ -5,8 +5,10 @@ import { useState } from "react"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import type React from "react"
+import type { WizardForm } from "../WizardContext"
 
-export default function Step4({ form, setForm }: any) {
+export default function Step4({ form, setForm }: { form: WizardForm; setForm: React.Dispatch<React.SetStateAction<WizardForm>> }) {
   const [agree, setAgree] = useState(false)
 
   return (
@@ -43,8 +45,8 @@ export default function Step4({ form, setForm }: any) {
         <Textarea
           placeholder="Any final comments?"
           value={form.comments || ""}
-          onChange={(e) =>
-            setForm({ ...form, comments: e.target.value })
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+            setForm((prev) => ({ ...prev, comments: e.target.value }))
           }
         />
       </div>
@@ -53,8 +55,8 @@ export default function Step4({ form, setForm }: any) {
       <div className="flex items-start space-x-3">
         <Checkbox
           checked={agree}
-          onCheckedChange={(checked: boolean) =>
-            setAgree(checked)
+          onCheckedChange={(checked) =>
+            setAgree(Boolean(checked))
           }
         />
         <Label className="text-sm leading-none">

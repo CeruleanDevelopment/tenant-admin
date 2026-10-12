@@ -2,6 +2,8 @@
 
 export const dynamic = "force-dynamic"
 
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -52,7 +54,7 @@ const LIMITS = {
 };
 
 export default function SignUpPage() {
-  const router = useRouter()
+  const router = useRouter() as { replace: (href: string) => void }
   const dispatch = useDispatch<AppDispatch>()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoadingCountries, setIsLoadingCountries] = useState(true)
@@ -90,6 +92,16 @@ export default function SignUpPage() {
     },
   })
 
+  function getErrorMessage(err: unknown) {
+    if (!err) return "An error occurred."
+    if (typeof err === "string") return err
+    if (typeof err === "object" && err !== null) {
+      const e = err as { response?: { data?: { error?: string } }; data?: any; message?: string }
+      return String(e.response?.data?.error ?? e.message ?? "An error occurred.")
+    }
+    return "An error occurred."
+  }
+
   useEffect(() => {
     let mounted = true
 
@@ -99,8 +111,8 @@ export default function SignUpPage() {
         if (mounted) {
           setCountries(rows)
         }
-      } catch (error: any) {
-        const message = error?.response?.data?.error || error?.message || "Unable to load countries"
+      } catch (error: unknown) {
+        const message = getErrorMessage(error) || "Unable to load countries"
         toast.error(String(message))
       } finally {
         if (mounted) {
@@ -122,7 +134,7 @@ export default function SignUpPage() {
     setSuccessMessage(null)
     setIsSubmitting(true)
     try {
-      var formData = {
+      const formData = {
         firstName: String(data.firstName || "").trim(),
         lastName: String(data.lastName || "").trim(),
         email: String(data.email || "").trim().toLowerCase(),
@@ -150,24 +162,29 @@ export default function SignUpPage() {
       } catch (err) {
         // ignore reset errors
       }
-    } catch (error: any) {
-      const payload = error?.response?.data || error?.data || null
+    } catch (error: unknown) {
+      let payload: any = null
+      if (typeof error === "object" && error !== null) {
+        const e = error as { response?: { data?: any }; data?: any; message?: string }
+        payload = e.response?.data ?? e.data ?? null
+      }
 
       if (payload && typeof payload === "object") {
         if (payload.details && typeof payload.details === "object") {
           Object.entries(payload.details).forEach(([field, msg]) => {
             try {
-              setError(field as any, { type: "server", message: String(msg) })
+              setError(field as keyof SignupValues, { type: "server", message: String(msg) })
             } catch {
+              // ignore
             }
           })
         }
 
-        const message = payload.error || error?.message || "Registration failed."
+        const message = payload.error ?? getErrorMessage(error) ?? "Registration failed."
         setFormError(String(message))
         toast.error(String(message))
       } else {
-        const message = error?.response?.data?.error || error?.message || "Registration failed."
+        const message = getErrorMessage(error) || "Registration failed."
         setFormError(String(message))
         toast.error(String(message))
       }
@@ -371,7 +388,7 @@ export default function SignUpPage() {
 
                 <div className="mt-4 text-center text-sm">
                   Already registered? {" "}
-                  <Link href="/signin" className="underline underline-offset-4">
+                  <Link href={TENANT_SIGNIN_PATH} className="underline underline-offset-4">
                     Sign in
                   </Link>
                 </div>

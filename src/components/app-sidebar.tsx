@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import type { NavItem } from "./nav-main"
 
 import { NavMain } from "./nav-main"
 import { NavProjects } from "./nav-projects"
@@ -18,9 +19,10 @@ import {
 import { useSelector } from "react-redux"
 import type { RootState } from "../../redux/reducers"
 import { useDispatch } from "react-redux"
-import { useRouter } from "next/navigation"
-import { signOutTenant } from "../../actions/auth"
+import Link from "next/link"
+import { signOut } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
+import { canAccessPath, resolveSessionType } from "@/utils/access-control"
 import {
   BookOpen,
   ChartNoAxesCombined,
@@ -46,13 +48,19 @@ import {
 } from "lucide-react"
 
 // nav menues
-const data = {
+const data: {
+  user: { name: string; email: string; avatar: string }
+  tenantNavMain: NavItem[]
+  userNavMain: NavItem[]
+  navSecondary: NavItem[]
+  projects: { name: string; url: string; icon: React.ReactNode }[]
+} = {
   user: {
     name: "shadcn",
     email: "m@example.com",
     avatar: "/products/01.png",
   },
-  navMain: [
+  tenantNavMain: [
     {
       title: "Dashboard",
       url: "/dashboard/analytics",
@@ -61,34 +69,32 @@ const data = {
         <Gauge
         />
       ),
-      isActive: true,
-      // items: [
-      //   {
-      //     title: "Analytics",
-      //     url: "/dashboard/analytics",
-      //   },
-      //   {
-      //     title: "CRM",
-      //     url: "/dashboard/crm",
-      //   },
-      //   {
-      //     title: "eCommerce",
-      //     url: "/dashboard/eCommerce",
-      //   },
-      // ],
     },
     {
       title: "Users",
-      url: "/users",
+      url: "/tenant/users",
       icon: (
         <CircleUserRound
         />
       ),
       items: [
-        { title: "Add User", url: "/users/add" },
-        { title: "View Users", url: "/users/view" },        
+        { title: "Add User", url: "/tenant/users/add" },
+        { title: "View Users", url: "/tenant/users/view" },
       ],
     },
+    {
+      title: "Agents",
+      url: "/tenant/agents",
+      icon: (
+        <LayoutGrid
+        />
+      ),
+      items: [
+        { title: "Agents", url: "/tenant/agents" },
+        { title: "AssignAgents", url: "/tenant/agents/created" },
+      ],
+    },
+    /*
     {
       title: "eCommerce",
       url: "#",
@@ -380,6 +386,28 @@ const data = {
         { title: "coming soon", url: "/error/coming-soon" },
       ],
     },
+    */
+  ],
+  userNavMain: [
+    {
+      title: "Dashboard",
+      url: "/users/dashboard",
+      icon: (
+        <Gauge
+        />
+      ),
+    },
+    {
+      title: "My Agents",
+      url: "/users/agents",
+      icon: (
+        <LayoutGrid
+        />
+      ),
+      items: [
+        { title: "Assigned Agents", url: "/users/agents" },
+      ],
+    },
   ],
   navSecondary: [
     {
@@ -458,8 +486,8 @@ function resolveUrl(url: string) {
   if (first === "auth") {
     // map common login/register to top-level signin/signup
     if (parts[1] === "basic") {
-      if (parts[2] === "login") return "/signin"
-      if (parts[2] === "register") return "/signup"
+      if (parts[2] === "login") return "/tenant/signin"
+      if (parts[2] === "register") return "/tenant/signup"
       return `/no-layout-pages${url}`
     }
     return `/no-layout-pages${url}`
@@ -468,7 +496,7 @@ function resolveUrl(url: string) {
   return url
 }
 
-function normalizeItems(items: any[] | undefined) {
+function normalizeItems(items?: NavItem[]) {
   if (!items) return
   for (const it of items) {
     if (typeof it.url === "string") it.url = resolveUrl(it.url)
@@ -476,13 +504,25 @@ function normalizeItems(items: any[] | undefined) {
   }
 }
 
-normalizeItems(data.navMain)
+normalizeItems(data.tenantNavMain)
+normalizeItems(data.userNavMain)
 normalizeItems(data.navSecondary)
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const dispatch = useDispatch<AppDispatch>()
   const reduxUser = useSelector((state: RootState) => state.auth.user)
   const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
+  // console.log( tenantProfile,"tenantProfile");  
+
+  const sessionType = React.useMemo(
+    () => resolveSessionType({ authUserId: reduxUser?.id, tenantId: tenantProfile?.id, role: reduxUser?.role }),
+    [reduxUser?.id, reduxUser?.role, tenantProfile?.id],
+  )
+
+  const navMainItems = React.useMemo(() => {
+    const source = sessionType === "user" ? data.userNavMain : data.tenantNavMain
+    return source.filter((item) => canAccessPath(String(item?.url ?? ""), sessionType))
+  }, [sessionType])
 
   const userForNav = {
     name: reduxUser?.name || data.user.name,
@@ -491,7 +531,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }
 
   const handleLogout = async () => {
-    await dispatch(signOutTenant())
+    await dispatch(signOut())
   }
 
   return (
@@ -500,22 +540,22 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <a href="#">
+              <Link href="/" prefetch={false}>
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                   <PieChart className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">Pulse UI</span>
-                  <span className="truncate text-xs">{tenantProfile?.companyName || "Next.js Admin"}</span>
+                  <span className="truncate text-xs">{tenantProfile?.companyName}</span>
                 </div>
-              </a>
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <div className="px-2">
-          <NavMain items={data.navMain} />
+          <NavMain items={navMainItems} />
         </div>
         {/* <div className="border-b border-border">
           <NavProjects projects={data.projects} />
@@ -524,9 +564,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <NavSecondary items={data.navSecondary} />
         </div> */}
       </SidebarContent>
-      {/* <SidebarFooter className="border-t border-border p-0">
+      <SidebarFooter className="border-t border-border p-0">
         <NavUser user={userForNav} onLogout={handleLogout} />
-      </SidebarFooter> */}
+      </SidebarFooter>
     </Sidebar>
   )
 }

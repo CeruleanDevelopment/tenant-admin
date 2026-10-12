@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useDispatch } from "react-redux"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
@@ -31,6 +31,8 @@ type AuthValues = {
 }
 
 const OTP_LENGTH = 6
+const TENANT_SIGNIN_PATH = "/tenant/signin"
+const TENANT_SIGNUP_PATH = "/tenant/signup"
 
 const resolveCopy = (mode: AuthMode) => {
   if (mode === "signup") {
@@ -40,7 +42,7 @@ const resolveCopy = (mode: AuthMode) => {
       description: "Use a one-time code to create the tenant, then jump straight into the dashboard.",
       primaryButton: "Continue",
       footerPrefix: "Already have a tenant?",
-      footerHref: "/signin",
+      footerHref: TENANT_SIGNIN_PATH,
       footerLabel: "Sign in",
       successMessage: "Tenant created and signed in successfully.",
     }
@@ -52,21 +54,49 @@ const resolveCopy = (mode: AuthMode) => {
     description: "Use a six-digit code to get back into your tenant dashboard fast.",
     primaryButton: "Continue",
     footerPrefix: "Don’t have a tenant yet?",
-    footerHref: "/signup",
+    footerHref: TENANT_SIGNUP_PATH,
     footerLabel: "Create one",
     successMessage: "Signed in successfully.",
   }
 }
 
+function getErrorMessage(err: unknown): string {
+  if (typeof err === "string") return err
+  if (err instanceof Error) return err.message
+  if (typeof err === "object" && err !== null) {
+    const e = err as Record<string, unknown>
+    const resp = e["response"]
+    if (typeof resp === "object" && resp !== null) {
+      const data = (resp as Record<string, unknown>)["data"]
+      if (typeof data === "object" && data !== null) {
+        const error = (data as Record<string, unknown>)["error"]
+        if (typeof error === "string") return error
+      }
+    }
+
+    const msg = e["message"]
+    if (typeof msg === "string") return msg
+
+    try {
+      return JSON.stringify(e)
+    } catch {
+      return "An error occurred"
+    }
+  }
+
+  return String(err)
+}
+
 export function TenantAuthCard({ mode }: TenantAuthCardProps) {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
+  const getParam = (key: string): string => searchParams?.get(key) || ""
   const copy = useMemo(() => resolveCopy(mode), [mode])
-  const errorMessage = String(searchParams.get("error") || "").trim()
-  const initialEmail = String(searchParams.get("email") || "")
-  const initialTenantId = searchParams.get("tenantId") || searchParams.get("slug") || undefined
-  const tenantName = searchParams.get("tenantName") || undefined
-  const slug = searchParams.get("slug") || undefined
+  const errorMessage = String(getParam("error")).trim()
+  const initialEmail = String(getParam("email"))
+  const initialTenantId = getParam("tenantId") || getParam("slug") || undefined
+  const tenantName = getParam("tenantName") || undefined
+  const slug = getParam("slug") || undefined
 
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<AuthValues>({
     defaultValues: { email: initialEmail },
@@ -81,6 +111,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
   const [expiresInSeconds, setExpiresInSeconds] = useState(0)
   const [isRequestingOtp, setIsRequestingOtp] = useState(false)
   const [isVerifying, setIsVerifying] = useState(false)
+  const lastSubmittedOtpKeyRef = useRef<string>("")
 
   useEffect(() => {
     if (resendSeconds <= 0) {
@@ -127,11 +158,12 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     setExpiresAt(response.expiresAt)
     setResendSeconds(response.resendCooldownSeconds)
     setOtpValue("")
+    lastSubmittedOtpKeyRef.current = ""
     setStage("otp")
     toast.success("OTP sent. Check your inbox.")
   }
 
-  const completeOtp = async (code: string) => {
+  const completeOtp = useCallback(async (code: string) => {
     if (!sessionId || isRequestingOtp || code.length < OTP_LENGTH || isVerifying) {
       return
     }
@@ -151,24 +183,32 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
       const hydrated = await dispatch(hydrateTenantSession({ token: response.token, refreshToken: response.refreshToken }))
       if (hydrated) {
         toast.success(copy.successMessage)
+        setOtpValue("")
         window.location.assign("/")
         return
       }
 
+      lastSubmittedOtpKeyRef.current = ""
       toast.error("Unable to complete authentication.")
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Invalid code."
-      toast.error(String(message))
+    } catch (err: unknown) {
+      lastSubmittedOtpKeyRef.current = ""
+      const message = getErrorMessage(err) || "Invalid code."
+      toast.error(message)
     } finally {
       setIsVerifying(false)
     }
-  }
+  }, [sessionId, isRequestingOtp, isVerifying, dispatch, initialTenantId, tenantName, slug, copy.successMessage])
 
   useEffect(() => {
     if (otpValue.length === OTP_LENGTH) {
+      const otpKey = `${String(sessionId || "").trim()}:${otpValue}`
+      if (otpKey && lastSubmittedOtpKeyRef.current === otpKey) {
+        return
+      }
+      lastSubmittedOtpKeyRef.current = otpKey
       void completeOtp(otpValue)
     }
-  }, [otpValue])
+  }, [otpValue, sessionId, completeOtp])
 
   const onEmailSubmit = handleSubmit(async (data) => {
     const email = String(data.email || emailValue || "").trim().toLowerCase()
@@ -193,9 +233,9 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
 
     try {
       await requestOtp(email)
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Failed to send OTP."
-      toast.error(String(message))
+    } catch (err: unknown) {
+      const message = getErrorMessage(err) || "Failed to send OTP."
+      toast.error(message)
       setStage("email")
     } finally {
       setIsRequestingOtp(false)
@@ -212,9 +252,9 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     try {
       await requestOtp(emailValue)
       toast.success("OTP resent. Check your inbox.")
-    } catch (err: any) {
-      const message = err?.response?.data?.error || err?.message || "Failed to resend OTP."
-      toast.error(String(message))
+    } catch (err: unknown) {
+      const message = getErrorMessage(err) || "Failed to resend OTP."
+      toast.error(message)
     }
   }
 
@@ -289,14 +329,13 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                   </div>
                 ) : null}
 
-                {/* Google sign-in is currently disabled. Use email/OTP below. */}
-                <div className="mb-2 rounded-md bg-white/5 px-4 py-3 text-sm text-slate-300">Google sign-in is temporarily disabled. Use email and a one-time code (OTP) below to continue.</div>
+                {/* <div className="mb-2 rounded-md bg-white/5 px-4 py-3 text-sm text-slate-300">Google sign-in is temporarily disabled. Use email and a one-time code (OTP) below to continue.</div>
 
                 <div className="flex items-center gap-3 text-xs uppercase tracking-[0.26em] text-slate-400">
                   <span className="h-px flex-1 bg-white/10" />
                   Or continue with email
                   <span className="h-px flex-1 bg-white/10" />
-                </div>
+                </div> */}
 
                 {stage === "email" ? (
                   <form onSubmit={onEmailSubmit} className="space-y-4">
@@ -335,7 +374,13 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
 
                     <div className="space-y-2">
                       <Label htmlFor="otp" className="text-sm text-slate-200">Enter 6-digit OTP</Label>
-                      <TenantOtpInput value={otpValue} onChange={setOtpValue} length={OTP_LENGTH} />
+                      <TenantOtpInput
+                        value={otpValue}
+                        onChange={setOtpValue}
+                        length={OTP_LENGTH}
+                        disabled={isRequestingOtp || isVerifying}
+                        inputClassName="border-cyan-300/35 bg-slate-900/80 text-white caret-cyan-300 focus:border-cyan-300 focus:ring-cyan-300/30"
+                      />
                       {isRequestingOtp ? (
                         <p className="text-xs text-slate-400">Sending OTP to your email...</p>
                       ) : null}

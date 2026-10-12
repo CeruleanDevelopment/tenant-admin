@@ -1,12 +1,13 @@
-const ACCESS_TOKEN_KEY = "tenant_admin_access_token"
-const REFRESH_TOKEN_KEY = "tenant_admin_refresh_token"
-const SESSION_KEY = "tenant_admin_session"
+const ACCESS_TOKEN_KEY = "TENANT_ADMIN_ACCESS_TOKEN"
+const REFRESH_TOKEN_KEY = "TENANT_ADMIN_REFRESH_TOKEN"
+const SESSION_KEY = "TENANT_ADMIN_SESSION"
+const TENANT_ADMIN_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 const isBrowser = (): boolean => typeof window !== "undefined"
 
 const writeCookie = (name: string, value: string): void => {
   if (!isBrowser()) return
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=lax`
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${TENANT_ADMIN_TOKEN_MAX_AGE_SECONDS}; samesite=lax`
 }
 
 const readCookie = (name: string): string | null => {

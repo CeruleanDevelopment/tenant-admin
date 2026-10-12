@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import type React from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,14 +16,18 @@ const initialState = {
   agree: false,
 }
 
-export default function LayoutSignup2() {
-  const [form, setForm] = useState(initialState)
-  const [errors, setErrors] = useState<any>({})
-  const [touched, setTouched] = useState<any>({})
-  const [showPassword, setShowPassword] = useState(false)
+type Signup2FormState = typeof initialState
+type FormErrors = Partial<Record<keyof Signup2FormState, string>>
+type Touched = Partial<Record<keyof Signup2FormState, boolean>>
 
-  const validate = () => {
-    const newErrors: any = {}
+export default function LayoutSignup2() {
+  const [form, setForm] = useState<Signup2FormState>(initialState)
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [touched, setTouched] = useState<Touched>({})
+  const [showPassword, setShowPassword] = useState<boolean>(false)
+
+  const validate = (): FormErrors => {
+    const newErrors: FormErrors = {}
 
     if (!form.name) newErrors.name = "Name is required"
 
@@ -45,16 +50,16 @@ export default function LayoutSignup2() {
     return newErrors
   }
 
-  const handleChange = (name: string, value: any) => {
-    setForm((prev) => ({ ...prev, [name]: value }))
+  const handleChange = <K extends keyof Signup2FormState>(name: K, value: Signup2FormState[K]) => {
+    setForm((prev) => ({ ...prev, [name]: value } as Signup2FormState))
   }
 
-  const handleBlur = (name: string) => {
-    setTouched((prev: any) => ({ ...prev, [name]: true }))
+  const handleBlur = (name: keyof Signup2FormState) => {
+    setTouched((prev) => ({ ...prev, [name]: true }))
     setErrors(validate())
   }
 
-  const handleSubmit = (e: any) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const validationErrors = validate()
@@ -73,7 +78,7 @@ export default function LayoutSignup2() {
     }
   }
 
-  const inputStyle = (name: string) =>
+  const inputStyle = (name: keyof Signup2FormState) =>
     touched[name] && errors[name]
       ? "border-red-500 focus-visible:ring-red-500"
       : ""
@@ -130,9 +135,7 @@ export default function LayoutSignup2() {
               <Input
                 placeholder="Your Name"
                 value={form.name}
-                onChange={(e) =>
-                  handleChange("name", e.target.value)
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("name", e.target.value)}
                 onBlur={() => handleBlur("name")}
                 className={inputStyle("name")}
               />
@@ -150,9 +153,7 @@ export default function LayoutSignup2() {
                 type="email"
                 placeholder="Your E-mail"
                 value={form.email}
-                onChange={(e) =>
-                  handleChange("email", e.target.value)
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("email", e.target.value)}
                 onBlur={() => handleBlur("email")}
                 className={inputStyle("email")}
               />
@@ -171,9 +172,7 @@ export default function LayoutSignup2() {
                   type={showPassword ? "text" : "password"}
                   placeholder="At least 8 characters"
                   value={form.password}
-                  onChange={(e) =>
-                    handleChange("password", e.target.value)
-                  }
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleChange("password", e.target.value)}
                   onBlur={() => handleBlur("password")}
                   className={`pr-10 ${inputStyle("password")}`}
                 />
@@ -202,9 +201,7 @@ export default function LayoutSignup2() {
             <div className="flex items-start space-x-2">
               <Checkbox
                 checked={form.agree}
-                onCheckedChange={(value) =>
-                  handleChange("agree", value)
-                }
+                onCheckedChange={(value) => handleChange("agree", Boolean(value))}
               />
               <div className="text-sm text-muted-foreground">
                 I agree to all the{" "}

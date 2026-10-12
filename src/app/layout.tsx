@@ -7,11 +7,11 @@ import AppShell from "./AppShell"
 
 export const metadata = {
   title: {
-    default: "PulseUI Pro – Modern Next.js Admin & Dashboard Template (ShadCN UI + Tailwind CSS)",
-    template: "%s | PulseUI Pro",
+    default: "Tenant Admin Dashboard",
+    template: "%s | Tenant Admin Dashboard",
   },
   description:
-    "PulseUI Pro is a premium Next.js admin dashboard template built with ShadCN UI, Tailwind CSS, and TypeScript. Ideal for SaaS apps, CRM systems, analytics dashboards, and modern web applications.",
+    "Tenant Admin Dashboard is a premium Next.js admin dashboard template built with ShadCN UI, Tailwind CSS, and TypeScript. Ideal for SaaS apps, CRM systems, analytics dashboards, and modern web applications.",
 }
 
 const inter = Inter({ subsets: ["latin"] })

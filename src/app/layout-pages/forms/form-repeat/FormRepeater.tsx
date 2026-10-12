@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -15,14 +15,16 @@ interface Item {
 }
 
 export default function FormRepeater() {
+  // Use a simple incremental id generator to avoid calling impure functions during render
+  const nextId = useRef<number>(2)
   const [items, setItems] = useState<Item[]>([
-    { id: Date.now(), name: "", quantity: 1, price: 0 },
+    { id: 1, name: "", quantity: 1, price: 0 },
   ])
 
   const addItem = () => {
-    setItems([
-      ...items,
-      { id: Date.now(), name: "", quantity: 1, price: 0 },
+    setItems((prev) => [
+      ...prev,
+      { id: nextId.current++, name: "", quantity: 1, price: 0 },
     ])
   }
 

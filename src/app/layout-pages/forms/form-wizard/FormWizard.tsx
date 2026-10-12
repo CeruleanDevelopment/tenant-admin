@@ -4,7 +4,7 @@ import { useWizard } from "./WizardContext"
 import { Button } from "@/components/ui/button"
 import StepProgress from "./StepProgress"
 
-export default function FormWizard({ children }: any) {
+export default function FormWizard({ children }: { children: React.ReactNode[] }) {
   const { step, next, back } = useWizard()
 
   return (

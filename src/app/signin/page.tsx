@@ -2,6 +2,8 @@
 
 export const dynamic = "force-dynamic"
 
+const TENANT_SIGNUP_PATH = "/tenant/signup"
+
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
@@ -16,25 +18,47 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { cn } from "../../lib/utils"
 import { TenantOtpInput } from "../../components/TenantOtpInput"
 import {
-  hydrateTenantSession,
-  requestTenantOtp,
-  verifyTenantOtp,
-} from "../../../actions/auth"
+  requestUserOtp,
+  verifyUserOtp,
+} from "../../../actions/userAuth"
 import type { AppDispatch } from "../../../redux/store"
 import { GalleryVerticalEnd, RefreshCcw, ShieldCheck } from "lucide-react"
 
 type LoginValues = { email?: string }
 
 const OTP_LENGTH = 6
-const RESEND_COOLDOWN_SECONDS = 60
+const RESEND_COOLDOWN_SECONDS = 300
+
+const normalizeUserNextPath = (value: string): string => {
+  const candidate = String(value || "").trim()
+  if (!candidate.startsWith("/") || candidate.startsWith("//")) {
+    return "/users/dashboard"
+  }
+
+  if (candidate === "/signin" || candidate.startsWith("/signin?")) {
+    return "/users/dashboard"
+  }
+
+  if (candidate === "/users/signin" || candidate.startsWith("/users/signin?")) {
+    return "/users/dashboard"
+  }
+
+  if (!candidate.startsWith("/users")) {
+    return "/users/dashboard"
+  }
+
+  return candidate
+}
 
 export default function SignInPage() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
-  const errorMessage = String(searchParams.get("error") || "").trim()
+  const getParam = (key: string): string => searchParams?.get(key) || ""
+  const errorMessage = String(getParam("error")).trim()
+  const nextPath = String(getParam("next")).trim()
 
   const [stage, setStage] = useState<"email" | "otp">("email")
-  const [emailValue, setEmailValue] = useState(String(searchParams.get("email") || ""))
+  const [emailValue, setEmailValue] = useState(String(getParam("email")))
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [otpValue, setOtpValue] = useState("")
   const [resendSeconds, setResendSeconds] = useState(0)
@@ -43,8 +67,18 @@ export default function SignInPage() {
   const [formError, setFormError] = useState<string | null>(null)
 
   const { register: registerEmail, handleSubmit: handleEmailSubmit, formState: { isSubmitting: isEmailSubmitting } } = useForm<LoginValues>({
-    defaultValues: { email: String(searchParams.get("email") || "") },
+    defaultValues: { email: String(getParam("email")) },
   })
+
+  function getErrorMessage(err: unknown) {
+    if (!err) return "An error occurred."
+    if (typeof err === "string") return err
+    if (typeof err === "object" && err !== null) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string }
+      return String(e.response?.data?.error ?? e.message ?? "An error occurred.")
+    }
+    return "An error occurred."
+  }
 
   useEffect(() => {
     if (resendSeconds <= 0) {
@@ -78,12 +112,7 @@ export default function SignInPage() {
 
     try {
       const response = await dispatch(
-        requestTenantOtp({
-          email,
-          tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
-          tenantName: searchParams.get("tenantName") || undefined,
-          slug: searchParams.get("slug") || undefined,
-        }),
+        requestUserOtp({ email }),
       )
 
       setSessionId(response.sessionId)
@@ -92,8 +121,8 @@ export default function SignInPage() {
       setStage("otp")
       setFormError(null)
       toast.success("OTP sent to your email.")
-    } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || "Failed to send OTP."
+    } catch (error: unknown) {
+      const message = getErrorMessage(error) || "Failed to send OTP."
       setFormError(String(message))
       toast.error(String(message))
     } finally {
@@ -109,28 +138,22 @@ export default function SignInPage() {
     setIsVerifyingOtp(true)
     try {
       const response = await dispatch(
-        verifyTenantOtp({
+        verifyUserOtp({
           sessionId,
           code: otpValue,
-          tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
-          tenantName: searchParams.get("tenantName") || undefined,
-          slug: searchParams.get("slug") || undefined,
         }),
       )
 
-      const hydrated = await dispatch(
-        hydrateTenantSession({ token: response.token, refreshToken: response.refreshToken }),
-      )
-
-      if (hydrated) {
+      if (response?.token && response?.refreshToken) {
         toast.success("Signed in successfully.")
-        window.location.assign("/")
+        const safeNext = normalizeUserNextPath(nextPath)
+        window.location.assign(safeNext)
         return
       }
 
       toast.error("Unable to complete authentication.")
-    } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || "Invalid OTP code."
+    } catch (error: unknown) {
+      const message = getErrorMessage(error) || "Invalid OTP code."
       setFormError(String(message))
       toast.error(String(message))
     } finally {
@@ -146,20 +169,15 @@ export default function SignInPage() {
     setIsRequestingOtp(true)
     try {
       const response = await dispatch(
-        requestTenantOtp({
-          email: emailValue,
-          tenantId: searchParams.get("tenantId") || searchParams.get("slug") || undefined,
-          tenantName: searchParams.get("tenantName") || undefined,
-          slug: searchParams.get("slug") || undefined,
-        }),
+        requestUserOtp({ email: emailValue }),
       )
 
       setSessionId(response.sessionId)
       setResendSeconds(Math.max(RESEND_COOLDOWN_SECONDS, Number(response.resendCooldownSeconds) || 0))
       setOtpValue("")
       toast.success("OTP resent.")
-    } catch (error: any) {
-      const message = error?.response?.data?.error || error?.message || "Failed to resend OTP."
+    } catch (error: unknown) {
+      const message = getErrorMessage(error) || "Failed to resend OTP."
       setFormError(String(message))
       toast.error(String(message))
     } finally {
@@ -181,7 +199,7 @@ export default function SignInPage() {
           <div className={cn("flex flex-col gap-6")}>
             <Card>
               <CardHeader className="text-center">
-                <CardTitle className="text-xl">Sign in to your tenant</CardTitle>
+                <CardTitle className="text-xl">Sign in to your account</CardTitle>
                 <CardDescription>
                   {stage === "email"
                     ? "Use your registered email and continue with OTP."
@@ -276,12 +294,12 @@ export default function SignInPage() {
                     </div>
                   )}
 
-                  <div className="text-center text-sm">
+                  {/* <div className="text-center text-sm">
                     Don&apos;t have a tenant yet? {" "}
-                    <Link href="/signup" className="underline underline-offset-4">
+                    <Link href={TENANT_SIGNUP_PATH} className="underline underline-offset-4">
                       Signup
                     </Link>
-                  </div>
+                  </div> */}
                 </div>
               </CardContent>
             </Card>
