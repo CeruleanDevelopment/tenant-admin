@@ -8,7 +8,8 @@ declare module "next/navigation" {
     prefetch(href: string): void
   }
 
+  export function redirect(url: string): never
   export function usePathname(): string
   export function useRouter(): AppRouterInstance
-  export function useSearchParams(): URLSearchParams | null
+  export function useSearchParams(): URLSearchParams
 }
