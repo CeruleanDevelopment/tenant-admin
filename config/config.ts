@@ -1,7 +1,8 @@
 const readPublicValue = (value?: string): string => value?.trim() || ""
 
 // const server = readPublicValue(process.env.NEXT_PUBLIC_DEPLOYMENT_ENV).toUpperCase() || "LOCAL"
-const server: string = "LOCAL"
+// const server: string = "LOCAL"
+const server: string = "PRODUCTION"
 
 let API_URL = "http://localhost:4054"
 let WEBSITE_URL = "http://localhost:3001"
