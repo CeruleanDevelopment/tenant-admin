@@ -45,7 +45,7 @@ export function SignupForm({ className, ...props }: React.ComponentProps<"div">)
 
               <div className="text-center text-sm">
                 Already have a tenant?{" "}
-                <Link href={TENANT_SIGNIN_PATH} className="underline underline-offset-4">
+                <Link href={TENANT_SIGNIN_PATH} prefetch={false} className="underline underline-offset-4">
                   Sign in
                 </Link>
               </div>

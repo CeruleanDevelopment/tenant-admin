@@ -296,7 +296,7 @@ export default function SignInPage() {
 
                   {/* <div className="text-center text-sm">
                     Don&apos;t have a tenant yet? {" "}
-                    <Link href={TENANT_SIGNUP_PATH} className="underline underline-offset-4">
+                    <Link href={TENANT_SIGNUP_PATH} prefetch={false} className="underline underline-offset-4">
                       Signup
                     </Link>
                   </div> */}

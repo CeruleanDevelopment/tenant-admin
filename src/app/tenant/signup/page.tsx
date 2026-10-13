@@ -1,7 +1,7 @@
 "use client"
 
-import { TenantAuthCard } from "@/components/TenantAuthCard"
+import SignUpPage from "../../signup/page"
 
 export default function TenantSignupPage() {
-	return <TenantAuthCard mode="signup" />
+	return <SignUpPage />
 }

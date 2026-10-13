@@ -188,10 +188,8 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
         return
       }
 
-      lastSubmittedOtpKeyRef.current = ""
       toast.error("Unable to complete authentication.")
     } catch (err: unknown) {
-      lastSubmittedOtpKeyRef.current = ""
       const message = getErrorMessage(err) || "Invalid code."
       toast.error(message)
     } finally {
@@ -200,6 +198,10 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
   }, [sessionId, isRequestingOtp, isVerifying, dispatch, initialTenantId, tenantName, slug, copy.successMessage])
 
   useEffect(() => {
+    if (otpValue.length < OTP_LENGTH) {
+      lastSubmittedOtpKeyRef.current = ""
+      return
+    }
     if (otpValue.length === OTP_LENGTH) {
       const otpKey = `${String(sessionId || "").trim()}:${otpValue}`
       if (otpKey && lastSubmittedOtpKeyRef.current === otpKey) {
@@ -422,7 +424,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                 )}
 
                 <div className="pt-2 text-center text-sm text-slate-400">
-                  {copy.footerPrefix} <Link href={copy.footerHref} className="text-cyan-200 underline-offset-4 hover:text-cyan-100 hover:underline">{copy.footerLabel}</Link>
+                  {copy.footerPrefix} <Link href={copy.footerHref} prefetch={false} className="text-cyan-200 underline-offset-4 hover:text-cyan-100 hover:underline">{copy.footerLabel}</Link>
                 </div>
               </div>
             </CardContent>

@@ -131,7 +131,7 @@ export default function AdminLayout({
                                 <BreadcrumbPage>{c.label}</BreadcrumbPage>
                               ) : (
                                 <BreadcrumbLink asChild>
-                                  <Link href={c.href}>{c.label}</Link>
+                                  <Link href={c.href} prefetch={false}>{c.label}</Link>
                                 </BreadcrumbLink>
                               )}
                             </BreadcrumbItem>

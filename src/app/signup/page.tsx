@@ -388,7 +388,7 @@ export default function SignUpPage() {
 
                 <div className="mt-4 text-center text-sm">
                   Already registered? {" "}
-                  <Link href={TENANT_SIGNIN_PATH} className="underline underline-offset-4">
+                  <Link href={TENANT_SIGNIN_PATH} prefetch={false} className="underline underline-offset-4">
                     Sign in
                   </Link>
                 </div>
