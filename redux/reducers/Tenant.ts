@@ -4,7 +4,6 @@ export interface TenantProfile {
   id: string
   slug: string
   companyName: string
-  status?: string
   apiKey?: string | null
   apiSecretHash?: string | null
   secretKey?: string | null

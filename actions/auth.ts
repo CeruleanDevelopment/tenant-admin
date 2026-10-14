@@ -1332,7 +1332,6 @@ export const hydrateTenantSession =
         id: tenantId,
         slug: tenantSlug,
         companyName,
-        status: tenantProfile.status,
         apiKey: tenantProfile.apiKey || null,
         apiSecretHash: tenantProfile.apiSecretHash || null,
         secretKey: tenantProfile.secretKey || null,
