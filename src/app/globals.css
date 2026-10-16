@@ -194,6 +194,13 @@
   justify-content: center !important;
 }
 
+[data-sidebar="menu-button"]:not(:disabled),
+[data-sidebar="menu-sub-button"]:not(:disabled),
+[data-sidebar="menu-button"] *,
+[data-sidebar="menu-sub-button"] * {
+  cursor: pointer;
+}
+
 .rw-popup {
   overflow: hidden;
   background-color: rgb(255, 255, 255) !important;

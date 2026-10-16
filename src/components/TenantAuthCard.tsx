@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { useEffect, useMemo, useState, useCallback, useRef } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useDispatch } from "react-redux"
 import { useForm } from "react-hook-form"
 import { toast } from "sonner"
@@ -20,44 +20,17 @@ import {
 } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
 
-type AuthMode = "signin" | "signup"
-
-type TenantAuthCardProps = {
-  mode: AuthMode
-}
-
 type AuthValues = {
   email?: string
 }
 
 const OTP_LENGTH = 6
-const TENANT_SIGNIN_PATH = "/tenant/signin"
-const TENANT_SIGNUP_PATH = "/tenant/signup"
 
-const resolveCopy = (mode: AuthMode) => {
-  if (mode === "signup") {
-    return {
-      eyebrow: "Create your tenant",
-      title: "Launch a workspace in minutes",
-      description: "Use a one-time code to create the tenant, then jump straight into the dashboard.",
-      primaryButton: "Continue",
-      footerPrefix: "Already have a tenant?",
-      footerHref: TENANT_SIGNIN_PATH,
-      footerLabel: "Sign in",
-      successMessage: "Tenant created and signed in successfully.",
-    }
-  }
-
-  return {
-    eyebrow: "Welcome back",
-    title: "Sign in without friction",
-    description: "Use a six-digit code to get back into your tenant dashboard fast.",
-    primaryButton: "Continue",
-    footerPrefix: "Don’t have a tenant yet?",
-    footerHref: TENANT_SIGNUP_PATH,
-    footerLabel: "Create one",
-    successMessage: "Signed in successfully.",
-  }
+const copy = {
+  title: "Sign in without friction",
+  description: "Use a six-digit code to get back into your tenant dashboard fast.",
+  eyebrow: "Welcome back",
+  successMessage: "Signed in successfully.",
 }
 
 function getErrorMessage(err: unknown): string {
@@ -87,15 +60,13 @@ function getErrorMessage(err: unknown): string {
   return String(err)
 }
 
-export function TenantAuthCard({ mode }: TenantAuthCardProps) {
+export function TenantAuthCard() {
   const dispatch = useDispatch<AppDispatch>()
   const searchParams = useSearchParams()
   const getParam = (key: string): string => searchParams?.get(key) || ""
-  const copy = useMemo(() => resolveCopy(mode), [mode])
   const errorMessage = String(getParam("error")).trim()
   const initialEmail = String(getParam("email"))
   const initialTenantId = getParam("tenantId") || getParam("slug") || undefined
-  const tenantName = getParam("tenantName") || undefined
   const slug = getParam("slug") || undefined
 
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<AuthValues>({
@@ -149,7 +120,6 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
       requestTenantOtp({
         email,
         tenantId: initialTenantId,
-        tenantName,
         slug,
       }),
     )
@@ -175,7 +145,6 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
           sessionId,
           code,
           tenantId: initialTenantId,
-          tenantName,
           slug,
         }),
       )
@@ -195,7 +164,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
     } finally {
       setIsVerifying(false)
     }
-  }, [sessionId, isRequestingOtp, isVerifying, dispatch, initialTenantId, tenantName, slug, copy.successMessage])
+  }, [sessionId, isRequestingOtp, isVerifying, dispatch, initialTenantId, slug])
 
   useEffect(() => {
     if (otpValue.length < OTP_LENGTH) {
@@ -261,33 +230,33 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
   }
 
   return (
-    <div className="relative min-h-svh overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.24),transparent_30%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.18),transparent_32%),linear-gradient(180deg,#0f172a_0%,#111827_50%,#020617_100%)] text-white">
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-size-[24px_24px] opacity-20" />
-      <div className="absolute -left-24 top-12 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
-      <div className="absolute -right-20 bottom-12 h-72 w-72 rounded-full bg-blue-500/20 blur-3xl" />
+    <div className="relative min-h-svh overflow-hidden bg-background text-foreground">
+      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.04)_1px,transparent_1px)] bg-size-[24px_24px]" />
+      <div className="absolute -left-24 top-12 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+      <div className="absolute -right-20 bottom-12 h-72 w-72 rounded-full bg-primary/5 blur-3xl" />
 
       <div className="relative mx-auto flex min-h-svh w-full max-w-6xl items-center px-4 py-10 sm:px-6 lg:px-8">
         <div className="grid w-full gap-8 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="flex flex-col justify-between rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-slate-950/40 backdrop-blur-xl sm:p-8 lg:p-10">
+          <div className="flex flex-col justify-between rounded-3xl border border-border bg-muted/40 p-6 shadow-xl shadow-black/5 sm:p-8 lg:p-10">
             <div className="flex items-center gap-3">
-              <div className="flex size-11 items-center justify-center rounded-2xl bg-cyan-400/15 ring-1 ring-cyan-300/30">
-                <WandSparkles className="size-5 text-cyan-200" />
+              <div className="flex size-11 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
+                <WandSparkles className="size-5 text-primary" />
               </div>
               <div>
-                <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Tenant Admin</p>
-                <p className="text-sm text-slate-400">Secure access for tenant operators</p>
+                <p className="text-sm uppercase tracking-[0.3em] text-foreground">Tenant Admin</p>
+                <p className="text-sm text-muted-foreground">Secure access for tenant operators</p>
               </div>
             </div>
 
             <div className="mt-10 max-w-xl">
-              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-100">
+              <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                 <Sparkles className="size-3.5" />
                 OTP authentication
               </span>
-              <h1 className="mt-6 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+              <h1 className="mt-6 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
                 {copy.title}
               </h1>
-              <p className="mt-4 max-w-lg text-sm leading-6 text-slate-300 sm:text-base">
+              <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground sm:text-base">
                 {copy.description}
               </p>
             </div>
@@ -298,27 +267,27 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                 { icon: MailCheck, label: "6-digit auto-submit" },
                 { icon: BadgeCheck, label: "30s resend cooldown" },
               ].map((item) => (
-                <div key={item.label} className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  <item.icon className="size-5 text-cyan-200" />
-                  <p className="mt-3 text-sm text-slate-200">{item.label}</p>
+                <div key={item.label} className="rounded-2xl border border-border bg-background p-4">
+                  <item.icon className="size-5 text-primary" />
+                  <p className="mt-3 text-sm text-foreground">{item.label}</p>
                 </div>
               ))}
             </div>
 
-            <p className="mt-8 text-xs text-slate-400">
+            <p className="mt-8 text-xs text-muted-foreground">
               The dashboard opens automatically after OTP verification or Google sign-in succeeds.
             </p>
           </div>
 
-          <Card className="overflow-hidden border-white/10 bg-slate-950/80 text-white shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
+          <Card className="overflow-hidden border-border bg-card text-card-foreground shadow-xl shadow-black/5">
             <CardContent className="p-0">
-              <div className="border-b border-white/10 bg-white/5 px-6 py-5 sm:px-8">
+              <div className="border-b border-border bg-muted/40 px-6 py-5 sm:px-8">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="text-sm uppercase tracking-[0.24em] text-cyan-200/80">{copy.eyebrow}</p>
-                    <h2 className="mt-1 text-2xl font-semibold text-white">{copy.eyebrow}</h2>
+                    <p className="text-sm uppercase tracking-[0.24em] text-primary">{copy.eyebrow}</p>
+                    <h2 className="mt-1 text-2xl font-semibold text-foreground">{copy.eyebrow}</h2>
                   </div>
-                  <div className="hidden rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100 sm:inline-flex">
+                  <div className="hidden rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs text-primary sm:inline-flex">
                     Dashboard ready
                   </div>
                 </div>
@@ -326,7 +295,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
 
               <div className="space-y-6 px-6 py-6 sm:px-8">
                 {errorMessage ? (
-                  <div className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                     {errorMessage}
                   </div>
                 ) : null}
@@ -342,12 +311,12 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                 {stage === "email" ? (
                   <form onSubmit={onEmailSubmit} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email" className="text-sm text-slate-200">Email</Label>
+                      <Label htmlFor="email" className="text-sm text-foreground">Email</Label>
                       <Input
                         id="email"
                         type="email"
                         placeholder="you@example.com"
-                        className="h-12 border-white/10 bg-white/5 text-white placeholder:text-slate-500 focus-visible:ring-cyan-400/40"
+                        className="h-12 border-input bg-background text-foreground placeholder:text-muted-foreground focus-visible:ring-primary/30"
                         {...register("email")}
                         value={emailValue}
                         onChange={(event) => setEmailValue(event.target.value)}
@@ -356,42 +325,42 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                       />
                     </div>
 
-                    <Button type="submit" className="h-12 w-full bg-cyan-400 text-slate-950 hover:bg-cyan-300" disabled={isSubmitting}>
-                      {isSubmitting ? "Sending..." : mode === "signup" ? "Get verification code" : "Continue"}
+                    <Button type="submit" className="h-12 w-full" disabled={isSubmitting}>
+                      {isSubmitting ? "Sending..." : "Continue"}
                       <ArrowRight className="ml-2 size-4" />
                     </Button>
                   </form>
                 ) : (
                   <div className="space-y-4">
-                    <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/5 p-4">
-                      <p className="text-sm text-cyan-100">We sent a code to</p>
-                      <p className="mt-1 break-all font-medium text-white">{emailValue}</p>
-                      {expiresAt ? <p className="mt-1 text-xs text-slate-400">Expires at {new Date(expiresAt).toLocaleTimeString()}</p> : null}
+                    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                      <p className="text-sm text-primary">We sent a code to</p>
+                      <p className="mt-1 break-all font-medium text-foreground">{emailValue}</p>
+                      {expiresAt ? <p className="mt-1 text-xs text-muted-foreground">Expires at {new Date(expiresAt).toLocaleTimeString()}</p> : null}
                       {expiresInSeconds > 0 ? (
-                        <p className="mt-1 text-xs text-slate-400">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           Code expires in {Math.floor(expiresInSeconds / 60)}m {expiresInSeconds % 60}s
                         </p>
                       ) : null}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="otp" className="text-sm text-slate-200">Enter 6-digit OTP</Label>
+                      <Label htmlFor="otp" className="text-sm text-foreground">Enter 6-digit OTP</Label>
                       <TenantOtpInput
                         value={otpValue}
                         onChange={setOtpValue}
                         length={OTP_LENGTH}
                         disabled={isRequestingOtp || isVerifying}
-                        inputClassName="border-cyan-300/35 bg-slate-900/80 text-white caret-cyan-300 focus:border-cyan-300 focus:ring-cyan-300/30"
+                        inputClassName="border-input bg-background text-foreground caret-primary focus:border-primary focus:ring-primary/30"
                       />
                       {isRequestingOtp ? (
-                        <p className="text-xs text-slate-400">Sending OTP to your email...</p>
+                        <p className="text-xs text-muted-foreground">Sending OTP to your email...</p>
                       ) : null}
                     </div>
 
                     <div className="flex gap-3">
                       <Button
                         type="button"
-                        className="h-12 flex-1 bg-cyan-400 text-slate-950 hover:bg-cyan-300"
+                        className="h-12 flex-1"
                         onClick={() => void completeOtp(otpValue)}
                         disabled={isRequestingOtp || isVerifying || otpValue.length !== OTP_LENGTH}
                       >
@@ -400,7 +369,7 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-12 border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                        className="h-12"
                         onClick={() => void resendOtp()}
                         disabled={isRequestingOtp || resendSeconds > 0}
                       >
@@ -416,15 +385,16 @@ export function TenantAuthCard({ mode }: TenantAuthCardProps) {
                         setOtpValue("")
                         setSessionId(null)
                       }}
-                      className="w-full text-sm text-slate-400 underline-offset-4 hover:text-white hover:underline"
+                      className="w-full text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                     >
                       Use a different email
                     </button>
                   </div>
                 )}
 
-                <div className="pt-2 text-center text-sm text-slate-400">
-                  {copy.footerPrefix} <Link href={copy.footerHref} prefetch={false} className="text-cyan-200 underline-offset-4 hover:text-cyan-100 hover:underline">{copy.footerLabel}</Link>
+                <div className="pt-2 text-center text-sm text-muted-foreground">
+                  Don’t have a tenant yet?{" "}
+                  <Link href="/tenant/signup" prefetch={false} className="text-primary underline-offset-4 hover:underline">Register</Link>
                 </div>
               </div>
             </CardContent>

@@ -247,7 +247,7 @@ export default function EditUserPage() {
 
                 <div>
                   <Label htmlFor="role" className="mb-1">Role</Label>
-                  <Select value={role || undefined} onValueChange={setRole}>
+                  <Select value={role} onValueChange={setRole}>
                     <SelectTrigger id="role" className="w-full">
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>

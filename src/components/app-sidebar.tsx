@@ -83,15 +83,15 @@ const data: {
       ],
     },
     {
-      title: "Agents",
+      title: "Agent",
       url: "/tenant/agents",
       icon: (
         <LayoutGrid
         />
       ),
       items: [
-        { title: "Agents", url: "/tenant/agents" },
-        { title: "AssignAgents", url: "/tenant/agents/created" },
+        // { title: "Agents", url: "/tenant/agents" },
+        { title: "Create Agent", url: "/tenant/agents/created" },
       ],
     },
     /*

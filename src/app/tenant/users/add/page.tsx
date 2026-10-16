@@ -48,7 +48,7 @@ export default function AddUserPage() {
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [agentOptions, setAgentOptions] = useState<
-    Array<{ id: string; name: string }>
+    Array<{ id: string; name: string; active: boolean }>
   >([]);
 
   const roles = useMemo(() => {
@@ -78,6 +78,12 @@ export default function AddUserPage() {
   const assignedAgentIdsCsv = selectedAgentIds.join(",");
   const agentNameById = useMemo(
     () => new Map(agentOptions.map((agent) => [agent.id, agent.name])),
+    [agentOptions],
+  );
+
+  // All agents are listed; inactive ones are flagged in the label.
+  const visibleAgents = useMemo(
+    () => [...agentOptions].sort((a, b) => a.name.localeCompare(b.name)),
     [agentOptions],
   );
 
@@ -115,11 +121,11 @@ export default function AddUserPage() {
               typeof activeRaw === "boolean"
                 ? activeRaw
                 : Number(activeRaw ?? 1) !== 0;
-            if (!isActiveAgent) return null;
-
-            return { id, name };
+            return { id, name, active: isActiveAgent };
           })
-          .filter((row): row is { id: string; name: string } => Boolean(row));
+          .filter((row): row is { id: string; name: string; active: boolean } =>
+            Boolean(row),
+          );
 
         const uniqueById = Array.from(
           new Map(mapped.map((item) => [item.id, item])).values(),
@@ -149,7 +155,9 @@ export default function AddUserPage() {
     setErrors({});
     setSuccess("");
 
-    const request = dispatch(fetchTenantUsers()) as Promise<unknown>;
+    const request = dispatch(
+      fetchTenantUsers({ limit: 200 }),
+    ) as Promise<unknown>;
     request
       .then((rows: unknown) => {
         if (!mounted) return;
@@ -440,7 +448,7 @@ export default function AddUserPage() {
                     Role
                   </Label>
                   <Select
-                    value={role || undefined}
+                    value={role}
                     onValueChange={setRole}
                     disabled={loadingRoles}
                   >
@@ -505,13 +513,13 @@ export default function AddUserPage() {
                       <p className="px-2 py-3 text-sm text-slate-500">
                         Loading active agents...
                       </p>
-                    ) : agentOptions.length === 0 ? (
+                    ) : visibleAgents.length === 0 ? (
                       <p className="px-2 py-3 text-sm text-slate-500">
                         No active agents available.
                       </p>
                     ) : (
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                        {agentOptions.map((agent) => {
+                        {visibleAgents.map((agent) => {
                           const selected = selectedAgentIds.includes(agent.id);
                           return (
                             <button
@@ -532,6 +540,7 @@ export default function AddUserPage() {
                                 }
                               >
                                 {agent.name}
+                                {agent.active ? "" : " (inactive)"}
                               </p>
                             </button>
                           );

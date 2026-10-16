@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import {
   createTenantAgent,
@@ -12,7 +12,9 @@ import {
   fetchTenantUsers,
   fetchTenantRoleBootstrap,
   saveTenantRole,
-  saveTenantAgentToolBindings,  updateTenantAgent,
+  fetchTenantAgentToolBindings,
+  saveTenantAgentToolBindings,
+  updateTenantAgent,
   updateTenantUserActions,
   type ConnectorCatalogItem,
   type TenantConnectorItem,
@@ -49,10 +51,12 @@ import {
   Bot,
   CheckCircle2,
   FileText,
+  Search,
   Shield,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAutoDismissApiMessage } from "@/hooks/useAutoDismissApiMessage";
 import { Checkbox } from "@/components/ui/checkbox";
 
 type TenantUser = {
@@ -274,8 +278,73 @@ const wizardSteps = [
   },
 ] as const;
 
+const MIN_USER_SEARCH_LENGTH = 3;
+
+// Server-side user search; results are fetched only on explicit submit (button / Enter).
+const useTenantUserSearch = (dispatch: AppDispatch) => {
+  const [query, setQueryState] = useState("");
+  const [results, setResults] = useState<TenantUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [searchedTerm, setSearchedTerm] = useState("");
+  const requestId = useRef(0);
+
+  useAutoDismissApiMessage(error, () => setError(""));
+
+  const reset = useCallback(() => {
+    requestId.current += 1;
+    setResults([]);
+    setSearchedTerm("");
+    setLoading(false);
+    setError("");
+  }, []);
+
+  const clear = useCallback(() => {
+    setQueryState("");
+    reset();
+  }, [reset]);
+
+  const setQuery = (value: string) => {
+    setQueryState(value);
+    if (!value.trim()) reset();
+    else setError("");
+  };
+
+  const submit = async () => {
+    const term = query.trim();
+    const id = ++requestId.current;
+
+    if (term.length < MIN_USER_SEARCH_LENGTH) {
+      setResults([]);
+      setSearchedTerm("");
+      setLoading(false);
+      setError(`Enter at least ${MIN_USER_SEARCH_LENGTH} characters to search.`);
+      return;
+    }
+
+    setError("");
+    setLoading(true);
+    setSearchedTerm(term);
+    try {
+      const result = await dispatch(fetchTenantUsers({ search: term, limit: 10 }));
+      if (id !== requestId.current) return;
+      const rows = Array.isArray(result) ? (result as TenantUser[]) : [];
+      setResults(rows.filter((user) => Boolean(user.isActive ?? true)));
+    } catch {
+      if (id !== requestId.current) return;
+      setResults([]);
+      setError("Failed to search users.");
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
+  };
+
+  return { query, setQuery, results, loading, error, searchedTerm, submit, clear };
+};
+
 export default function TenantAgentCreatePage() {
   const dispatch = useDispatch<AppDispatch>();
+  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -296,6 +365,7 @@ export default function TenantAgentCreatePage() {
   const [roleBootstrapMembers, setRoleBootstrapMembers] = useState<RoleBootstrapMember[]>([]);
   const [roleBootstrapActions, setRoleBootstrapActions] = useState<RoleBootstrapRoleAction[]>([]);
   const [roleActionCatalog, setRoleActionCatalog] = useState<RoleBootstrapAction[]>([]);
+  const [savedBindingKeys, setSavedBindingKeys] = useState<string[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [selectedRoleUserIds, setSelectedRoleUserIds] = useState<string[]>([]);
   const [selectedRoleActionIds, setSelectedRoleActionIds] = useState<string[]>([]);
@@ -325,7 +395,8 @@ export default function TenantAgentCreatePage() {
   const [tenantConnectors, setTenantConnectors] = useState<
     TenantConnectorItem[]
   >([]);
-  const [userSearch, setUserSearch] = useState("");
+  const memberSearch = useTenantUserSearch(dispatch);
+  const userSearch = useTenantUserSearch(dispatch);
   const [connectorModalOpen, setConnectorModalOpen] = useState(false);
   const [addUserModalOpen, setAddUserModalOpen] = useState(false);
   const [step1FieldErrors, setStep1FieldErrors] = useState<Step1FieldErrors>(
@@ -335,6 +406,10 @@ export default function TenantAgentCreatePage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useAutoDismissApiMessage(saveError, () => setSaveError(null));
+  useAutoDismissApiMessage(success, () => setSuccess(null));
+  useAutoDismissApiMessage(userActionError, () => setUserActionError(null));
   
 
   const getConnectorByKey = (connectorKey: string) =>
@@ -424,10 +499,6 @@ export default function TenantAgentCreatePage() {
     }
   }, [currentStep]);
 
-  useEffect(() => {
-    setUserSearch("");
-  }, [roleViewMode]);
-
   const syncAgentIdInUrl = (agentId: string) => {
     const normalizedAgentId = String(agentId || "").trim();
     if (!normalizedAgentId) return;
@@ -445,7 +516,7 @@ export default function TenantAgentCreatePage() {
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
-      const result = await dispatch(fetchTenantUsers());
+      const result = await dispatch(fetchTenantUsers({ limit: 200 }));
       setUsers(Array.isArray(result) ? (result as TenantUser[]) : []);
     } finally {
       setLoadingUsers(false);
@@ -490,12 +561,24 @@ export default function TenantAgentCreatePage() {
 
     void track(
       setLoadingUsers,
-      () => dispatch(fetchTenantUsers()) as Promise<unknown>,
+      () => dispatch(fetchTenantUsers({ limit: 200 })) as Promise<unknown>,
       (result) => setUsers(Array.isArray(result) ? (result as TenantUser[]) : []),
     );
+    // The catalog helper returns [] when the auth token is not ready yet, so retry a few times.
+    const loadCatalogWithRetry = async () => {
+      let rows: ConnectorCatalogItem[] = [];
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        rows = (await dispatch(fetchConnectorCatalog())) as ConnectorCatalogItem[];
+        if (cancelled || (Array.isArray(rows) && rows.length > 0)) break;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        if (cancelled) break;
+      }
+      return rows;
+    };
+
     void track(
       setLoadingConnectors,
-      () => dispatch(fetchConnectorCatalog()) as Promise<unknown>,
+      () => loadCatalogWithRetry() as Promise<unknown>,
       (result) =>
         setConnectors(Array.isArray(result) ? (result as ConnectorCatalogItem[]) : []),
     );
@@ -569,6 +652,29 @@ export default function TenantAgentCreatePage() {
     };
   }, [dispatch, editingAgentId, isEditMode, selectedConnectorId, tenantId]);
 
+  // Saved tool bindings for this agent, so a save can clear them when every action is removed.
+  useEffect(() => {
+    if (!isEditMode || !editingAgentId || !tenantId || !selectedConnectorId) {
+      setSavedBindingKeys([]);
+      return;
+    }
+    let cancelled = false;
+
+    void (async () => {
+      const bindings = await dispatch(fetchTenantAgentToolBindings(editingAgentId));
+      if (cancelled) return;
+      setSavedBindingKeys(
+        bindings
+          .filter((item) => String(item.connectorId) === selectedConnectorId)
+          .map((item) => item.actionKey),
+      );
+    })().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dispatch, editingAgentId, isEditMode, selectedConnectorId, tenantId]);
+
   useEffect(() => {
     if (!selectedTenantConnectorId) {
       setRoleActionCatalog([]);
@@ -595,9 +701,22 @@ export default function TenantAgentCreatePage() {
     [currentAgentId, roleBootstrapRoles],
   );
 
+  const tenantUsers = useMemo(
+    () => users.filter((user) => Boolean(user.isActive ?? true)),
+    [users],
+  );
+
+  const knownUsers = useMemo(() => {
+    const byId = new Map<string, TenantUser>();
+    [...users, ...memberSearch.results, ...userSearch.results].forEach((user) =>
+      byId.set(String(user.id), user),
+    );
+    return Array.from(byId.values());
+  }, [users, memberSearch.results, userSearch.results]);
+
   const selectedUser = useMemo(
-    () => users.find((user) => String(user.id) === selectedUserId) || null,
-    [selectedUserId, users],
+    () => knownUsers.find((user) => String(user.id) === selectedUserId) || null,
+    [selectedUserId, knownUsers],
   );
 
   const selectedUserLabel = selectedUser ? formatUserName(selectedUser) : "Select a user";
@@ -605,9 +724,9 @@ export default function TenantAgentCreatePage() {
   const selectedRoleUsers = useMemo(
     () =>
       selectedRoleUserIds
-        .map((userId) => users.find((user) => String(user.id) === String(userId)) || null)
+        .map((userId) => knownUsers.find((user) => String(user.id) === String(userId)) || null)
         .filter((user): user is TenantUser => Boolean(user)),
-    [selectedRoleUserIds, users],
+    [selectedRoleUserIds, knownUsers],
   );
 
   // Actions granted to the selected user through roles (includes unsaved edits to the open role).
@@ -847,19 +966,6 @@ export default function TenantAgentCreatePage() {
     selectRole(roleRecord);
   };
 
-  const activeUsers = users.filter((user) => Boolean(user.isActive ?? true));
-
-  const filteredUsers = (() => {
-    const q = userSearch.trim().toLowerCase();
-    if (!q) return activeUsers;
-
-    return activeUsers.filter((user) => {
-      const nameText = formatUserName(user).toLowerCase();
-      const emailText = String(user.email || "").toLowerCase();
-      return nameText.includes(q) || emailText.includes(q);
-    });
-  })();
-
   const isActiveToggleDisabled = !tenantId || loadingEditData || loadingUsers;
 
   const handleConnectorSaved = async (payload: {
@@ -978,7 +1084,8 @@ export default function TenantAgentCreatePage() {
     setServiceType("");
     setSelectedTenantConnectorId("");
     setStep1FieldErrors({});
-    setUserSearch("");
+    memberSearch.clear();
+    userSearch.clear();
     setRoleViewMode("roles");
     setSelectedUserId("");
     setSelectedRoleId("");
@@ -989,6 +1096,7 @@ export default function TenantAgentCreatePage() {
     setRoleBootstrapActions([]);
     setUserDirectActions({});
     setRoleActionCatalog([]);
+    setSavedBindingKeys([]);
   };
 
   const createAgent = async () => {
@@ -1030,6 +1138,29 @@ export default function TenantAgentCreatePage() {
 
     if (loadingConnectors || loadingTenantConnectors) {
       setSaveError("Please wait until tenant connector details are loaded.");
+      return;
+    }
+
+    // An agent is only assigned to users who hold at least one action.
+    const isActiveRow = (row: { is_active?: number | boolean | null }) => Number(row.is_active ?? 1) !== 0;
+    const hasRoleWithUsersAndActions = visibleRoleBootstrapRoles.some((role) => {
+      if (String(role.id || "").startsWith("draft-role-") || !isActiveRow(role)) return false;
+      const hasUsers = roleBootstrapMembers.some(
+        (item) => String(item.role_id) === String(role.id) && isActiveRow(item),
+      );
+      const hasActions = roleBootstrapActions.some(
+        (item) => String(item.role_id) === String(role.id) && isActiveRow(item),
+      );
+      return hasUsers && hasActions;
+    });
+    const hasUserWithDirectActions = Object.values(userDirectActions).some(
+      (byConnector) => (byConnector[selectedToolConnector.id] || []).length > 0,
+    );
+
+    if (!hasRoleWithUsersAndActions && !hasUserWithDirectActions) {
+      setSaveError(
+        "Select users and actions in a role, or select actions for a user. Users without actions are not assigned this agent.",
+      );
       return;
     }
 
@@ -1131,27 +1262,36 @@ export default function TenantAgentCreatePage() {
           current.map((item) => (savedRoleIds.has(item.id) ? { ...item, agent_id: agentId } : item)),
         );
 
-        // Agent tool allowlist = union of actions granted to its roles.
-        const actionKeyById = new Map(roleActionCatalog.map((item) => [String(item.id), item.action_key]));
-        const boundActionKeys = Array.from(
-          new Set(
-            roleBootstrapActions
-              .filter((item) => savedRoleIds.has(item.role_id) && Number(item.is_active ?? 1) !== 0)
-              .map((item) => actionKeyById.get(String(item.action_id || "")) || "")
-              .filter(Boolean),
-          ),
-        );
+      }
 
-        if (boundActionKeys.length > 0) {
-          await dispatch(
-            saveTenantAgentToolBindings({
-              agentId,
-              connectorId: selectedToolConnector.id,
-              tenantConnectorId: selectedTenantConnectorRow.id,
-              actionKeys: boundActionKeys,
-            }),
-          );
-        }
+      // Agent tool allowlist = union of actions granted to its roles and to users directly.
+      const actionKeyById = new Map(roleActionCatalog.map((item) => [String(item.id), item.action_key]));
+      const savedRoleIdSet = new Set(rolesToSave.map((role) => role.id));
+      const directActionIds = Object.values(userDirectActions).flatMap(
+        (byConnector) => byConnector[selectedToolConnector.id] || [],
+      );
+      const boundActionKeys = Array.from(
+        new Set(
+          [
+            ...roleBootstrapActions
+              .filter((item) => savedRoleIdSet.has(item.role_id) && Number(item.is_active ?? 1) !== 0)
+              .map((item) => String(item.action_id || "")),
+            ...directActionIds.map((id) => String(id)),
+          ]
+            .map((id) => actionKeyById.get(id) || "")
+            .filter(Boolean),
+        ),
+      );
+
+      if (boundActionKeys.length > 0 || savedBindingKeys.length > 0) {
+        await dispatch(
+          saveTenantAgentToolBindings({
+            agentId,
+            connectorId: selectedToolConnector.id,
+            tenantConnectorId: selectedTenantConnectorRow.id,
+            actionKeys: boundActionKeys,
+          }),
+        );
       }
 
       for (const [userId, byConnector] of Object.entries(userDirectActions)) {
@@ -1174,6 +1314,7 @@ export default function TenantAgentCreatePage() {
         coreMessage || backendMessage || fallbackMessage,
       );
       resetForm();
+      router.push("/tenant/agents/created");
     } catch (err: unknown) {
       setSaveError(extractErrorMessage(err));
     } finally {
@@ -1210,11 +1351,10 @@ export default function TenantAgentCreatePage() {
                 </div>
                 <div>
                   <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-                    Build your agent in two focused steps
+                    Create Agent
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                    The canvas has been replaced with a guided form flow so the
-                    full agent definition stays easy to review, edit, and save.
+                    Set up your agent and choose who can use it.
                   </p>
                 </div>
               </div>
@@ -1676,7 +1816,7 @@ export default function TenantAgentCreatePage() {
                                   : "bg-transparent text-slate-600 hover:text-primary hover:bg-white/90",
                               )}
                             >
-                              Roles
+                              Teams
                             </Button>
 
                             <Button
@@ -1751,21 +1891,52 @@ export default function TenantAgentCreatePage() {
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                               Users
                             </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Search and add tenant users for this agent.
-                            </p>
+                            {/* <p className="mt-1 text-xs text-muted-foreground">
+                              All tenant users. Add a new user to see it here instantly.
+                            </p> */}
                           </div>
+                          <Button type="button" variant="outline" size="sm" className="cursor-pointer" onClick={() => setAddUserModalOpen(true)}>
+                            Add User
+                          </Button>
                         </div>
-                        <div className="relative">
-                          <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users..." className="pr-8" />
-                          {userSearch ? (
-                            <button type="button" onClick={() => setUserSearch("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                              ×
-                            </button>
-                          ) : null}
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Input
+                              value={userSearch.query}
+                              onChange={(event) => userSearch.setQuery(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void userSearch.submit();
+                                }
+                              }}
+                              placeholder="Search users..."
+                              className="pr-8"
+                            />
+                            {userSearch.query ? (
+                              <button type="button" onClick={userSearch.clear} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                ×
+                              </button>
+                            ) : null}
+                          </div>
+                          <Button type="button" variant="outline" onClick={() => void userSearch.submit()} disabled={userSearch.loading} aria-label="Search users" className="cursor-pointer">
+                            <Search className="h-4 w-4" />
+                          </Button>
                         </div>
+                        {userSearch.error ? <p className="text-xs text-red-600">{userSearch.error}</p> : null}
+                        {loadingUsers || userSearch.loading ? <p className="text-sm text-muted-foreground">Loading users...</p> : null}
+                        {!loadingUsers && !userSearch.loading && !userSearch.searchedTerm && tenantUsers.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
+                            No users yet. Click "Add User" to create one.
+                          </div>
+                        ) : null}
+                        {!userSearch.loading && !userSearch.error && userSearch.searchedTerm && userSearch.results.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
+                            No users found for "{userSearch.searchedTerm}".
+                          </div>
+                        ) : null}
                         <div className="space-y-2 max-h-130 overflow-y-auto pr-1">
-                          {filteredUsers.map((user) => {
+                          {(userSearch.searchedTerm ? userSearch.results : tenantUsers).map((user) => {
                             const id = String(user.id);
                             const selected = selectedUserId === id;
                             return (
@@ -1813,7 +1984,7 @@ export default function TenantAgentCreatePage() {
                         <div className="overflow-hidden rounded-2xl border border-border">
                           <table className="min-w-full divide-y divide-border text-sm">
                             <tbody className="divide-y divide-border bg-background">
-                              <tr>
+                              {/* <tr>
                                 <th className="w-40 bg-muted/30 px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Scope</th>
                                 <td className="px-4 py-4">
                                   <div className="flex flex-wrap gap-2">
@@ -1823,45 +1994,85 @@ export default function TenantAgentCreatePage() {
                                     <Badge variant={roleIsActive ? "outline" : "destructive"}>{roleIsActive ? "Active" : "Inactive"}</Badge>
                                   </div>
                                 </td>
-                              </tr>
+                              </tr> */}
                               <tr>
                                 <th className="bg-muted/30 px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</th>
                                 <td className="px-4 py-4">
                                   <div className="space-y-3">
                                     <div className="flex items-center gap-2">
                                       <div className="relative w-full max-w-sm">
-                                        <Input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users..." className="pr-8" />
-                                        {userSearch ? (
-                                          <button type="button" onClick={() => setUserSearch("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                        <Input
+                                          value={memberSearch.query}
+                                          onChange={(event) => memberSearch.setQuery(event.target.value)}
+                                          onKeyDown={(event) => {
+                                            if (event.key === "Enter") {
+                                              event.preventDefault();
+                                              void memberSearch.submit();
+                                            }
+                                          }}
+                                          placeholder="Search users..."
+                                          className="pr-8"
+                                        />
+                                        {memberSearch.query ? (
+                                          <button type="button" onClick={memberSearch.clear} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                                             ×
                                           </button>
                                         ) : null}
-                                      </div>
-                                      <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge>
+                                        </div>
+                                        <Button type="button" variant="outline" onClick={() => void memberSearch.submit()} disabled={memberSearch.loading} aria-label="Search users" className="cursor-pointer">
+                                          <Search className="mr-1 h-4 w-4" />
+                                          Search
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className="cursor-pointer"
+                                          onClick={() => {
+                                            setAddUserModalOpen(true);
+                                          }}
+                                      >
+                                          Add User
+                                      </Button>
+                                      {/* <Badge variant="outline">{selectedRoleUserIds.length} selected</Badge> */}
                                     </div>
 
-                                    {userSearch.trim().length === 0 ? (
+                                    {memberSearch.error ? (
+                                      <p className="text-xs text-red-600">{memberSearch.error}</p>
+                                    ) : null}
+
+                                    {!memberSearch.searchedTerm && !memberSearch.loading && !memberSearch.error ? (
                                       <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
-                                        Search for a user to add them to this role.
+                                        Search for a user (at least {MIN_USER_SEARCH_LENGTH} characters) to add them to this role.
                                       </div>
                                     ) : (
                                       <div className="space-y-2">
-                                        {loadingUsers ? <span className="text-sm text-muted-foreground">Loading users...</span> : null}
-                                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                                          {filteredUsers.map((user) => {
-                                            const userId = String(user.id);
-                                            const checked = selectedRoleUserIds.includes(userId);
-                                            return (
-                                              <label key={userId} className={cn("flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-colors", checked ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-muted/20")}>
-                                                <Checkbox checked={checked} onCheckedChange={() => toggleRoleUser(userId)} />
-                                                <div className="min-w-0">
-                                                  <p className="truncate text-sm font-medium text-foreground">{formatUserName(user)}</p>
-                                                  <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-                                                </div>
-                                              </label>
-                                            );
-                                          })}
-                                        </div>
+                                        {memberSearch.loading ? (
+                                          <span className="text-sm text-muted-foreground">Loading users...</span>
+                                        ) : null}
+
+                                        {!memberSearch.loading && !memberSearch.error && memberSearch.results.length === 0 ? (
+                                          <div className="rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
+                                            No users found for "{memberSearch.searchedTerm}".
+                                          </div>
+                                        ) : null}
+
+                                        {memberSearch.results.length > 0 ? (
+                                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                            {memberSearch.results.map((user) => {
+                                              const userId = String(user.id);
+                                              const checked = selectedRoleUserIds.includes(userId);
+                                              return (
+                                                <label key={userId} className={cn("flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-colors", checked ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-muted/20") }>
+                                                  <Checkbox checked={checked} onCheckedChange={() => toggleRoleUser(userId)} />
+                                                  <div className="min-w-0">
+                                                    <p className="truncate text-sm font-medium text-foreground">{formatUserName(user)}</p>
+                                                    <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                                                  </div>
+                                                </label>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : null}
                                       </div>
                                     )}
 
@@ -1905,7 +2116,7 @@ export default function TenantAgentCreatePage() {
                                           No actions found for the selected tool.
                                         </div>
                                       ) : null}
-                                      <div className="grid gap-3">
+                                      <div className="grid gap-2 md:grid-cols-2">
                                         {selectedToolActions.map((action) => {
                                           const checked = selectedRoleActionIds.includes(action.id);
                                           return (
@@ -1943,7 +2154,7 @@ export default function TenantAgentCreatePage() {
                             <Button
                                 type="button"
                                 variant="outline"
-                                className=""
+                                className="cursor-pointer"
                                 onClick={() => {
                                   setAddUserModalOpen(true);
                                 }}

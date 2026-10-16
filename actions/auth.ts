@@ -1506,7 +1506,7 @@ export const fetchTenantUsers =
   (input?: { search?: string; limit?: number }): ThunkAction<Promise<TenantMeUser[]>, RootState, unknown, AnyAction> =>
   async () => {
     const search = String(input?.search || "").trim();
-    const limit = Math.max(1, Math.min(Number(input?.limit || 10) || 10, 10));
+    const limit = Math.max(1, Math.min(Number(input?.limit || 10) || 10, 200));
     const requestKey = `${search.toLowerCase()}|${limit}`;
 
     const token = loadAuthTokenCookie();

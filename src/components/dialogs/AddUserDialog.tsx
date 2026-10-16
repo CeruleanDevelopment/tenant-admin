@@ -167,9 +167,6 @@ export default function AddUserDialog({
                   <p className="text-sm font-medium text-foreground">
                     Active
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Enable this user immediately after creation.
-                  </p>
                 </div>
                 <Switch
                   checked={isActive}

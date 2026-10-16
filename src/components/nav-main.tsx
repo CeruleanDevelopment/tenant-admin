@@ -75,7 +75,7 @@ export function NavMain({ items }: { items: NavItem[] }) {
             <SidebarMenuItem>
 
               {/* Parent */}
-              <CollapsibleTrigger asChild>
+              <CollapsibleTrigger asChild className="cursor-pointer">
                 <SidebarMenuButton
                   className="group "
                   isActive={parentActive}

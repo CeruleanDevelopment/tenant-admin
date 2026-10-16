@@ -3,5 +3,5 @@
 import { TenantAuthCard } from "@/components/TenantAuthCard"
 
 export default function TenantSigninPage() {
-	return <TenantAuthCard mode="signin" />
+	return <TenantAuthCard />
 }

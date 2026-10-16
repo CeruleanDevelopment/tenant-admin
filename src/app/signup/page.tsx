@@ -208,8 +208,8 @@ export default function SignUpPage() {
           <div className={cn("flex flex-col gap-6")}>
             <Card className="border-border bg-card text-card-foreground shadow-xl backdrop-blur-xl">
               <CardHeader className="text-center">
-                <div className="mx-auto mb-3 inline-flex size-11 items-center justify-center rounded-xl border border-emerald-300/30 bg-emerald-500">
-                  <Building2 className="size-5 " />
+                <div className="mx-auto mb-3 inline-flex size-11 items-center justify-center rounded-xl border border-primary/30 bg-primary text-primary-foreground">
+                  <Building2 className="size-5" />
                 </div>
                 <CardTitle className="text-xl">Register Tenant Admin</CardTitle>
                 <CardDescription className="text-muted-foreground">
@@ -379,7 +379,7 @@ export default function SignUpPage() {
                     <button
                       type="submit"
                       disabled={isSubmitting || isLoadingCountries}
-                      className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-xl border border-emerald-300/40 bg-emerald-400 px-4 text-base font-semibold text-slate-950 shadow-lg shadow-emerald-900/30 transition-colors hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                      className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-xl border border-primary/40 bg-primary px-4 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/30 transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                     >
                       {isSubmitting ? "Registering..." : "Register Tenant"}
                     </button>
