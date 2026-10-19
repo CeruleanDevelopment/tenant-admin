@@ -594,7 +594,7 @@ export default function TenantCreatedAgentsPage() {
                               className="inline-flex h-8 items-center justify-center leading-none cursor-pointer bg-primary text-white"
                               onClick={() => openDialog(agent)}
                             >
-                              <span className="relative top-px leading-none">View</span>
+                              <span className="relative top-px leading-none">Edit Assigned Actions</span>
                             </Button>
                             <Button
                               type="button"
