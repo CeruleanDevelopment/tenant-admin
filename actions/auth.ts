@@ -888,6 +888,7 @@ export const sendTenantAgentChat = (input: {
   collections?: string[];
   workflowType?: string;
   files?: TenantAgentChatFileInput[];
+  onToken?: (token: string) => void;
 }): ThunkAction<
   Promise<TenantAgentChatResponse>,
   RootState,
@@ -915,11 +916,35 @@ export const sendTenantAgentChat = (input: {
     }
 
     try {
+      // Server streams SSE tokens when available; otherwise it returns a normal JSON body.
+      let streamOffset = 0;
+      const streamConfig = {
+        responseType: "text" as const,
+        onDownloadProgress: (event: { event?: { target?: { responseText?: string } } }) => {
+          if (!input.onToken) return;
+          const text = String(event?.event?.target?.responseText || "");
+          const lastFrameEnd = text.lastIndexOf("\n\n");
+          if (lastFrameEnd < streamOffset) return;
+          const frames = text.slice(streamOffset, lastFrameEnd).split("\n\n");
+          streamOffset = lastFrameEnd + 2;
+          for (const frame of frames) {
+            if (!frame.startsWith("event: token")) continue;
+            const dataLine = frame.split("\n").find((line: string) => line.startsWith("data: "));
+            try {
+              const token = dataLine ? JSON.parse(dataLine.slice(6)).t : "";
+              if (token) input.onToken(String(token));
+            } catch {
+              // ignore malformed frame
+            }
+          }
+        },
+      };
       const response = await (() => {
         if (!files.length) {
           const payload: Record<string, unknown> = {
             message: normalizedMessage,
           };
+          if (input.onToken) payload.stream = true;
           if (input.chatId) payload.chatId = String(input.chatId);
           if (typeof input.topK === "number") payload.topK = input.topK;
           if (Array.isArray(input.collections)) payload.collections = input.collections;
@@ -931,12 +956,14 @@ export const sendTenantAgentChat = (input: {
             {
               headers,
               timeout: 120000,
+              ...streamConfig,
             },
           );
         }
 
         const formData = new FormData();
         formData.append("message", normalizedMessage);
+        if (input.onToken) formData.append("stream", "true");
         if (input.chatId) formData.append("chatId", String(input.chatId));
         if (typeof input.topK === "number") {
           formData.append("topK", String(input.topK));
@@ -966,14 +993,40 @@ export const sendTenantAgentChat = (input: {
           {
             headers,
             timeout: 180000,
+            ...streamConfig,
           },
         );
       })();
+
+      const rawBody: string = typeof response?.data === "string" ? response.data : "";
+      if (rawBody) {
+        const doneFrame = rawBody.split("\n\n").reverse().find((frame: string) => frame.startsWith("event: done") || frame.startsWith("event: error"));
+        const dataLine = doneFrame?.split("\n").find((line: string) => line.startsWith("data: "));
+        const parsed = (() => {
+          try {
+            return JSON.parse(dataLine ? dataLine.slice(6) : rawBody) as Record<string, unknown>;
+          } catch {
+            return {} as Record<string, unknown>;
+          }
+        })();
+        if (doneFrame?.startsWith("event: error")) {
+          throw new Error(String(parsed.message || "Chat failed."));
+        }
+        return normalizeTenantChatResponse(parsed);
+      }
 
       return normalizeTenantChatResponse(
         (response?.data || {}) as Record<string, unknown>,
       );
     } catch (error: unknown) {
+      const errorResponse = (error as { response?: { data?: unknown } } | null)?.response;
+      if (errorResponse && typeof errorResponse.data === "string") {
+        try {
+          errorResponse.data = JSON.parse(errorResponse.data);
+        } catch {
+          // keep the raw text
+        }
+      }
       const normalizeOAuthError = (value: string): string => {
         const text = String(value || "").trim();
         const lower = text.toLowerCase();

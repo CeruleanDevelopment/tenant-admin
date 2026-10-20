@@ -37,6 +37,7 @@ import {
 
 import {
   deleteTenantAgentConversationUser,
+  ensureTenantChatSession,
   fetchAssignedAgents,
   fetchTenantAgentChatHistory,
   fetchUserChatSessions,
@@ -1660,7 +1661,17 @@ export default function ChatPage() {
     }))
     router.replace(buildChatUrl(selectedAgentId, nextChatId))
     setOpenSessionMenuId(null)
-  }, [router, selectedAgentId])
+
+    const agentId = selectedAgentId
+    void (async () => {
+      try {
+        await dispatch(ensureTenantChatSession({ agentId, chatId: nextChatId }) as any)
+        await loadUserSessions(true, { silent: true, agentId })
+      } catch {
+        // the row is still created on the first message
+      }
+    })()
+  }, [dispatch, loadUserSessions, router, selectedAgentId])
 
   const sendMessage = async (extraAttachments: ChatAttachment[] = []) => {
     const message = input.trim()
@@ -1723,6 +1734,31 @@ export default function ChatPage() {
       [targetBucketKey]: [...(prev[targetBucketKey] ?? activeMessages), userMessage],
     }))
 
+    const streamMessageId = `assistant-${Date.now()}`
+    let streamedText = ""
+    let streamFlushTimer: ReturnType<typeof setTimeout> | null = null
+    const flushStreamedText = () => {
+      streamFlushTimer = null
+      const text = streamedText
+      setMessagesByBucket((prev) => {
+        const bucket = prev[targetBucketKey] ?? []
+        const exists = bucket.some((item) => item.id === streamMessageId)
+        const next: ChatMessage = {
+          id: streamMessageId,
+          role: "assistant",
+          text,
+          time: nowTime(activeDisplayTimeZone),
+          source: "server",
+        }
+        return {
+          ...prev,
+          [targetBucketKey]: exists
+            ? bucket.map((item) => (item.id === streamMessageId ? { ...item, text } : item))
+            : [...bucket, next],
+        }
+      })
+    }
+
     try {
       const payload = (await dispatch(
         sendTenantAgentChat({
@@ -1730,6 +1766,10 @@ export default function ChatPage() {
           message: message,
           chatId: resolvedChatId,
           workflowType: selectedWorkflowType,
+          onToken: (token: string) => {
+            streamedText += token
+            if (!streamFlushTimer) streamFlushTimer = setTimeout(flushStreamedText, 50)
+          },
           files: pendingAttachments.map((item) => ({
             file: item.file,
             kind: item.kind,
@@ -1783,7 +1823,7 @@ export default function ChatPage() {
         String(payload.markdown_summary || payload.answer || payload.response || payload.reply || "I analyzed your request and prepared a response."),
       )
       const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
+        id: streamedText ? streamMessageId : `assistant-${Date.now()}`,
         role: "assistant",
         text: replyText,
         time: nowTime(activeDisplayTimeZone),
@@ -1798,11 +1838,24 @@ export default function ChatPage() {
 
       const responseChatId = returnedChatId || resolvedChatId
       const responseBucketKey = buildMessageBucketKey(selectedAgentId, responseChatId)
-      setMessagesByBucket((prev) => ({
-        ...prev,
-        [responseBucketKey]: [...(prev[responseBucketKey] ?? []), assistantMessage],
-      }))
+      if (streamFlushTimer) clearTimeout(streamFlushTimer)
+      setMessagesByBucket((prev) => {
+        const streamedBucket = prev[targetBucketKey] ?? []
+        const hasStreamed = streamedBucket.some((item) => item.id === streamMessageId)
+        if (hasStreamed) {
+          // Swap the live-streamed text for the final server-formatted answer.
+          return {
+            ...prev,
+            [targetBucketKey]: streamedBucket.map((item) => (item.id === streamMessageId ? assistantMessage : item)),
+          }
+        }
+        return {
+          ...prev,
+          [responseBucketKey]: [...(prev[responseBucketKey] ?? []), assistantMessage],
+        }
+      })
     } catch (chatError: unknown) {
+      if (streamFlushTimer) clearTimeout(streamFlushTimer)
       const extracted = extractApiMessage(chatError as any)
       const rawMessage =
         typeof chatError === "object" && chatError !== null && "message" in chatError
@@ -1846,7 +1899,7 @@ export default function ChatPage() {
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">Agent Workspace</p>
+              {/* <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary">Agent Workspace</p> */}
               <h1 className="text-xl font-semibold sm:text-2xl">
                 {selectedAgent?.name}
               </h1>
