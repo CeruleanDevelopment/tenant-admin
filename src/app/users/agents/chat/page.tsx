@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -14,11 +14,13 @@ import {
   CheckCircle2,
   Clock3,
   Copy,
+  Download,
   FileText,
   FolderClosed,
   Globe,
   Image,
   ImageIcon,
+  Loader2,
   Mail,
   Mic,
   MoreVertical,
@@ -33,12 +35,13 @@ import {
   Trash2,
   Wand2,
   X,
+  PlusIcon,
 } from "lucide-react"
 
 import {
   deleteTenantAgentConversationUser,
   ensureTenantChatSession,
-  fetchAssignedAgents,
+  fetchAssignedAgent,
   fetchTenantAgentChatHistory,
   fetchUserChatSessions,
   renameTenantAgentConversationUser,
@@ -82,6 +85,7 @@ type ChatMessage = {
   meta?: string
   source?: "ai" | "server"
   persistedId?: string
+  createdAt?: string
   attachments?: ChatAttachment[]
 }
 
@@ -107,9 +111,10 @@ const doesSessionMatchChatId = (session: UserChatSession, chatId: string): boole
 type ChatAttachment = {
   id: string
   file: File
-  kind: "image" | "media" | "document"
+  kind: "image" | "document"
   mimeType?: string
   previewUrl?: string
+  url?: string
   sizeLabel?: string
 }
 
@@ -127,6 +132,7 @@ type ChatHistoryRow = {
 
 let assignedAgentsCache: TenantAgentCard[] | null = null
 let assignedAgentsLastFetchAt = 0
+let assignedAgentsCacheKey = ""
 let assignedAgentsRequestPromise: Promise<Record<string, unknown>[]> | null = null
 
 const DEFAULT_CHAT_TIMEZONE = "Asia/Kolkata"
@@ -154,22 +160,23 @@ const resolveChatTimeZone = (value?: string): string => {
 const formatTimeByTimeZone = (date: Date, timezone?: string): string => {
   const targetTimeZone = resolveChatTimeZone(timezone)
   try {
-    return new Intl.DateTimeFormat("en-IN", {
-      hour: "2-digit",
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
       timeZone: targetTimeZone,
     }).format(date)
   } catch {
     try {
-      return new Intl.DateTimeFormat("en-IN", {
-        hour: "2-digit",
+      return new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
         minute: "2-digit",
-        hour12: false,
+        hour12: true,
         timeZone: DEFAULT_CHAT_TIMEZONE,
       }).format(date)
     } catch {
-      return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+      const hours = date.getHours()
+      return `${hours % 12 || 12}:${String(date.getMinutes()).padStart(2, "0")} ${hours >= 12 ? "PM" : "AM"}`
     }
   }
 }
@@ -544,19 +551,44 @@ const mapStoredAttachments = (urls: unknown): ChatAttachment[] => {
     const lower = name.toLowerCase()
     const kind: ChatAttachment["kind"] = /\.(png|jpg|jpeg|gif|webp|bmp|svg|avif)$/.test(lower)
       ? "image"
-      : /\.(mp3|wav|ogg|mp4|mov|avi|mkv|m4a|webm)$/.test(lower)
-        ? "media"
-        : "document"
+      : "document"
 
     mapped.push({
       id: `history-attachment-${index}-${name}`,
       file: createVirtualFile(name),
       kind,
+      url,
       previewUrl: kind === "image" ? url : undefined,
     })
   })
 
   return mapped
+}
+
+const HISTORY_PAGE_SIZE = 30
+
+const dayKeyByTimeZone = (date: Date, timezone?: string): string => {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: resolveChatTimeZone(timezone) }).format(date)
+  } catch {
+    return date.toDateString()
+  }
+}
+
+// WhatsApp-style day label: Today, Yesterday, weekday within the last week, else full date.
+const formatDayLabel = (date: Date, timezone?: string): string => {
+  const now = new Date()
+  const key = dayKeyByTimeZone(date, timezone)
+  if (key === dayKeyByTimeZone(now, timezone)) return "Today"
+  if (key === dayKeyByTimeZone(new Date(now.getTime() - 24 * 60 * 60 * 1000), timezone)) return "Yesterday"
+  const diffDays = (now.getTime() - date.getTime()) / (24 * 60 * 60 * 1000)
+  const tz = resolveChatTimeZone(timezone)
+  try {
+    if (diffDays < 7) return new Intl.DateTimeFormat("en-IN", { weekday: "long", timeZone: tz }).format(date)
+    return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "long", year: "numeric", timeZone: tz }).format(date)
+  } catch {
+    return date.toDateString()
+  }
 }
 
 const mapHistoryRowsToMessages = (rows: ChatHistoryRow[], timezone?: string): ChatMessage[] =>
@@ -565,13 +597,13 @@ const mapHistoryRowsToMessages = (rows: ChatHistoryRow[], timezone?: string): Ch
     role: String(row.role || "assistant") === "user" ? "user" : "assistant",
     text: String(row.content || ""),
     time: formatTimeFromIso(String(row.created_at || ""), timezone),
+    createdAt: String(row.created_at || "") || undefined,
     attachments: mapStoredAttachments(row.attachment_urls),
   }))
 
 const inferAttachmentKind = (file: File): ChatAttachment["kind"] => {
   const type = String(file.type || "").toLowerCase()
   if (type.startsWith("image/")) return "image"
-  if (type.startsWith("audio/") || type.startsWith("video/")) return "media"
   return "document"
 }
 
@@ -581,10 +613,6 @@ const isImageAttachment = (attachment: ChatAttachment): boolean => {
     attachment.previewUrl &&
       (attachment.mimeType?.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|avif|svg)$/.test(name)),
   )
-}
-
-const isMediaAttachment = (attachment: ChatAttachment): boolean => {
-  return Boolean(attachment.mimeType?.startsWith("audio/") || attachment.mimeType?.startsWith("video/") || attachment.kind === "media")
 }
 
 const getAttachmentExtension = (attachment: ChatAttachment): string => {
@@ -671,50 +699,125 @@ const createAttachmentView = (attachment: ChatAttachment): ChatAttachmentView =>
   isPreviewImage: Boolean(attachment.previewUrl && isImageAttachment(attachment)),
 })
 
+// Download via blob so the browser saves the file; fall back to opening it in a new tab.
+const downloadAttachment = async (attachment: ChatAttachment) => {
+  const url = attachment.url
+  if (!url) return
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(String(response.status))
+    const blobUrl = URL.createObjectURL(await response.blob())
+    const link = document.createElement("a")
+    link.href = blobUrl
+    link.download = attachment.file.name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000)
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer")
+  }
+}
+
+const getExtensionLabelTone = (extension: string): string => {
+  switch (extension) {
+    case "PDF":
+      return "bg-rose-500"
+    case "DOC":
+    case "DOCX":
+      return "bg-blue-500"
+    case "XLS":
+    case "XLSX":
+    case "CSV":
+      return "bg-emerald-500"
+    case "PPT":
+    case "PPTX":
+      return "bg-orange-500"
+    case "TXT":
+    case "MD":
+    case "JSON":
+    case "XML":
+      return "bg-violet-500"
+    default:
+      return "bg-slate-500"
+  }
+}
+
 function AttachmentImageTile({ attachment, isUser }: { attachment: ChatAttachmentView; isUser: boolean }) {
   if (!attachment.previewUrl) return null
+  const canOpen = Boolean(attachment.url)
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/55 bg-white/90 shadow-sm">
-      <img
-        src={attachment.previewUrl}
-        alt={attachment.file.name}
-        className="h-44 w-full object-cover sm:h-52"
-      />
+      <button
+        type="button"
+        disabled={!canOpen}
+        onClick={() => attachment.url && window.open(attachment.url, "_blank", "noopener,noreferrer")}
+        className="block w-full cursor-pointer disabled:cursor-default"
+        aria-label={`Open ${attachment.file.name}`}
+      >
+        <img
+          src={attachment.previewUrl}
+          alt={attachment.file.name}
+          className="h-44 w-full object-cover sm:h-52"
+        />
+      </button>
       <div className={`flex items-center justify-between gap-3 px-3 py-2 ${isUser ? "bg-linear-to-r from-primary to-primary-light text-white" : "bg-white text-slate-700"}`}>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{attachment.file.name}</p>
           <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>{attachment.sizeLabel ?? "Image"}</p>
         </div>
-        <Image className="h-4 w-4 shrink-0" />
+        {canOpen ? (
+          <button type="button" onClick={() => void downloadAttachment(attachment)} className="cursor-pointer rounded-full p-1.5 hover:bg-black/10" aria-label={`Download ${attachment.file.name}`}>
+            <Download className="h-4 w-4 shrink-0" />
+          </button>
+        ) : (
+          <Image className="h-4 w-4 shrink-0" />
+        )}
       </div>
     </div>
   )
 }
 
 function AttachmentCard({ attachment, isUser }: { attachment: ChatAttachmentView; isUser: boolean }) {
-  const isMedia = isMediaAttachment(attachment)
-  const MediaIcon = isMedia ? Globe : FileText
   const extension = getAttachmentExtension(attachment)
-  const tone = getFileToneByExtension(extension)
+  const name = attachment.file.name
+  const canOpen = Boolean(attachment.url)
 
   return (
-    <div className={`flex items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-white/60 bg-white/90 text-slate-700"}`}>
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${isUser ? "bg-white/15" : tone.iconClass}`}>
-        <MediaIcon className={`h-5 w-5 ${isUser ? "text-white" : "text-primary"}`} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{attachment.file.name}</p>
-        <div className="mt-1 flex items-center gap-2">
-          {!isMedia ? (
-            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${isUser ? "border border-white/30 bg-white/20 text-white" : tone.badgeClass}`}>
-              {extension}
-            </span>
-          ) : null}
+    <div className={`rounded-2xl border px-3 py-2.5 shadow-sm ${isUser ? "border-white/20 bg-white/10 text-white" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+      <div
+        role={canOpen ? "button" : undefined}
+        tabIndex={canOpen ? 0 : undefined}
+        onClick={() => canOpen && window.open(attachment.url, "_blank", "noopener,noreferrer")}
+        onKeyDown={(event) => {
+          if (canOpen && (event.key === "Enter" || event.key === " ")) window.open(attachment.url, "_blank", "noopener,noreferrer")
+        }}
+        className={`flex items-center gap-3 ${canOpen ? "cursor-pointer" : ""}`}
+      >
+        <div className={`relative flex h-11 w-9 shrink-0 items-center justify-center rounded-md ${getExtensionLabelTone(extension)} text-white`}>
+          <FileText className="h-4 w-4" />
+          <span className="absolute inset-x-0 bottom-0 rounded-b-md bg-black/25 text-center text-[8px] font-bold leading-3">{extension.slice(0, 4)}</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{name}</p>
           <p className={`text-[11px] ${isUser ? "text-white/75" : "text-slate-500"}`}>
-            {attachment.sizeLabel ?? (isMedia ? "Media" : "File")}
+            {extension}{attachment.sizeLabel ? ` · ${attachment.sizeLabel}` : ""}
           </p>
         </div>
+        {canOpen ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              void downloadAttachment(attachment)
+            }}
+            className={`shrink-0 cursor-pointer rounded-full border p-2 ${isUser ? "border-white/40 hover:bg-white/20" : "border-slate-300 hover:bg-slate-200"}`}
+            aria-label={`Download ${name}`}
+          >
+            <Download className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
     </div>
   )
@@ -722,11 +825,9 @@ function AttachmentCard({ attachment, isUser }: { attachment: ChatAttachmentView
 
 function AttachmentGallery({ attachments, isUser }: { attachments: ChatAttachmentView[]; isUser: boolean }) {
   const images = attachments.filter((attachment) => attachment.isPreviewImage)
-  const media = attachments.filter((attachment) => !attachment.isPreviewImage && isMediaAttachment(attachment))
-  const files = attachments.filter((attachment) => !attachment.isPreviewImage && !isMediaAttachment(attachment))
+  const files = attachments.filter((attachment) => !attachment.isPreviewImage)
 
   const imageGridClass = images.length === 1 ? "grid-cols-1" : "grid-cols-2"
-  const mediaGridClass = media.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"
   const fileGridClass = files.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"
 
   return (
@@ -736,16 +837,6 @@ function AttachmentGallery({ attachments, isUser }: { attachments: ChatAttachmen
           {images.map((attachment, index) => (
             <div key={attachment.id} className={images.length > 1 && images.length % 2 === 1 && index === 0 ? "sm:col-span-2" : ""}>
               <AttachmentImageTile attachment={attachment} isUser={isUser} />
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {media.length ? (
-        <div className={`grid gap-2 ${mediaGridClass}`}>
-          {media.map((attachment, index) => (
-            <div key={attachment.id} className={media.length > 1 && media.length % 2 === 1 && index === media.length - 1 ? "sm:col-span-2" : ""}>
-              <AttachmentCard attachment={attachment} isUser={isUser} />
             </div>
           ))}
         </div>
@@ -782,6 +873,8 @@ export default function ChatPage() {
   const initialChatId = searchParams?.get("chatId")?.trim() || ""
   const [agents, setAgents] = useState<TenantAgentCard[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
+  const [agentsLoaded, setAgentsLoaded] = useState(false)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
 
   const [selectedAgentId, setSelectedAgentId] = useState(initialAgentId)
   const [chatIdByAgent, setChatIdByAgent] = useState<Record<string, string>>({})
@@ -810,15 +903,28 @@ export default function ChatPage() {
   const [conversationTitle, setConversationTitle] = useState<string | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const loadedHistoryRef = useRef<Set<string>>(new Set())
+  const [hasMoreByBucket, setHasMoreByBucket] = useState<Record<string, boolean>>({})
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const loadingOlderRef = useRef(false)
+  const prependScrollHeightRef = useRef<number | null>(null)
   const activeChatIdRef = useRef("")
   const selectedAgentIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
   const filesInputRef = useRef<HTMLInputElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [input])
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null)
   const messageListRef = useRef<HTMLDivElement | null>(null)
   const activeDisplayTimeZoneRef = useRef(DEFAULT_CHAT_TIMEZONE)
   const lastAgentsFetchAtRef = useRef(0)
+  const lastAgentsFetchKeyRef = useRef<string | null>(null)
   const agentsRequestInFlightRef = useRef(false)
   const previousSelectedAgentIdRef = useRef("")
   const lastSessionsFetchAtByAgentRef = useRef<Record<string, number>>({})
@@ -836,6 +942,7 @@ export default function ChatPage() {
   const micStartingRef = useRef(false)
   const speechRecRef = useRef<any>(null)
   const speechTextRef = useRef("")
+  const speechBaseInputRef = useRef("")
 
   const AGENTS_REFRESH_COOLDOWN_MS = 60000
   const SESSIONS_REFRESH_COOLDOWN_MS = 30000
@@ -880,6 +987,7 @@ export default function ChatPage() {
     } finally {
       sessionsRequestInFlightByAgentRef.current[agentKey] = false
       hasLoadedSessionsOnceByAgentRef.current[agentKey] = true
+      setSessionsLoaded(true)
       if (!silent) {
         setLoadingUserSessions(false)
       }
@@ -920,27 +1028,44 @@ export default function ChatPage() {
           assignedUserIds: Array.isArray(row.assignedUserIds) ? row.assignedUserIds.map((value: unknown) => String(value)) : [],
         })) as TenantAgentCard[]
 
-    if (!force && assignedAgentsCache && now - assignedAgentsLastFetchAt < AGENTS_REFRESH_COOLDOWN_MS) {
-      setAgents(assignedAgentsCache)
+    const targetAgentId = initialAgentId
+    if (!targetAgentId) {
+      router.replace("/users/agents")
       return
     }
 
-    if (!force && now - lastAgentsFetchAtRef.current < AGENTS_REFRESH_COOLDOWN_MS) return
+    if (
+      !force &&
+      assignedAgentsCache &&
+      assignedAgentsCacheKey === targetAgentId &&
+      now - assignedAgentsLastFetchAt < AGENTS_REFRESH_COOLDOWN_MS
+    ) {
+      setAgents(assignedAgentsCache)
+      setAgentsLoaded(true)
+      return
+    }
+
+    if (!force && lastAgentsFetchKeyRef.current === targetAgentId && now - lastAgentsFetchAtRef.current < AGENTS_REFRESH_COOLDOWN_MS) return
     if (agentsRequestInFlightRef.current) return
 
-    if (assignedAgentsRequestPromise) {
+    if (assignedAgentsRequestPromise && assignedAgentsCacheKey === targetAgentId) {
       const rows = await assignedAgentsRequestPromise
       const nextAgents = mapAgents(rows)
       assignedAgentsCache = nextAgents
       setAgents(nextAgents)
+      setAgentsLoaded(true)
       return
     }
 
     agentsRequestInFlightRef.current = true
     lastAgentsFetchAtRef.current = now
+    lastAgentsFetchKeyRef.current = targetAgentId
     setLoadingAgents(true)
     try {
-      assignedAgentsRequestPromise = Promise.resolve(dispatch(fetchAssignedAgents() as any) as any)
+      assignedAgentsCacheKey = targetAgentId
+      assignedAgentsRequestPromise = Promise.resolve(dispatch(fetchAssignedAgent(targetAgentId) as any) as any).then(
+        (agent: Record<string, unknown> | null) => (agent ? [agent] : []),
+      )
       const rows = (await assignedAgentsRequestPromise) as Record<string, unknown>[]
       const nextAgents = mapAgents(rows)
       assignedAgentsCache = nextAgents
@@ -957,8 +1082,9 @@ export default function ChatPage() {
       assignedAgentsRequestPromise = null
       agentsRequestInFlightRef.current = false
       setLoadingAgents(false)
+      setAgentsLoaded(true)
     }
-  }, [dispatch])
+  }, [dispatch, initialAgentId, router])
 
   useEffect(() => {
     void loadAgents()
@@ -1118,10 +1244,12 @@ export default function ChatPage() {
           fetchTenantAgentChatHistory({
             agentId: selectedAgentId,
             chatId: activeChatId,
+            limit: HISTORY_PAGE_SIZE,
           }) as any,
         )
 
         const historyRows = Array.isArray(payload?.history) ? payload.history : []
+        setHasMoreByBucket((prev) => ({ ...prev, [bucketKey]: Boolean(payload?.hasMore) }))
         const normalizedChatId = String(payload?.chatId || activeChatId || "").trim()
 
         if (normalizedChatId && normalizedChatId !== activeChatId) {
@@ -1177,8 +1305,25 @@ export default function ChatPage() {
     [activeMessageBucketKey, messagesByBucket],
   )
 
+  // Each day gets its own container so its sticky label is released when the next day scrolls in.
+  const dayGroups = useMemo(() => {
+    const groups: { key: string; label: string; messages: ChatMessage[] }[] = []
+    for (const message of activeMessages) {
+      const date = message.createdAt ? parseDateAssumeUtcIfMissing(message.createdAt) : new Date()
+      const key = date ? dayKeyByTimeZone(date, activeDisplayTimeZone) : "unknown"
+      const last = groups[groups.length - 1]
+      if (last && last.key === key) {
+        last.messages.push(message)
+      } else {
+        groups.push({ key, label: date ? formatDayLabel(date, activeDisplayTimeZone) : "", messages: [message] })
+      }
+    }
+    return groups
+  }, [activeMessages, activeDisplayTimeZone])
+
   useEffect(() => {
     if (!messageListRef.current) return
+    if (prependScrollHeightRef.current !== null) return
 
     const id = window.requestAnimationFrame(() => {
       if (!messageListRef.current) return
@@ -1187,6 +1332,52 @@ export default function ChatPage() {
 
     return () => window.cancelAnimationFrame(id)
   }, [activeChatId, activeMessages.length, sending, loadingHistory])
+
+  // Keep the viewport anchored after older messages are prepended.
+  useLayoutEffect(() => {
+    const el = messageListRef.current
+    if (!el || prependScrollHeightRef.current === null) return
+    el.scrollTop = el.scrollHeight - prependScrollHeightRef.current
+    prependScrollHeightRef.current = null
+  }, [activeMessages])
+
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingOlderRef.current || !selectedAgentId || !activeChatId || !activeMessageBucketKey) return
+    if (!hasMoreByBucket[activeMessageBucketKey]) return
+    const oldest = (messagesByBucket[activeMessageBucketKey] || []).find((m) => m.createdAt)
+    if (!oldest?.createdAt) return
+
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    try {
+      const payload = await dispatch(
+        fetchTenantAgentChatHistory({
+          agentId: selectedAgentId,
+          chatId: activeChatId,
+          limit: HISTORY_PAGE_SIZE,
+          before: oldest.createdAt,
+        }) as any,
+      )
+      const rows = Array.isArray(payload?.history) ? payload.history : []
+      const older = mapHistoryRowsToMessages(rows, activeDisplayTimeZoneRef.current)
+      if (messageListRef.current) prependScrollHeightRef.current = messageListRef.current.scrollHeight
+      setMessagesByBucket((prev) => {
+        const existing = prev[activeMessageBucketKey] || []
+        const seen = new Set(existing.map((m) => m.id))
+        return { ...prev, [activeMessageBucketKey]: [...older.filter((m) => !seen.has(m.id)), ...existing] }
+      })
+      setHasMoreByBucket((prev) => ({ ...prev, [activeMessageBucketKey]: Boolean(payload?.hasMore) && rows.length > 0 }))
+    } catch {
+      prependScrollHeightRef.current = null
+    } finally {
+      loadingOlderRef.current = false
+      setLoadingOlder(false)
+    }
+  }, [activeChatId, activeMessageBucketKey, dispatch, hasMoreByBucket, messagesByBucket, selectedAgentId])
+
+  const handleMessageListScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    if (event.currentTarget.scrollTop <= 60) void loadOlderMessages()
+  }
 
   const openAssignedAgents = () => {
     router.push("/users/agents")
@@ -1297,12 +1488,17 @@ export default function ChatPage() {
         const chunks = recordingChunksRef.current
         recordingChunksRef.current = []
         const liveText = speechTextRef.current.trim()
+        const baseInput = speechBaseInputRef.current
         acquiredStream.getTracks().forEach((track) => track.stop())
         releaseRecordingResources()
-        if (!shouldSend || !chunks.length) return
+        if (!shouldSend) {
+          setInput(baseInput)
+          return
+        }
+        if (!chunks.length) return
 
         if (liveText) {
-          setInput((prev) => (prev.trim() ? `${prev.trim()} ${liveText}` : liveText))
+          setInput(baseInput.trim() ? `${baseInput.trim()} ${liveText}` : liveText)
           return
         }
 
@@ -1355,6 +1551,7 @@ export default function ChatPage() {
       recorder.start()
 
       speechTextRef.current = ""
+      speechBaseInputRef.current = input
       const SpeechCtor =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
       if (SpeechCtor) {
@@ -1369,6 +1566,8 @@ export default function ChatPage() {
               text += `${event.results[i][0].transcript} `
             }
             speechTextRef.current = text.trim()
+            const base = speechBaseInputRef.current.trim()
+            setInput(base ? `${base} ${speechTextRef.current}` : speechTextRef.current)
           }
           rec.onerror = () => undefined
           rec.start()
@@ -1890,6 +2089,14 @@ export default function ChatPage() {
 
   sendMessageRef.current = sendMessage
 
+  if (!agentsLoaded || (selectedAgentId && !sessionsLoaded)) {
+    return (
+      <main className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-label="Loading" />
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-4 lg:p-4 rounded-2xl">
       <div className="container mx-auto flex w-full flex-col gap-4">
@@ -2000,7 +2207,7 @@ export default function ChatPage() {
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
 
-                {loadingUserSessions ? <p className="px-3 py-2 text-xs text-muted-foreground">Loading sessions...</p> : null}
+                {loadingUserSessions ? <p className="px-3 py-2 text-xs text-muted-foreground">Loading...</p> : null}
 
                 {!loadingUserSessions && userSessions.length === 0 ? (
                   <div className="flex min-h-45 items-center justify-center px-4 py-6 text-center">
@@ -2204,14 +2411,23 @@ export default function ChatPage() {
                   </Button>
                 </div> */}
 
-                <div ref={messageListRef} className="min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto pr-1">
-                  {activeMessages.map((message) => {
+                <div ref={messageListRef} onScroll={handleMessageListScroll} className="min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto pr-1">
+                  {loadingOlder ? <p className="py-1 text-center text-xs text-slate-400">Loading earlier messages...</p> : null}
+                  {dayGroups.map((group) => (
+                  <div key={group.key} className="flex flex-col space-y-4">
+                  {group.label ? (
+                    <div className="sticky top-0 z-10 flex justify-center py-1">
+                      <span className="rounded-full bg-slate-200/90 px-3 py-1 text-[11px] font-medium text-slate-600 shadow-sm">{group.label}</span>
+                    </div>
+                  ) : null}
+                  {group.messages.map((message) => {
                     const isUser = message.role === "user"
                     const isSystem = message.role === "system"
                     const isCopied = copiedMessageId === message.id
 
                     return (
-                      <div key={message.id} className={`group/message w-full flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+                      <Fragment key={message.id}>
+                      <div className={`group/message w-full flex items-end gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
                         {!isUser ? (
                           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isSystem ? "bg-slate-200 text-slate-600" : "bg-primary text-white"}`}>
                             {isSystem ? <Wand2 className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
@@ -2275,8 +2491,11 @@ export default function ChatPage() {
                           </div>
                         ) : null}
                       </div>
+                      </Fragment>
                     )
                   })}
+                  </div>
+                  ))}
 
                   {sending ? (
                     <div className="w-full flex items-end gap-3 pb-4">
@@ -2307,7 +2526,8 @@ export default function ChatPage() {
                   ))}
                 </div> */}
 
-                <div className="rounded-[26px] border border-slate-200 p-3 bg-white shadow-sm">
+                <div className="flex items-end gap-2">
+                <div className="min-w-0 flex-1 rounded-[28px] border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition focus-within:border-slate-300 focus-within:shadow-md">
                   <input
                     ref={filesInputRef}
                     type="file"
@@ -2318,7 +2538,7 @@ export default function ChatPage() {
                   />
 
                   {attachments.length > 0 ? (
-                    <div className="mb-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-2 shadow-sm">
+                    <div className="mb-2 rounded-2xl bg-slate-50 p-2">
                       <div className="mb-2 flex items-center justify-between gap-2 px-1">
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Attached files</p>
                         <button
@@ -2345,7 +2565,7 @@ export default function ChatPage() {
                             ) : (
                               <div className="flex items-center gap-3 px-3 py-3">
                                 <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${getFileToneByExtension(getAttachmentExtension(attachment)).iconClass}`}>
-                                  {isMediaAttachment(attachment) ? <Globe className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                                  <FileText className="h-5 w-5" />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <p className="truncate text-sm font-medium text-slate-800">{attachment.file.name}</p>
@@ -2412,20 +2632,21 @@ export default function ChatPage() {
                     </div>
                   ) : null}
 
-                  <div className={`${isMicActive ? "hidden" : "flex"} h-12 items-stretch gap-2`}>
+                  <div className={`${isMicActive ? "hidden" : "flex"} items-end gap-1.5`}>
                     <div ref={attachmentMenuRef} className="relative">
                       <Button
                         type="button"
-                        variant="outline"
-                        className="h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed"
+                        variant="ghost"
+                        aria-label="Add attachments"
+                        className="h-9 w-9 cursor-pointer rounded-full p-0 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed"
                         disabled={!selectedAgentId || sending}
                         onClick={() => setAttachmentMenuOpen((prev) => !prev)}
                       >
-                        <Paperclip className="h-4 w-4" />
+                        <PlusIcon className="size-5" />
                       </Button>
 
                       {attachmentMenuOpen ? (
-                        <div className="absolute bottom-full left-2 mb-2 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+                        <div className="absolute bottom-full left-0 mb-2 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
                           <div>
                             {[
                               {
@@ -2449,8 +2670,10 @@ export default function ChatPage() {
                       ) : null}
                     </div>
 
-                    <div className="flex h-12 flex-1 items-center rounded-2xl border border-slate-200 px-3">
+                    <div className="flex min-h-9 flex-1 items-center">
                       <textarea
+                        ref={composerRef}
+                        rows={1}
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
                         onKeyDown={(event) => {
@@ -2464,30 +2687,35 @@ export default function ChatPage() {
                             ? "Ask the agent..."
                             : "Select an agent first..."
                         }
-                        className="h-full w-full resize-none bg-transparent py-3 text-sm outline-none placeholder:text-slate-400"
+                        className="max-h-40 min-h-9 w-full resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-slate-400"
                         disabled={!selectedAgentId || sending || transcribing}
                       />
                     </div>
 
                     <Button
                       type="button"
-                      variant={isMicActive ? "default" : "outline"}
-                      className={`h-12 w-12 cursor-pointer rounded-2xl disabled:cursor-not-allowed ${isMicActive ? "bg-rose-500 text-white hover:bg-rose-600" : ""}`}
+                      variant="ghost"
+                      aria-label="Record voice message"
+                      className="h-9 w-9 cursor-pointer rounded-full p-0 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed"
                       disabled={!selectedAgentId || sending || transcribing}
                       onClick={toggleMic}
                     >
-                      <Mic className="h-4 w-4" />
-                    </Button>
-
-                    <Button
-                      type="button"
-                      className="h-12 w-12 cursor-pointer rounded-2xl bg-primary text-white shadow-lg shadow-primary/20 hover:bg-primary-light disabled:cursor-not-allowed"
-                      disabled={!selectedAgentId || sending || transcribing || (!input.trim() && attachments.length === 0)}
-                      onClick={() => void sendMessage()}
-                    >
-                      <SendHorizonal className="h-4 w-4" />
+                      <Mic className="size-5" />
                     </Button>
                   </div>
+                </div>
+
+                {isMicActive ? null : (
+                  <Button
+                    type="button"
+                    aria-label="Send message"
+                    className="h-auto min-h-14.5 w-14.5 shrink-0 cursor-pointer self-stretch rounded-[28px] border-0 bg-primary p-0 text-white shadow-none outline-none ring-0 hover:bg-primary/80 focus:outline-none focus-visible:border-0 focus-visible:ring-0 focus-visible:outline-none disabled:cursor-not-allowed disabled:bg-primary/30 disabled:text-white disabled:opacity-100"
+                    disabled={!selectedAgentId || sending || transcribing || (!input.trim() && attachments.length === 0)}
+                    onClick={() => void sendMessage()}
+                  >
+                    <SendHorizonal className="size-5" />
+                  </Button>
+                )}
                 </div>
 
               {/* </div> */}

@@ -34,6 +34,7 @@ import {
   clearUserAuthTokenCookie,
   clearUserRefreshTokenCookie,
   loadUserAuthTokenCookie,
+  saveUserAuthSessionCookie,
 } from "../utils/userAuthCookies";
 import { bootstrapUserAuth, signOutUser } from "./userAuth";
 import { resolveSessionType } from "@/utils/access-control";
@@ -763,6 +764,27 @@ let tenantAgentAssignmentsBatchCache: {
   fetchedAt: number;
 } | null = null;
 
+export const fetchAssignedAgent = (
+  agentId: string,
+): ThunkAction<Promise<Record<string, unknown> | null>, RootState, unknown, AnyAction> => {
+  return async (): Promise<Record<string, unknown> | null> => {
+    const id = String(agentId || "").trim();
+    if (!id) return null;
+
+    const headers: Record<string, string> = {};
+    const token = String(loadUserAuthTokenCookie() || "").trim();
+    if (token) {
+      headers.user = token;
+      headers.Authorization = `Bearer ${token}`;
+    }
+    const response = await axios.get(
+      `/api/users/agents/assigned/${encodeURIComponent(id)}`,
+      { headers },
+    );
+    return (response?.data?.agent || null) as Record<string, unknown> | null;
+  };
+};
+
 export const fetchAssignedAgents = (): ThunkAction<
   Promise<unknown[]>,
   RootState,
@@ -1127,8 +1149,10 @@ export const sendTenantAgentChatWithFiles = (input: {
 export const fetchTenantAgentChatHistory = (input: {
   agentId: string;
   chatId: string;
+  limit?: number;
+  before?: string;
 }): ThunkAction<
-  Promise<{ chatId: string; history: TenantAgentChatHistoryMessage[] }>,
+  Promise<{ chatId: string; history: TenantAgentChatHistoryMessage[]; hasMore: boolean }>,
   RootState,
   unknown,
   AnyAction
@@ -1136,12 +1160,13 @@ export const fetchTenantAgentChatHistory = (input: {
   return async (): Promise<{
     chatId: string;
     history: TenantAgentChatHistoryMessage[];
+    hasMore: boolean;
   }> => {
     const agentId = String(input.agentId || "").trim();
     const chatId = String(input.chatId || "").trim();
 
     if (!agentId || !chatId) {
-      return { chatId, history: [] };
+      return { chatId, history: [], hasMore: false };
     }
 
     const headers: Record<string, string> = {};
@@ -1151,9 +1176,13 @@ export const fetchTenantAgentChatHistory = (input: {
       headers.Authorization = `Bearer ${userToken}`;
     }
 
+    const params: Record<string, string | number> = {};
+    if (input.limit) params.limit = input.limit;
+    if (input.before) params.before = input.before;
+
     const response = await axios.get(
       `/ai/agents/${encodeURIComponent(agentId)}/chat/history/${encodeURIComponent(chatId)}`,
-      { headers },
+      { headers, params },
     );
 
     const payload = (response?.data || {}) as Record<string, unknown>;
@@ -1161,6 +1190,7 @@ export const fetchTenantAgentChatHistory = (input: {
 
     return {
       chatId: String(payload.chatId || chatId),
+      hasMore: Boolean(payload.hasMore),
       history: historyRaw
         .map((row) => ({
           id: String((row as Record<string, unknown>).id || ""),
@@ -1551,6 +1581,127 @@ export const fetchCountries =
       ? response.data.countries
       : [];
     return countries as ActiveCountry[];
+  };
+
+export type TenantProfileUpdateInput = {
+  companyName: string;
+  phone?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  countryId?: string;
+};
+
+export const updateTenantProfile =
+  (
+    input: TenantProfileUpdateInput,
+  ): ThunkAction<Promise<TenantProfile>, RootState, unknown, AnyAction> =>
+  async (dispatch, getState) => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const resp = await axios.patch("/tenant/me", input, { headers });
+    const updated = unwrapEnvelope<Partial<TenantProfile>>(resp.data);
+    const current = getState().tenant.profile;
+    const merged = { ...(current || {}), ...updated } as TenantProfile;
+    dispatch(setTenantProfile(merged));
+    return merged;
+  };
+
+export type UserProfile = {
+  id: string;
+  tenantId: string;
+  companyName?: string | null;
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  role?: string | null;
+  isActive?: boolean;
+  picture?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export const fetchUserProfile =
+  (): ThunkAction<Promise<UserProfile | null>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = String(loadUserAuthTokenCookie() || "").trim();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.user = token;
+      headers.Authorization = `Bearer ${token}`;
+    }
+    const resp = await axios.get("/api/users/me", { headers });
+    return (resp?.data?.user || null) as UserProfile | null;
+  };
+
+const userAuthHeaders = (): Record<string, string> => {
+  const token = String(loadUserAuthTokenCookie() || "").trim();
+  return token ? { user: token, Authorization: `Bearer ${token}` } : {};
+};
+
+// Keeps header/sidebar and the persisted user cookie in sync after a profile change.
+const syncUserSession =
+  (patch: { name?: string; picture?: string | null }): ThunkAction<void, RootState, unknown, AnyAction> =>
+  (dispatch, getState) => {
+    const { token, refreshToken, user } = getState().auth;
+    if (!token || !refreshToken || !user) return;
+    const session: AuthSession = {
+      token,
+      refreshToken,
+      user: { ...user, ...patch },
+      tenant: null,
+    };
+    saveUserAuthSessionCookie(session);
+    dispatch(setAuthSession(session));
+  };
+
+export const updateUserProfile =
+  (input: {
+    firstName: string;
+    lastName: string;
+  }): ThunkAction<Promise<UserProfile>, RootState, unknown, AnyAction> =>
+  async (dispatch) => {
+    const resp = await axios.patch("/api/users/me", input, {
+      headers: userAuthHeaders(),
+    });
+    const user = resp.data.user as UserProfile;
+    const name =
+      [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
+    dispatch(syncUserSession({ name }));
+    return user;
+  };
+
+export const uploadUserProfilePhoto =
+  (file: File): ThunkAction<Promise<string>, RootState, unknown, AnyAction> =>
+  async (dispatch) => {
+    const formData = new FormData();
+    formData.append("picture", file, file.name);
+    const resp = await axios.post("/api/users/me/picture", formData, {
+      headers: userAuthHeaders(),
+    });
+    const picture = String(resp.data.picture || "");
+    dispatch(syncUserSession({ picture }));
+    return picture;
+  };
+
+export const uploadTenantLogo =
+  (file: File): ThunkAction<Promise<string>, RootState, unknown, AnyAction> =>
+  async (dispatch, getState) => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+
+    const formData = new FormData();
+    formData.append("picture", file, file.name);
+    const resp = await axios.post("/tenant/me/picture", formData, { headers });
+    const picture = String(resp.data.picture || "");
+    const current = getState().tenant.profile;
+    if (current) dispatch(setTenantProfile({ ...current, picture }));
+    return picture;
   };
 
 const _fetchTenantUsersPromiseByKey = new Map<string, Promise<TenantMeUser[]>>();

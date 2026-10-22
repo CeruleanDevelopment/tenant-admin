@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import {
   Avatar,
   AvatarFallback,
@@ -24,6 +26,7 @@ import { ChevronsUpDownIcon, SparklesIcon, BadgeCheckIcon, CreditCardIcon, BellI
 
 export function NavUser({
   user,
+  accountHref,
   onLogout,
 }: {
   user: {
@@ -31,6 +34,7 @@ export function NavUser({
     email: string
     avatar: string
   }
+  accountHref?: string
   onLogout?: () => void | Promise<void>
 }) {
   const { isMobile } = useSidebar()
@@ -83,12 +87,13 @@ export function NavUser({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <BadgeCheckIcon
-                />
-                Account
+              <DropdownMenuItem asChild>
+                <Link href={accountHref || "/"} prefetch={false}>
+                  <BadgeCheckIcon />
+                  Account
+                </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              {/* <DropdownMenuItem>
                 <CreditCardIcon
                 />
                 Billing
@@ -97,7 +102,7 @@ export function NavUser({
                 <BellIcon
                 />
                 Notifications
-              </DropdownMenuItem>
+              </DropdownMenuItem> */}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => void onLogout?.()}>

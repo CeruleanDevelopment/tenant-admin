@@ -17,6 +17,8 @@ import { signOut } from "../../../actions/auth"
 import type { AppDispatch } from "../../../redux/store"
 
 import Footer from "./Footer"
+import { resolveSessionType } from "@/utils/access-control"
+import { resolveAssetUrl } from "../../../utils/profile-validation"
 
 import {
   Breadcrumb,
@@ -46,11 +48,17 @@ export default function AdminLayout({
   const isRoot = pathname === "/"
   const dispatch = useDispatch<AppDispatch>()
   const reduxUser = useSelector((state: RootState) => state.auth.user)
+  const tenantProfile = useSelector((state: RootState) => state.tenant.profile)
   const userForHeader = {
     name: reduxUser?.name || "User",
     email: reduxUser?.email || "user@example.com",
-    avatar: "",
+    avatar: resolveAssetUrl(tenantProfile?.picture || reduxUser?.picture),
   }
+  const tenantId = tenantProfile?.id
+  const accountHref =
+    resolveSessionType({ authUserId: reduxUser?.id, tenantId, role: reduxUser?.role }) === "user"
+      ? "/users/account"
+      : "/tenant/account"
 
   useEffect(() => {
     const onScroll = () => {
@@ -161,6 +169,7 @@ export default function AdminLayout({
                           {/* Header user profile (top-right) */}
                           <HeaderUser
                             user={userForHeader}
+                            accountHref={accountHref}
                             onLogout={async () => {
                               await dispatch(signOut())
                             }}

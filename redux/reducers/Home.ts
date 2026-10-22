@@ -7,6 +7,7 @@ export interface AuthUser {
   name: string
   role?: string
   tenantId?: string | null
+  picture?: string | null
 }
 
 export interface AuthSession {

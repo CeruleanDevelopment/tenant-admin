@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import {
   Avatar,
   AvatarFallback,
@@ -19,6 +20,7 @@ import { ChevronsUpDownIcon, SparklesIcon, BadgeCheckIcon, CreditCardIcon, BellI
 
 export function HeaderUser({
   user,
+  accountHref,
   onLogout,
 }: {
   user: {
@@ -26,6 +28,7 @@ export function HeaderUser({
     email: string
     avatar: string
   }
+  accountHref?: string
   onLogout?: () => void | Promise<void>
 }) {
   return (
@@ -61,18 +64,20 @@ export function HeaderUser({
         </DropdownMenuGroup> */}
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem>
-            <BadgeCheckIcon />
-            Account
+          <DropdownMenuItem asChild>
+            <Link href={accountHref || "/"} prefetch={false}>
+              <BadgeCheckIcon />
+              Account
+            </Link>
           </DropdownMenuItem>
           {/* <DropdownMenuItem>
             <CreditCardIcon />
             Billing
           </DropdownMenuItem> */}
-          <DropdownMenuItem>
+          {/* <DropdownMenuItem>
             <BellIcon />
             Notifications
-          </DropdownMenuItem>
+          </DropdownMenuItem> */}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void onLogout?.() }>

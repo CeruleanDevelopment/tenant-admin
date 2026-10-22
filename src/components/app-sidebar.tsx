@@ -23,6 +23,7 @@ import Link from "next/link"
 import { signOut } from "../../actions/auth"
 import type { AppDispatch } from "../../redux/store"
 import { canAccessPath, resolveSessionType } from "@/utils/access-control"
+import { resolveAssetUrl } from "../../utils/profile-validation"
 import {
   BookOpen,
   ChartNoAxesCombined,
@@ -527,7 +528,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const userForNav = {
     name: reduxUser?.name || data.user.name,
     email: reduxUser?.email || data.user.email,
-    avatar: tenantProfile?.picture || data.user.avatar,
+    avatar: resolveAssetUrl(tenantProfile?.picture || reduxUser?.picture) || data.user.avatar,
   }
 
   const handleLogout = async () => {
@@ -565,7 +566,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </div> */}
       </SidebarContent>
       <SidebarFooter className="border-t border-border p-0">
-        <NavUser user={userForNav} onLogout={handleLogout} />
+        <NavUser user={userForNav} accountHref={sessionType === "user" ? "/users/account" : "/tenant/account"} onLogout={handleLogout} />
       </SidebarFooter>
     </Sidebar>
   )
