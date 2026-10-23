@@ -13,6 +13,7 @@ import {
 } from "../redux/reducers/Home";
 import {
   clearTenantProfile,
+  setTenantCountries,
   setTenantProfile,
   type TenantProfile,
 } from "../redux/reducers/Tenant";
@@ -1575,12 +1576,11 @@ export const registerTenant =
 
 export const fetchCountries =
   (): ThunkAction<Promise<ActiveCountry[]>, RootState, unknown, AnyAction> =>
-  async () => {
+  async (dispatch) => {
     const response = await axios.get("/tenant/countries");
-    const countries = Array.isArray(response?.data?.countries)
-      ? response.data.countries
-      : [];
-    return countries as ActiveCountry[];
+    const countries = (response?.data?.countries || []) as ActiveCountry[];
+    dispatch(setTenantCountries(countries));
+    return countries;
   };
 
 export type TenantProfileUpdateInput = {

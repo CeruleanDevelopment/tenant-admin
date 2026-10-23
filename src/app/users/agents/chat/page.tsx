@@ -1331,7 +1331,7 @@ export default function ChatPage() {
     })
 
     return () => window.cancelAnimationFrame(id)
-  }, [activeChatId, activeMessages.length, sending, loadingHistory])
+  }, [activeChatId, activeMessages.length, sending, loadingHistory, agentsLoaded, sessionsLoaded])
 
   // Keep the viewport anchored after older messages are prepended.
   useLayoutEffect(() => {
@@ -2100,7 +2100,7 @@ export default function ChatPage() {
   return (
     <main className="min-h-screen bg-linear-to-b from-primary/10 via-white to-slate-50 p-4 text-slate-900 sm:p-4 lg:p-4 rounded-2xl">
       <div className="container mx-auto flex w-full flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/80 bg-white/80 px-4 py-4 shadow-sm backdrop-blur md:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/80 bg-white/80 px-3 py-3 shadow-sm backdrop-blur sm:px-4 sm:py-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">
               <Sparkles className="h-5 w-5" />
@@ -2110,9 +2110,9 @@ export default function ChatPage() {
               <h1 className="text-xl font-semibold sm:text-2xl">
                 {selectedAgent?.name}
               </h1>
-              <p className="text-sm text-muted-foreground">
+              {/* <p className="text-sm text-muted-foreground">
                 Use one shared chat page for different agent workflows.
-              </p>
+              </p> */}
             </div>
           </div>
 
@@ -2126,8 +2126,8 @@ export default function ChatPage() {
 
         {error ? <p className="text-sm text-rose-700">{sanitizeAssistantText(error)}</p> : null}
 
-        <div className="grid gap-0 lg:items-stretch lg:grid-cols-[280px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
-          <Card className="relative z-20 flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:sticky lg:top-4 lg:rounded-r-none lg:border-r-0">
+        <div className="grid h-[calc(100vh-10rem)] min-h-130 grid-cols-1 grid-rows-[minmax(0,2fr)_minmax(0,5fr)] gap-3 lg:h-[75vh] lg:max-h-[calc(100vh-6rem)] lg:grid-cols-[280px_minmax(0,1fr)] lg:grid-rows-1 lg:gap-0 xl:grid-cols-[300px_minmax(0,1fr)]">
+          <Card className="relative z-20 flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:rounded-r-none lg:border-r-0">
             <CardHeader className="border-b border-slate-200 bg-white px-4 py-4">
               <CardTitle className="flex items-center justify-between gap-2 text-base font-semibold tracking-wide text-slate-700">
                 <span className="flex items-center gap-2">
@@ -2156,54 +2156,6 @@ export default function ChatPage() {
               {!loadingAgents && agents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No configured agents found.</p>
               ) : null} */}
-
-              {/* <div className="space-y-2">
-                {agents.map((agent) => {
-                  const active = agent.id === selectedAgentId
-                  return (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedAgentId(agent.id)
-                        router.replace(buildChatUrl(agent.id, chatIdByAgent[agent.id]))
-                      }}
-                      className={`w-full rounded-2xl border p-3 text-left transition ${
-                        active
-                          ? "border-primary/30 bg-primary/5 shadow-sm"
-                          : "border-slate-200 bg-white hover:border-primary/20 hover:bg-primary/5"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{agent.name}</p>
-                          <p className="truncate text-xs text-muted-foreground">{agent.description || "AI agent"}</p>
-                        </div>
-                        <Badge variant={agent.isActive === 1 ? "outline" : "destructive"}>
-                          {agent.isActive === 1 ? "active" : "inactive"}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
-                        <span>{agent.aiProvider || "provider not set"}</span>
-                        <span>•</span>
-                        <span>{agent.aiModel || "model not set"}</span>
-                        <span>•</span>
-                        <span>{agent.allowedActions?.length || 0} actions</span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div> */}
-
-              {/* <div className="rounded-2xl border bg-muted/30 p-3 text-sm text-slate-700">
-                <div className="flex items-center gap-2 font-medium">
-                  <ShieldCheck className="h-4 w-4 text-primary" />
-                  Workflow
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Configure required integrations from the assigned agents page, then return here to chat with the live endpoint.
-                </p>
-              </div> */}
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
 
@@ -2318,7 +2270,7 @@ export default function ChatPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex h-[75vh] min-h-140 max-h-[calc(100vh-6rem)] flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:rounded-l-none lg:border-l-0">
+          <Card className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border-slate-200 bg-white/90 shadow-sm lg:rounded-l-none lg:border-l-0">
             <CardHeader className="border-b border-slate-200 bg-white p-2.5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>

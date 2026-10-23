@@ -4,3 +4,4 @@ export const AUTH_INITIALIZED_SET = "AUTH/INITIALIZED_SET" as const
 
 export const TENANT_PROFILE_SET = "TENANT/PROFILE_SET" as const
 export const TENANT_PROFILE_CLEAR = "TENANT/PROFILE_CLEAR" as const
+export const TENANT_COUNTRIES_SET = "TENANT/COUNTRIES_SET" as const

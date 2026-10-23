@@ -76,13 +76,13 @@ export default function AdminLayout({
             <SidebarInset>
               <header
                 className={cn(
-                    "px-6 sticky top-0 z-40 flex h-16 shrink-0 items-center gap-2 transition-all duration-200 border-b",
+                    "px-3 sm:px-6 sticky top-0 z-40 flex h-16 shrink-0 items-center gap-2 transition-all duration-200 border-b",
                     scrolled
                     ? "bg-background/80 backdrop-blur supports-backdrop-filter:bg-background/60 shadow-md"
                     : "bg-transparent"
                 )}
               >
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <SidebarTrigger
                   size="icon"
                   className="-ml-1 rounded-full h-9 w-9 [&_svg]:size-5! hover:bg-muted/60 transition-colors"
@@ -153,7 +153,7 @@ export default function AdminLayout({
                 </Breadcrumb>
               </div>
 
-                <div className="ml-auto">
+                <div className="ml-auto shrink-0">
                     <div className="flex items-center gap-1">
                         <GlobalSearch />
                         {/* <ThemeToggle />
@@ -178,7 +178,7 @@ export default function AdminLayout({
                     </div>
                 </div>
               </header>
-              <div className="flex flex-1 flex-col gap-6 p-6">
+              <div className="flex min-w-0 flex-1 flex-col gap-4 p-3 sm:gap-6 sm:p-6">
                 {children}
               </div>
               <Footer />

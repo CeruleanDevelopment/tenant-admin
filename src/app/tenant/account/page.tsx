@@ -12,7 +12,6 @@ import {
   fetchCountries,
   updateTenantProfile,
   uploadTenantLogo,
-  type ActiveCountry,
 } from "../../../../actions/auth"
 import { ProfileImageUploader } from "@/components/profile-image-uploader"
 import { validateTenantProfileForm, type TenantProfileFormErrors } from "../../../../utils/profile-validation"
@@ -45,7 +44,7 @@ export default function TenantAccountPage() {
   const dispatch = useDispatch<AppDispatch>()
   const profile = useSelector((state: RootState) => state.tenant.profile)
   const [form, setForm] = useState<FormState>(() => toForm(profile))
-  const [countries, setCountries] = useState<ActiveCountry[]>([])
+  const countries = useSelector((state: RootState) => state.tenant.countries)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<TenantProfileFormErrors>({})
@@ -55,13 +54,7 @@ export default function TenantAccountPage() {
   }, [profile])
 
   useEffect(() => {
-    let active = true
-    void dispatch(fetchCountries())
-      .then((rows) => active && setCountries(rows))
-      .catch(() => undefined)
-    return () => {
-      active = false
-    }
+    void dispatch(fetchCountries()).catch(() => undefined)
   }, [dispatch])
 
   const setField = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
