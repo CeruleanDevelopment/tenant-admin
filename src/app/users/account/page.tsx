@@ -86,14 +86,14 @@ export default function UserAccountPage() {
     }
   }
 
-  const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ") || profile?.email || "User"
+  const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ") || profile?.email || ""
 
   const rows: Array<[string, string]> = [
     ["Email", profile?.email || "-"],
     ["Role", profile?.role || "-"],
     ["Organization", profile?.companyName || "-"],
     ["Status", profile?.isActive ? "Active" : "Inactive"],
-    ["Member since", formatDate(profile?.createdAt)],
+    // ["Member since", formatDate(profile?.createdAt)],
   ]
 
   return (
@@ -146,10 +146,11 @@ export default function UserAccountPage() {
               </div>
 
               {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-
-              <Button type="submit" disabled={!canSave} className="cursor-pointer disabled:cursor-not-allowed">
-                {saving ? "Saving..." : "Save changes"}
-              </Button>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={!canSave} className="cursor-pointer disabled:cursor-not-allowed">
+                  {saving ? "Saving..." : "Save changes"}
+                </Button>
+              </div>
 
               <dl className="grid gap-4 border-t pt-6 sm:grid-cols-2">
                 {rows.map(([label, value]) => (

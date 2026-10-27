@@ -59,7 +59,7 @@ export default function EditProfile() {
                 <Label className="mb-3">Bio</Label>
                 <Textarea
                   placeholder="Write something about yourself..."
-                  className="min-h-[120px]"
+                  className="min-h-30"
                 />
               </div>
             </div>

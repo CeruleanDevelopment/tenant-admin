@@ -78,19 +78,19 @@ export function NavUser({
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuGroup>
+            {/* <DropdownMenuGroup>
               <DropdownMenuItem>
                 <SparklesIcon
                 />
                 Upgrade to Pro
               </DropdownMenuItem>
-            </DropdownMenuGroup>
+            </DropdownMenuGroup> */}
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
                 <Link href={accountHref || "/"} prefetch={false}>
                   <BadgeCheckIcon />
-                  Account
+                  Profile
                 </Link>
               </DropdownMenuItem>
               {/* <DropdownMenuItem>

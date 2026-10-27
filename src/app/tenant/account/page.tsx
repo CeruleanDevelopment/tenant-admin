@@ -60,6 +60,11 @@ export default function TenantAccountPage() {
   const setField = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
 
+  const initialForm = toForm(profile)
+  const isDirty = (Object.keys(form) as Array<keyof FormState>).some(
+    (key) => form[key].trim() !== initialForm[key],
+  )
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const errors = validateTenantProfileForm(form)
@@ -166,10 +171,11 @@ export default function TenantAccountPage() {
             </div>
 
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-
-            <Button type="submit" disabled={saving} className="cursor-pointer">
-              {saving ? "Saving..." : "Save changes"}
-            </Button>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={!isDirty || saving} className="cursor-pointer disabled:cursor-not-allowed">
+                {saving ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>

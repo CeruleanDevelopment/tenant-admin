@@ -67,7 +67,7 @@ export function HeaderUser({
           <DropdownMenuItem asChild>
             <Link href={accountHref || "/"} prefetch={false}>
               <BadgeCheckIcon />
-              Account
+              Profile
             </Link>
           </DropdownMenuItem>
           {/* <DropdownMenuItem>
