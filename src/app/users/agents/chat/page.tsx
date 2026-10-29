@@ -2152,10 +2152,6 @@ export default function ChatPage() {
               </CardDescription> */}
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col gap-2 p-2">
-              {/* {loadingAgents ? <p className="text-sm text-muted-foreground">Loading agents...</p> : null}
-              {!loadingAgents && agents.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No configured agents found.</p>
-              ) : null} */}
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-white">
 
