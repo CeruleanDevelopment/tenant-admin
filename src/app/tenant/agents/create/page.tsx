@@ -6,6 +6,8 @@ import { useDispatch, useSelector } from "react-redux";
 import {
   createTenantAgent,
   fetchConnectorCatalog,
+  fetchAiModelCatalog,
+  fetchAiModelsByProvider,
   fetchConnectorActions,
   fetchTenantConnectors,
   fetchTenantAgent,
@@ -17,6 +19,7 @@ import {
   updateTenantAgent,
   updateTenantUserActions,
   type ConnectorCatalogItem,
+  type AiModelCatalogProvider,
   type TenantConnectorItem,
 } from "../../../../../actions/auth";
 import type { AppDispatch } from "../../../../../redux/store";
@@ -67,31 +70,11 @@ type TenantUser = {
   isActive?: boolean | null;
 };
 
-type AiProvider = "" | "openrouter";
+type AiProvider = string;
 type AgentCategory = string;
 
 const AGENT_NAME_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9 ]*[A-Za-z0-9]$|^[A-Za-z0-9]$/;
-
-const AI_MODEL_OPTIONS: Record<"openrouter", string[]> = {
-  openrouter: [
-    "openrouter/auto",
-    "anthropic/claude-3.7-sonnet",
-    "google/gemini-2.5-flash",
-    // "anthropic/claude-fable-5.1",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-opus-5.5",
-    "google/gemini-3.8-flash",
-    // "google/gemini-2.5-pro",
-    // "google/gemini-2.5-flash",
-    // "openai/gpt-6-astra",
-    // "openai/gpt-sol-latest",
-    // "openai/gpt-terra-latest",
-    // "openai/gpt-luna-latest",
-    "openai/gpt-5.5-pro",
-    "openai/o3-pro",
-  ],
-};
 
 type Step1FieldErrors = {
   name?: string;
@@ -387,6 +370,31 @@ export default function TenantAgentCreatePage() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [aiProvider, setAiProvider] = useState<AiProvider>("");
   const [aiModel, setAiModel] = useState("");
+  const [aiCatalog, setAiCatalog] = useState<AiModelCatalogProvider[]>([]);
+  const modelsForProvider = (providerKey: string): string[] =>
+    (aiCatalog.find((item) => item.providerKey === providerKey)?.models || []).map((item) => item.modelKey);
+
+  useEffect(() => {
+    void (async () => {
+      setAiCatalog((await dispatch(fetchAiModelCatalog())) as AiModelCatalogProvider[]);
+    })();
+  }, [dispatch]);
+
+  const [providerModels, setProviderModels] = useState<AiModelCatalogProvider["models"]>([]);
+  useEffect(() => {
+    if (!aiProvider) {
+      setProviderModels([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const models = await dispatch(fetchAiModelsByProvider(aiProvider));
+      if (!cancelled) setProviderModels(models);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [aiProvider, dispatch]);
   const [isActive, setIsActive] = useState(true);
   const [serviceType, setServiceType] = useState<AgentCategory>("");
   const [selectedTenantConnectorId, setSelectedTenantConnectorId] =
@@ -555,7 +563,7 @@ export default function TenantAgentCreatePage() {
       setSavedConnectorId(String(agent?.connectorId || "").trim());
       setSelectedTenantConnectorId(String(agent?.tenantConnectorId || "").trim());
       const savedAssignment = (agent?.config as { assignment?: { aiProvider?: string; aiModel?: string } } | undefined)?.assignment;
-      setAiProvider(savedAssignment?.aiProvider === "openrouter" ? "openrouter" : "");
+      setAiProvider(String(savedAssignment?.aiProvider || ""));
       setAiModel(String(savedAssignment?.aiModel || ""));
     };
 
@@ -1048,7 +1056,7 @@ export default function TenantAgentCreatePage() {
     isSelectedConnectorMatchedToTool;
 
   const onProviderChange = (value: string) => {
-    const provider = value === "openrouter" ? "openrouter" : "";
+    const provider = value;
     setAiProvider(provider);
     setAiModel("");
   };
@@ -1057,8 +1065,8 @@ export default function TenantAgentCreatePage() {
     const selectedToolLabel =
       selectedToolConnector?.display_name || serviceType || "general";
     const selectedConnectorLabel = selectedTenantConnectorId || "connector";
-    const providerText = aiProvider || "openrouter";
-    const modelText = aiModel.trim() || AI_MODEL_OPTIONS[providerText][0];
+    const providerText = aiProvider || aiCatalog[0]?.providerKey || "";
+    const modelText = aiModel.trim() || modelsForProvider(providerText)[0] || "";
 
     return (
       systemPrompt.trim() ||
@@ -1168,8 +1176,8 @@ export default function TenantAgentCreatePage() {
 
     setSaving(true);
     try {
-      const provider = (aiProvider || "openrouter") as "openrouter";
-      const model = aiModel.trim() || AI_MODEL_OPTIONS[provider][0];
+      const provider = aiProvider || aiCatalog[0]?.providerKey || "";
+      const model = aiModel.trim() || modelsForProvider(provider)[0] || "";
       if (!aiProvider) setAiProvider(provider);
       if (!aiModel.trim()) setAiModel(model);
 
@@ -1570,7 +1578,11 @@ export default function TenantAgentCreatePage() {
                           className="w-(--radix-select-trigger-width)"
                         >
                           <SelectItem value="none">Select provider</SelectItem>
-                          <SelectItem value="openrouter">OpenRouter</SelectItem>
+                          {aiCatalog.map((item) => (
+                            <SelectItem key={item.providerKey} value={item.providerKey}>
+                              {item.displayName}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       {step1FieldErrors.aiProvider ? (
@@ -1602,10 +1614,10 @@ export default function TenantAgentCreatePage() {
                           className="w-(--radix-select-trigger-width)"
                         >
                           <SelectItem value="none">Select model</SelectItem>
-                          {(aiProvider ? AI_MODEL_OPTIONS[aiProvider] : []).map(
+                          {providerModels.map(
                             (model) => (
-                              <SelectItem key={model} value={model}>
-                                {model}
+                              <SelectItem key={model.modelKey} value={model.modelKey}>
+                                {model.displayName}
                               </SelectItem>
                             ),
                           )}

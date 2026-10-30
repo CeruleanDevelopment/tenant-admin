@@ -907,6 +907,7 @@ export default function ChatPage() {
   const [loadingOlder, setLoadingOlder] = useState(false)
   const loadingOlderRef = useRef(false)
   const prependScrollHeightRef = useRef<number | null>(null)
+  const skipAutoScrollRef = useRef(false)
   const activeChatIdRef = useRef("")
   const selectedAgentIdRef = useRef("")
   const loadingHistoryFlagRef = useRef(false)
@@ -1324,6 +1325,11 @@ export default function ChatPage() {
   useEffect(() => {
     if (!messageListRef.current) return
     if (prependScrollHeightRef.current !== null) return
+    // Older messages were just prepended; keep the user's position instead of jumping to the bottom.
+    if (skipAutoScrollRef.current) {
+      skipAutoScrollRef.current = false
+      return
+    }
 
     const id = window.requestAnimationFrame(() => {
       if (!messageListRef.current) return
@@ -1331,7 +1337,7 @@ export default function ChatPage() {
     })
 
     return () => window.cancelAnimationFrame(id)
-  }, [activeChatId, activeMessages.length, sending, loadingHistory, agentsLoaded, sessionsLoaded])
+  }, [activeChatId, activeMessages.length, activeMessages[activeMessages.length - 1]?.text?.length, sending, loadingHistory, agentsLoaded, sessionsLoaded])
 
   // Keep the viewport anchored after older messages are prepended.
   useLayoutEffect(() => {
@@ -1361,6 +1367,7 @@ export default function ChatPage() {
       const rows = Array.isArray(payload?.history) ? payload.history : []
       const older = mapHistoryRowsToMessages(rows, activeDisplayTimeZoneRef.current)
       if (messageListRef.current) prependScrollHeightRef.current = messageListRef.current.scrollHeight
+      if (older.length) skipAutoScrollRef.current = true
       setMessagesByBucket((prev) => {
         const existing = prev[activeMessageBucketKey] || []
         const seen = new Set(existing.map((m) => m.id))
@@ -2021,6 +2028,15 @@ export default function ChatPage() {
       const replyText = sanitizeAssistantText(
         String(payload.markdown_summary || payload.answer || payload.response || payload.reply || "I analyzed your request and prepared a response."),
       )
+      // Answers that arrived without live tokens are revealed progressively, like ChatGPT/Claude.
+      if (!streamedText && replyText.length > 80) {
+        const step = Math.ceil(replyText.length / 30)
+        for (let i = step; i < replyText.length; i += step) {
+          streamedText = replyText.slice(0, i)
+          flushStreamedText()
+          await new Promise((resolve) => setTimeout(resolve, 25))
+        }
+      }
       const assistantMessage: ChatMessage = {
         id: streamedText ? streamMessageId : `assistant-${Date.now()}`,
         role: "assistant",
@@ -2299,68 +2315,14 @@ export default function ChatPage() {
               </div>
             </CardHeader>
 
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/20 p-2 sm:p-2">
-              {/* <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border bg-muted/20 p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Mail className="h-4 w-4 text-primary" />
-                    Gmail status
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedAgent?.oauthReady ? "Connected and ready for analysis." : "Connect Gmail to unlock email analysis."}
-                  </p>
-                </div>
-                <div className="rounded-2xl border bg-muted/20 p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Clock3 className="h-4 w-4 text-primary" />
-                    Execution window
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedAgent ? "Email analysis ready for the selected agent." : "Waiting for an agent selection."}
-                  </p>
-                </div>
-                <div className="rounded-2xl border bg-muted/20 p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Globe className="h-4 w-4 text-primary" />
-                    Provider
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {selectedAgent?.aiProvider || "openai"} with {selectedAgent?.aiModel || "default model"}.
-                  </p>
-                </div>
-              </div> */}
-
-              {/* <div className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-4 shadow-sm"> */}
-                {/* <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold">Conversation</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="cursor-pointer"
-                    onClick={() => {
-                      if (!selectedAgentId) return
-                      const nextChatId = createChatId()
-                      const nextBucketKey = buildMessageBucketKey(selectedAgentId, nextChatId)
-                      setChatIdByAgent((prev) => ({
-                        ...prev,
-                        [selectedAgentId]: nextChatId,
-                      }))
-                      router.replace(buildChatUrl(selectedAgentId, nextChatId))
-                      setMessagesByBucket((prev) => ({
-                        ...prev,
-                        [nextBucketKey]: getInitialMessages(),
-                      }))
-                    }}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Reset Chat
-                  </Button>
-                </div> */}
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-4 bg-gray-200/20 p-2 sm:p-2">              
 
                 <div ref={messageListRef} onScroll={handleMessageListScroll} className="min-h-0 flex-1 flex flex-col space-y-4 overflow-y-auto pr-1">
-                  {loadingOlder ? <p className="py-1 text-center text-xs text-slate-400">Loading earlier messages...</p> : null}
+                  {loadingOlder ? (
+                    <div className="sticky top-0 z-20 -mb-4 flex h-0 justify-center">
+                      <span className="relative top-1 rounded-full bg-white/90 px-3 py-1 text-xs text-slate-400 shadow-sm">Loading earlier messages...</span>
+                    </div>
+                  ) : null}
                   {dayGroups.map((group) => (
                   <div key={group.key} className="flex flex-col space-y-4">
                   {group.label ? (
@@ -2445,7 +2407,7 @@ export default function ChatPage() {
                   </div>
                   ))}
 
-                  {sending ? (
+                  {sending && activeMessages[activeMessages.length - 1]?.role !== "assistant" ? (
                     <div className="w-full flex items-end gap-3 pb-4">
                       <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-white">
                         <Bot className="h-4 w-4" />
@@ -2460,19 +2422,6 @@ export default function ChatPage() {
                     </div>
                   ) : null}
                 </div>
-
-                {/* <div className="mt-4 flex flex-wrap gap-2">
-                  {selectedQuickPrompts.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => setInput(prompt)}
-                      className="rounded-full border cursor-pointer border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-primary/20 hover:bg-primary/5 hover:text-primary"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div> */}
 
                 <div className="flex items-end gap-2">
                 <div className="min-w-0 flex-1 rounded-[28px] border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition focus-within:border-slate-300 focus-within:shadow-md">

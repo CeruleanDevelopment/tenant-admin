@@ -2522,6 +2522,42 @@ export const fetchTenantAgents =
     return fetchTenantAgentsInFlight;
   };
 
+export type AiModelCatalogProvider = {
+  providerKey: string;
+  displayName: string;
+  models: Array<{ modelKey: string; displayName: string }>;
+};
+
+export const fetchAiModelCatalog =
+  (): ThunkAction<Promise<AiModelCatalogProvider[]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+    try {
+      const resp = await axios.get("/ai/models", { headers });
+      return Array.isArray(resp?.data?.providers) ? (resp.data.providers as AiModelCatalogProvider[]) : [];
+    } catch (error) {
+      console.warn("fetchAiModelCatalog failed:", extractApiMessage(error));
+      return [];
+    }
+  };
+
+export const fetchAiModelsByProvider =
+  (providerKey: string): ThunkAction<Promise<AiModelCatalogProvider["models"]>, RootState, unknown, AnyAction> =>
+  async () => {
+    const token = loadAuthTokenCookie();
+    const headers: Record<string, string> = {};
+    if (token) headers["x-tenant-token"] = token;
+    try {
+      const resp = await axios.get("/ai/models", { headers, params: { provider: providerKey } });
+      return Array.isArray(resp?.data?.models) ? (resp.data.models as AiModelCatalogProvider["models"]) : [];
+    } catch (error) {
+      console.warn("fetchAiModelsByProvider failed:", extractApiMessage(error));
+      return [];
+    }
+  };
+
 export const fetchTenantAgentAssignment =
   (
     agentId: string,
