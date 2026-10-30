@@ -5,13 +5,13 @@ export default function Footer() {
         <a href="https://codervent.com/" rel="noopener noreferrer" className="hover:underline">
          <span>
             © {new Date().getFullYear()}{" "}
-            <span className="font-medium text-foreground">Codervent</span>. All
+            <span className="font-medium text-foreground">Cerulean</span>. All
             rights reserved.
           </span>
         </a>
         <span>
           Built with ❤️ by{" "}
-          <span className="font-medium text-foreground"><a href="https://codervent.com/" rel="noopener noreferrer" className="hover:underline">Codervent</a></span>
+          <span className="font-medium text-foreground"><a href="https://codervent.com/" rel="noopener noreferrer" className="hover:underline">Cerulean</a></span>
         </span>
       </div>
     </footer>

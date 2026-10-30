@@ -546,8 +546,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <PieChart className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">Pulse UI</span>
-                  <span className="truncate text-xs">{tenantProfile?.companyName}</span>
+                  <span className="truncate text-xl font-bold">Cerulean</span>
+                  {/* <span className="truncate text-xs">{tenantProfile?.companyName}</span> */}
                 </div>
               </Link>
             </SidebarMenuButton>
