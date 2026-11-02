@@ -263,7 +263,6 @@ const wizardSteps = [
 
 const MIN_USER_SEARCH_LENGTH = 3;
 
-// Server-side user search; results are fetched only on explicit submit (button / Enter).
 const useTenantUserSearch = (dispatch: AppDispatch) => {
   const [query, setQueryState] = useState("");
   const [results, setResults] = useState<TenantUser[]>([]);
@@ -355,7 +354,6 @@ export default function TenantAgentCreatePage() {
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [roleViewMode, setRoleViewMode] = useState<"roles" | "users">("roles");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
-  // Direct (non-role) grants per user, keyed by connector; persisted when the agent is saved.
   const [userDirectActions, setUserDirectActions] = useState<Record<string, Record<string, string[]>>>({});
   const loadingUserActions = false;
   const savingUserAction = false;
@@ -531,7 +529,6 @@ export default function TenantAgentCreatePage() {
     }
   };
 
-  // Single page-load effect: all required data is fetched in parallel from the API.
   useEffect(() => {
     let cancelled = false;
 
@@ -572,7 +569,6 @@ export default function TenantAgentCreatePage() {
       () => dispatch(fetchTenantUsers({ limit: 200 })) as Promise<unknown>,
       (result) => setUsers(Array.isArray(result) ? (result as TenantUser[]) : []),
     );
-    // The catalog helper returns [] when the auth token is not ready yet, so retry a few times.
     const loadCatalogWithRetry = async () => {
       let rows: ConnectorCatalogItem[] = [];
       for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -606,7 +602,6 @@ export default function TenantAgentCreatePage() {
     };
   }, [dispatch, editingAgentId, isEditMode, tenantId]);
 
-  // Roles are matched in the query on tenant, agent and connector (tool) so only relevant roles load.
   const selectedConnectorId = selectedToolConnector?.id || "";
   useEffect(() => {
     if (!isEditMode || !editingAgentId || !tenantId || !selectedConnectorId) {
@@ -660,7 +655,6 @@ export default function TenantAgentCreatePage() {
     };
   }, [dispatch, editingAgentId, isEditMode, selectedConnectorId, tenantId]);
 
-  // Saved tool bindings for this agent, so a save can clear them when every action is removed.
   useEffect(() => {
     if (!isEditMode || !editingAgentId || !tenantId || !selectedConnectorId) {
       setSavedBindingKeys([]);
@@ -737,7 +731,6 @@ export default function TenantAgentCreatePage() {
     [selectedRoleUserIds, knownUsers],
   );
 
-  // Actions granted to the selected user through roles (includes unsaved edits to the open role).
   const selectedUserRoleActionIds = useMemo(() => {
     const result = new Set<string>();
     if (!selectedUserId) return result;
@@ -819,7 +812,6 @@ export default function TenantAgentCreatePage() {
     ) as Array<Record<string, unknown>>;
   }, [selectedUserId, userDirectActions]);
 
-  // Toggles commit straight into the role bootstrap state so the Users tab and the final save see them.
   const toggleRoleUser = (userId: string) => {
     const enabling = !selectedRoleUserIds.includes(userId);
     const nextUserIds = enabling
@@ -1149,7 +1141,6 @@ export default function TenantAgentCreatePage() {
       return;
     }
 
-    // An agent is only assigned to users who hold at least one action.
     const isActiveRow = (row: { is_active?: number | boolean | null }) => Number(row.is_active ?? 1) !== 0;
     const hasRoleWithUsersAndActions = visibleRoleBootstrapRoles.some((role) => {
       if (String(role.id || "").startsWith("draft-role-") || !isActiveRow(role)) return false;
@@ -1226,7 +1217,6 @@ export default function TenantAgentCreatePage() {
       ) as Promise<unknown>);
       const coreMessage = extractBackendMessage(coreResp);
 
-      // Roles already exist (inserted by Add Role); write their users/actions by role id and link the agent.
       const rolesToSave = roleBootstrapRoles.filter((role) => {
         const roleAgentId = String(role.agent_id || "").trim();
         return (
@@ -1272,7 +1262,6 @@ export default function TenantAgentCreatePage() {
 
       }
 
-      // Agent tool allowlist = union of actions granted to its roles and to users directly.
       const actionKeyById = new Map(roleActionCatalog.map((item) => [String(item.id), item.action_key]));
       const savedRoleIdSet = new Set(rolesToSave.map((role) => role.id));
       const directActionIds = Object.values(userDirectActions).flatMap(

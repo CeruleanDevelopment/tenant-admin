@@ -239,7 +239,6 @@ const normalizeNumberedListDetailBullets = (value: string): string => {
   return normalized.join("\n")
 }
 
-// Sanitize assistant text to remove conversation dumps, prefatory lines, repeated paragraphs, and internal tokens
 const sanitizeAssistantText = (value: string): string => {
   let text = String(value || "")
   // normalize newlines
@@ -287,7 +286,6 @@ const sanitizeAssistantText = (value: string): string => {
   text = compactLines.join("\n").trim()
 
   // Generic reflow for compressed AI output: restore readable markdown-like line breaks
-  // without relying on message-type specific templates.
   text = text
     // Ensure headings start on their own line.
     .replace(/\s+(?=#{1,6}\s+)/g, "\n")
@@ -301,14 +299,10 @@ const sanitizeAssistantText = (value: string): string => {
 
   text = normalizeNumberedListDetailBullets(text)
 
-  // Repair malformed markdown tokens coming from model output without using static templates.
   text = text
-    // Bullet marker separated from content: "-\n**Text**" -> "- **Text**"
     .replace(/(^|\n)\s*[-*+]\s*\n\s*(?=\S)/g, "$1- ")
-    // Numbered marker separated from content: "1.\n**Text**" -> "1. **Text**"
     .replace(/(^|\n)\s*(\d+[.)])\s*\n\s*(?=\S)/g, "$1$2 ")
 
-  // Collapse line breaks inside bold spans so markdown emphasis renders correctly.
   text = text.replace(/\*\*([\s\S]*?)\*\*/g, (full, inner) => {
     const normalizedInner = String(inner || "")
       .replace(/\s*\n\s*/g, " ")
@@ -371,7 +365,6 @@ const shouldRenderAsPlainNumberedRecords = (value: string): boolean => {
   const hasMultipleNumberedRows = Array.isArray(numberedLineMatches) && numberedLineMatches.length >= 2
   if (!hasMultipleNumberedRows) return false
 
-  // Match both bullet and non-bullet label formats, with or without markdown bold.
   const fromCount = (text.match(/(?:\*\*)?from(?:\*\*)?\s*:/gi) || []).length
   const toCount = (text.match(/(?:\*\*)?to(?:\*\*)?\s*:/gi) || []).length
   const dateCount = (text.match(/(?:\*\*)?date(?:\*\*)?\s*:/gi) || []).length
@@ -546,7 +539,6 @@ const mapStoredAttachments = (urls: unknown): ChatAttachment[] => {
     if (!rawUrl) return
     const url = rawUrl.startsWith("/") ? `${tenantAdminConfig.apiUrl}${rawUrl}` : rawUrl
     const storedName = decodeURIComponent(rawUrl.split("?")[0].split("/").pop() || "attachment")
-    // Stored file names are prefixed with `<timestamp>-<uuid>-`.
     const name = storedName.replace(/^\d+-[0-9a-f-]{36}-/i, "") || "attachment"
     const lower = name.toLowerCase()
     const kind: ChatAttachment["kind"] = /\.(png|jpg|jpeg|gif|webp|bmp|svg|avif)$/.test(lower)
@@ -575,7 +567,6 @@ const dayKeyByTimeZone = (date: Date, timezone?: string): string => {
   }
 }
 
-// WhatsApp-style day label: Today, Yesterday, weekday within the last week, else full date.
 const formatDayLabel = (date: Date, timezone?: string): string => {
   const now = new Date()
   const key = dayKeyByTimeZone(date, timezone)
@@ -699,7 +690,6 @@ const createAttachmentView = (attachment: ChatAttachment): ChatAttachmentView =>
   isPreviewImage: Boolean(attachment.previewUrl && isImageAttachment(attachment)),
 })
 
-// Download via blob so the browser saves the file; fall back to opening it in a new tab.
 const downloadAttachment = async (attachment: ChatAttachment) => {
   const url = attachment.url
   if (!url) return
@@ -963,7 +953,6 @@ export default function ChatPage() {
     if (!force && now - lastFetchAt < SESSIONS_REFRESH_COOLDOWN_MS) return
 
     if (sessionsRequestInFlightByAgentRef.current[agentKey]) {
-      // If a refresh is requested while one is in progress, queue one follow-up refresh.
       if (force) {
         pendingSessionsForceRefreshByAgentRef.current[agentKey] = true
       }
@@ -1106,7 +1095,6 @@ export default function ChatPage() {
     }
   }, [initialAgentId, selectedAgentId])
 
-  // Keep local selected agent/chat in sync with URL so refresh/back-forward never drifts.
   useEffect(() => {
     const urlAgentId = String(initialAgentId || "").trim()
     const urlChatId = String(initialChatId || "").trim()
@@ -1147,7 +1135,6 @@ export default function ChatPage() {
     const hasAgentChanged = previousSelectedAgentIdRef.current !== selectedAgentId
     previousSelectedAgentIdRef.current = selectedAgentId
 
-    // Reset visible sessions only when switching agents, not when chatId query param changes.
     if (hasAgentChanged) {
       setUserSessions([])
     }
@@ -1290,7 +1277,6 @@ export default function ChatPage() {
     })()
   }, [activeChatId, dispatch, router, selectedAgent?.name, selectedAgent?.oauthReady, selectedAgentId])
 
-  // Resolve title for active chat from user sessions.
   useEffect(() => {
     if (!activeChatId) {
       setConversationTitle(null)
@@ -1306,7 +1292,6 @@ export default function ChatPage() {
     [activeMessageBucketKey, messagesByBucket],
   )
 
-  // Each day gets its own container so its sticky label is released when the next day scrolls in.
   const dayGroups = useMemo(() => {
     const groups: { key: string; label: string; messages: ChatMessage[] }[] = []
     for (const message of activeMessages) {
@@ -1325,7 +1310,6 @@ export default function ChatPage() {
   useEffect(() => {
     if (!messageListRef.current) return
     if (prependScrollHeightRef.current !== null) return
-    // Older messages were just prepended; keep the user's position instead of jumping to the bottom.
     if (skipAutoScrollRef.current) {
       skipAutoScrollRef.current = false
       return
@@ -1339,7 +1323,6 @@ export default function ChatPage() {
     return () => window.cancelAnimationFrame(id)
   }, [activeChatId, activeMessages.length, activeMessages[activeMessages.length - 1]?.text?.length, sending, loadingHistory, agentsLoaded, sessionsLoaded])
 
-  // Keep the viewport anchored after older messages are prepended.
   useLayoutEffect(() => {
     const el = messageListRef.current
     if (!el || prependScrollHeightRef.current === null) return
@@ -1604,7 +1587,6 @@ export default function ChatPage() {
       speechRecRef.current?.stop()
     } catch {}
     recorder.stop()
-    // Release the mic immediately so the browser tab recording indicator clears.
     recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
     recordingStreamRef.current = null
     void recordingAudioCtxRef.current?.close().catch(() => undefined)
@@ -1770,7 +1752,6 @@ export default function ChatPage() {
     const currentTitle = String(session.title || "New chat").trim()
     const nextTitle = String(editingSessionTitle || "").trim()
 
-    // If title was not changed (or cleared), close edit mode and keep current value.
     if (!nextTitle || nextTitle === currentTitle) {
       cancelInlineRename()
       return
@@ -1874,7 +1855,6 @@ export default function ChatPage() {
         await dispatch(ensureTenantChatSession({ agentId, chatId: nextChatId }) as any)
         await loadUserSessions(true, { silent: true, agentId })
       } catch {
-        // the row is still created on the first message
       }
     })()
   }, [dispatch, loadUserSessions, router, selectedAgentId])
@@ -1912,7 +1892,6 @@ export default function ChatPage() {
       router.replace(buildChatUrl(selectedAgentId, resolvedChatId))
     }
 
-    // Optimistic recent chats update: reflect the active conversation immediately without waiting for API.
     setUserSessions((prev) => {
       const optimisticNow = new Date().toISOString()
       const existing = prev.find((session) => String(session.id) === resolvedChatId)
@@ -2000,7 +1979,6 @@ export default function ChatPage() {
         }))
         router.replace(buildChatUrl(selectedAgentId, returnedChatId))
 
-        // Keep optimistic recent chats coherent if backend normalizes chatId.
         setUserSessions((prev) => {
           const normalized = prev.find((session) => String(session.id) === returnedChatId)
           const fallback = prev.find((session) => String(session.id) === resolvedChatId)
@@ -2028,7 +2006,6 @@ export default function ChatPage() {
       const replyText = sanitizeAssistantText(
         String(payload.markdown_summary || payload.answer || payload.response || payload.reply || "I analyzed your request and prepared a response."),
       )
-      // Answers that arrived without live tokens are revealed progressively, like ChatGPT/Claude.
       if (!streamedText && replyText.length > 80) {
         const step = Math.ceil(replyText.length / 30)
         for (let i = step; i < replyText.length; i += step) {
@@ -2058,7 +2035,6 @@ export default function ChatPage() {
         const streamedBucket = prev[targetBucketKey] ?? []
         const hasStreamed = streamedBucket.some((item) => item.id === streamMessageId)
         if (hasStreamed) {
-          // Swap the live-streamed text for the final server-formatted answer.
           return {
             ...prev,
             [targetBucketKey]: streamedBucket.map((item) => (item.id === streamMessageId ? assistantMessage : item)),

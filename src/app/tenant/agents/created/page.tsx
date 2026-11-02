@@ -210,7 +210,6 @@ export default function TenantCreatedAgentsPage() {
   useAutoDismissApiMessage(addRoleError, () => setAddRoleError(null))
   useAutoDismissApiMessage(dialogMessage, () => setDialogMessage(null))
 
-  // Drafts are loaded from server data when a role/user is clicked, never carried over.
   const selectRole = (role: TenantAgentOverview["roles"][number] | null) => {
     setRoleId(role?.id || "")
     setRoleUserId("")
@@ -328,7 +327,6 @@ export default function TenantCreatedAgentsPage() {
     }
   }
 
-  // Agent tool allowlist = union of role actions, per-user role actions and direct user actions.
   const syncToolBindings = async (override: { roleId?: string; roleActionIds?: string[]; roleUserActions?: Record<string, string[]>; userId?: string; directIds?: string[] }) => {
     if (!dialogAgent || !dialogAgent.connectorId) return
     const ids = new Set<string>()
@@ -401,11 +399,9 @@ export default function TenantCreatedAgentsPage() {
     }
   }
 
-  // Role-wide actions apply to every member of the selected role; edits stay in a draft until saved.
   const savedRoleActionIds = (selectedRole?.actions || []).map((action) => String(action.id))
   const roleLockedIds = new Set(roleActionDraft ?? savedRoleActionIds)
 
-  // Actions the user receives through roles (including unsaved edits to the open role) cannot be edited as direct grants.
   const roleDerivedFor = (uid: string, skipOwnUserActions = false): Set<string> => {
     const ids = new Set<string>()
     if (!uid) return ids
@@ -421,16 +417,13 @@ export default function TenantCreatedAgentsPage() {
   }
   const roleDerivedIds = roleDerivedFor(userId)
 
-  // Everything a user ends up with on this agent: role-derived plus saved direct grants.
   const roleTabUser = allUsers.find((user) => user.id === roleUserId)
   const roleTabUserIds = roleDerivedFor(roleUserId, true)
-  // Same user open in the Users tab: show its current (possibly unsaved) direct picks.
   const roleTabDirectIds =
     roleUserId === userId
       ? directActionIds
       : dialogAgent?.userAccess.find((item) => item.id === roleUserId)?.directActionIds || []
   roleTabDirectIds.forEach((id) => roleTabUserIds.add(String(id)))
-  // Server-side effective actions, except this role's own per-user grants (those follow the draft).
   const ownSaved = new Set((selectedRole?.userActions?.[roleUserId] || []).map(String))
   dialogAgent?.userAccess
     .find((item) => item.id === roleUserId)
