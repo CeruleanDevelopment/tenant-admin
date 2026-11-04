@@ -1,17 +1,17 @@
 import "./globals.css"
+import type { Metadata } from "next"
+import { headers } from "next/headers"
 import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { Providers } from "./providers"
 import { Toaster } from "@/components/ui/sonner"
 import AppShell from "./AppShell"
+import PageMetadata from "./PageMetadata"
+import { buildPageMeta } from "./page-meta"
 
-export const metadata = {
-  title: {
-    default: "Tenant Admin Dashboard",
-    template: "%s | Tenant Admin Dashboard",
-  },
-  description:
-    "Tenant Admin Dashboard is a premium Next.js admin dashboard template built with ShadCN UI, Tailwind CSS, and TypeScript. Ideal for SaaS apps, CRM systems, analytics dashboards, and modern web applications.",
+export async function generateMetadata(): Promise<Metadata> {
+  const pathname = (await headers()).get("x-pathname") || "/"
+  return buildPageMeta(pathname)
 }
 
 const inter = Inter({ subsets: ["latin"] })
@@ -31,6 +31,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <Providers>
+            <PageMetadata />
             <AppShell>{children}</AppShell>
             <Toaster position="top-right" richColors closeButton />
           </Providers>

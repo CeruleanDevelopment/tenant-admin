@@ -16,10 +16,14 @@ import { cn } from "../../../lib/utils"
 import { TenantOtpInput } from "../../../components/TenantOtpInput"
 import {
   requestUserOtp,
+  startUserProviderSignIn,
   verifyUserOtp,
+  USER_AUTH_MESSAGE_SOURCE,
+  USER_AUTH_POPUP_NAME,
 } from "../../../../actions/userAuth"
 import type { AppDispatch } from "../../../../redux/store"
 import { GalleryVerticalEnd, RefreshCcw } from "lucide-react"
+import { FcGoogle } from "react-icons/fc";
 
 type LoginValues = { email?: string }
 
@@ -82,6 +86,14 @@ export default function SignInPage() {
   const { register: registerEmail, handleSubmit: handleEmailSubmit, formState: { isSubmitting: isEmailSubmitting } } = useForm<LoginValues>({
     defaultValues: { email: String(getParam("email")) },
   })
+
+  useEffect(() => {
+    // Provider errors redirect here inside the popup; hand them to the opener.
+    if (errorMessage && window.name === USER_AUTH_POPUP_NAME && window.opener) {
+      window.opener.postMessage({ source: USER_AUTH_MESSAGE_SOURCE, error: errorMessage }, window.location.origin)
+      window.close()
+    }
+  }, [errorMessage])
 
   useEffect(() => {
     if (resendSeconds <= 0) {
@@ -164,6 +176,27 @@ export default function SignInPage() {
     }
   }
 
+  const onMicrosoftSignIn = () => {
+    startProviderSignIn("microsoft")
+  }
+
+  const onGoogleSignIn = () => {
+    startProviderSignIn("google")
+  }
+
+  const startProviderSignIn = async (provider: "microsoft" | "google") => {
+    setFormError(null)
+    try {
+      await dispatch(startUserProviderSignIn(provider, normalizeUserNextPath(nextPath)))
+      toast.success("Signed in successfully.")
+      window.location.assign(normalizeUserNextPath(nextPath))
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, "Unable to complete sign-in.")
+      setFormError(message)
+      toast.error(message)
+    }
+  }
+
   const onResendOtp = async () => {
     if (!emailValue || resendSeconds > 0 || isRequestingOtp) {
       return
@@ -229,6 +262,7 @@ export default function SignInPage() {
                   ) : null} */}
 
                   {stage === "email" ? (
+                    <div className="grid gap-6">
                     <form onSubmit={onEmailSubmit}>
                       <div className="grid gap-6">
                         <div className="grid gap-2">
@@ -248,6 +282,23 @@ export default function SignInPage() {
                         </Button>
                       </div>
                     </form>
+                      <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+                        <span className="relative z-10 bg-card px-2 text-muted-foreground">Or</span>
+                      </div>
+                      <Button type="button" variant="outline" className="w-full cursor-pointer" onClick={onMicrosoftSignIn}>
+                        <svg className="mr-2 size-4" viewBox="0 0 23 23" aria-hidden="true">
+                          <path fill="#f35325" d="M1 1h10v10H1z" />
+                          <path fill="#81bc06" d="M12 1h10v10H12z" />
+                          <path fill="#05a6f0" d="M1 12h10v10H1z" />
+                          <path fill="#ffba08" d="M12 12h10v10H12z" />
+                        </svg>
+                        Sign in with Microsoft
+                      </Button>
+                      {/* <Button type="button" variant="outline" className="w-full cursor-pointer" onClick={onGoogleSignIn}>
+                        <FcGoogle className="mr-2 size-4" />
+                        Sign in with Google
+                      </Button> */}
+                    </div>
                   ) : (
                     <div className="grid gap-4">
                       <div className="rounded-md border border-border bg-muted/50 p-3 text-sm">

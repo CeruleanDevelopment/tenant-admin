@@ -15,7 +15,7 @@ export const routeAccessConfig: RouteAccessConfig = {
   userOnlyPrefixes: ["/users"],
 
   // Shared public auth pages (no folder guard)
-  publicPaths: ["/signin", "/signup", "/tenant/signin", "/tenant/signup", "/auth/callback", "/users/signin"],
+  publicPaths: ["/signin", "/signup", "/tenant/signin", "/tenant/signup", "/auth/callback", "/users/signin", "/users/auth/callback"],
 
   defaultRedirectBySession: {
     tenant: "/tenant/agents",

@@ -16,7 +16,7 @@ const USER_SESSION_COOKIE = "TENANT_ADMIN_USER_SESSION"
 
 const TENANT_ONLY_PREFIXES = ["/tenant"]
 const USER_ONLY_PREFIXES = ["/users"]
-const PUBLIC_PATHS = ["/users/signin", "/tenant/signin", "/tenant/signup", "/auth/callback", "/signin", "/signup"]
+const PUBLIC_PATHS = ["/users/signin", "/users/auth/callback", "/tenant/signin", "/tenant/signup", "/auth/callback", "/signin", "/signup"]
 
 const matchesPrefix = (pathname: string, prefix: string): boolean => {
   if (!prefix || prefix === "/") {
@@ -95,9 +95,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(buildRedirectUrl(request, redirectPath))
   }
 
-  return NextResponse.next()
+  // Lets the root layout build page-wise metadata from the path.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set("x-pathname", pathname)
+  return NextResponse.next({ request: { headers: requestHeaders } })
 }
 
 export const config = {
-  matcher: ["/users/:path*", "/tenant/:path*"],
+  matcher: ["/users/:path*", "/tenant/:path*", "/signin", "/signup", "/auth/callback"],
 }

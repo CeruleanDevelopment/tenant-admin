@@ -17,7 +17,7 @@ const TENANT_DASHBOARD_PATH = "/tenant/agents"
 const USER_DASHBOARD_PATH = "/users/dashboard"
 const AUTH_PATHS = ["/signin", "/signup", TENANT_SIGNIN_PATH, TENANT_SIGNUP_PATH, USER_SIGNIN_PATH]
 const PUBLIC_PATHS = new Set([...AUTH_PATHS, "/auth/callback"])
-const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback"]
+const AUTH_CALLBACK_PREFIXES = ["/auth/callback", "/tenant/auth/google/callback", "/users/auth/callback"]
 
 const isUserAreaPath = (pathname: string): boolean => {
   if (!pathname.startsWith("/users")) return false

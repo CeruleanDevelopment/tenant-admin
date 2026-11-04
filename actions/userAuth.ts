@@ -10,7 +10,7 @@ import {
 } from "../redux/reducers/Home"
 import { clearTenantProfile } from "../redux/reducers/Tenant"
 import type { RootState } from "../redux/reducers"
-import { tenantAdminConfig } from "../config/config"
+import { API_URL, tenantAdminConfig } from "../config/config"
 import {
   clearAuthSessionCookie,
   clearAuthTokenCookie,
@@ -178,6 +178,78 @@ export const hydrateUserSession =
       return null
     }
   }
+
+export const USER_AUTH_POPUP_NAME = "cerulean-user-auth-popup"
+export const USER_AUTH_MESSAGE_SOURCE = "cerulean-user-auth"
+
+export type UserAuthPopupMessage = {
+  source: typeof USER_AUTH_MESSAGE_SOURCE
+  token?: string
+  refreshToken?: string
+  error?: string
+}
+
+export const startUserProviderSignIn =
+  (provider: "microsoft" | "google", next: string): ThunkAction<Promise<AuthSession>, RootState, unknown, AnyAction> =>
+  (dispatch) =>
+    new Promise<AuthSession>((resolve, reject) => {
+      const url =
+        `${API_URL.replace(/\/$/, "")}/account/auth/${provider}/start` +
+        `?next=${encodeURIComponent(next)}&origin=${encodeURIComponent(window.location.origin)}`
+
+      const width = 500
+      const height = 650
+      const left = Math.max(0, window.screenX + (window.outerWidth - width) / 2)
+      const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2)
+      const popup = window.open(
+        url,
+        USER_AUTH_POPUP_NAME,
+        `width=${width},height=${height},left=${left},top=${top},popup=yes`,
+      )
+
+      if (!popup) {
+        reject(new Error("Popup was blocked. Allow popups for this site and try again."))
+        return
+      }
+
+      let settled = false
+      const cleanup = () => {
+        window.removeEventListener("message", onMessage)
+        window.clearInterval(closedTimer)
+      }
+      const finish = (action: () => void) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        action()
+      }
+
+      const onMessage = (event: MessageEvent<UserAuthPopupMessage>) => {
+        if (event.origin !== window.location.origin || event.source !== popup) return
+        const data = event.data
+        if (!data || data.source !== USER_AUTH_MESSAGE_SOURCE) return
+
+        if (data.error || !data.token || !data.refreshToken) {
+          finish(() => reject(new Error(data.error || "Unable to complete sign-in.")))
+          return
+        }
+
+        const { token, refreshToken } = data
+        finish(() => {
+          dispatch(hydrateUserSession({ token, refreshToken }))
+            .then((session) => (session ? resolve(session) : reject(new Error("Unable to complete sign-in."))))
+            .catch(reject)
+        })
+      }
+
+      const closedTimer = window.setInterval(() => {
+        if (popup.closed) {
+          finish(() => reject(new Error("Sign-in window was closed.")))
+        }
+      }, 500)
+
+      window.addEventListener("message", onMessage)
+    })
 
 export const bootstrapUserAuth =
   (): ThunkAction<Promise<boolean>, RootState, unknown, AnyAction> =>
