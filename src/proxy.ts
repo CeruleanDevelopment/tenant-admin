@@ -86,7 +86,7 @@ const getUnauthorizedRedirect = (pathname: string, sessionType: SessionType): st
   return null
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const sessionType = resolveSessionType(request)
   const redirectPath = getUnauthorizedRedirect(pathname, sessionType)

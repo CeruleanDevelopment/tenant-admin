@@ -20,7 +20,7 @@ const invoice = {
   dueDate: "2024-02-10",
   status: "Paid",
   company: {
-    name: "Acme Inc.",
+    name: "Cerulean",
     address: "123 Business Street, New York, USA",
     email: "billing@acme.com",
   },

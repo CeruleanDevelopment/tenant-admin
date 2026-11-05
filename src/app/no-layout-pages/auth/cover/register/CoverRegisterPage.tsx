@@ -14,7 +14,7 @@ export default function CoverRegisterPage() {
             <div className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-md">
               <GalleryVerticalEnd className="size-5" />
             </div>
-            <span className="text-lg">Acme Inc.</span>
+            <span className="text-lg">Cerulean</span>
           </div>
 
           <SignupForm />
@@ -35,7 +35,7 @@ export default function CoverRegisterPage() {
 
         <div className="relative z-10">
           <h1 className="text-3xl font-semibold leading-tight">
-            Join Acme Inc. 🚀
+            Join Cerulean 🚀
           </h1>
           <p className="mt-3 max-w-md text-primary-foreground/90">
             Create your account to access powerful dashboards,
@@ -50,7 +50,7 @@ export default function CoverRegisterPage() {
         </div>
 
         <div className="relative z-10 text-sm text-primary-foreground/80">
-          © {new Date().getFullYear()} Acme Inc. All rights reserved.
+          © {new Date().getFullYear()} Cerulean All rights reserved.
         </div>
       </div>
     </div>

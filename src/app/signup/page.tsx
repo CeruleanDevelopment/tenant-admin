@@ -271,7 +271,7 @@ export default function SignUpPage() {
                       <Label htmlFor="companyName" className="text-foreground">Company name</Label>
                       <Input
                         id="companyName"
-                        placeholder="Acme Inc"
+                        placeholder="Cerulean"
                         {...register("companyName", {
                           required: "Company name is required.",
                           maxLength: { value: LIMITS.companyName, message: `Company name must be at most ${LIMITS.companyName} characters.` },
